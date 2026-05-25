@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tugboat.db import Store
 
 
 @dataclass(frozen=True)
@@ -97,6 +103,55 @@ class OptimizationMemory:
 
     def record_slow_update(self, category: str, note: str) -> None:
         self.slow_update_notes.append(f"{category}: {note}")
+
+    def persist(self, store: "Store", *, repo: Path) -> None:
+        repo_path = str(repo)
+        for fingerprint, record in sorted(self.rejected_edits.items()):
+            payload = {
+                "rejection_reason": record.rejection_reason,
+                "semantic_fingerprint": record.semantic_fingerprint,
+                "source_refs": list(record.source_refs),
+            }
+            store.record_optimizer_memory(
+                repo_path=repo_path,
+                memory_type="rejected_edit",
+                key=fingerprint,
+                payload=payload,
+            )
+        for index, note in enumerate(self.slow_update_notes):
+            store.record_optimizer_memory(
+                repo_path=repo_path,
+                memory_type="slow_update",
+                key=f"slow_update:{index}:{hashlib.sha256(note.encode('utf-8')).hexdigest()}",
+                payload={"note": note},
+            )
+
+    @classmethod
+    def load(cls, store: "Store", *, repo: Path) -> "OptimizationMemory":
+        memory = cls()
+        rows = store.connection.execute(
+            """
+            SELECT memory_type, key, payload_json
+            FROM optimizer_memory
+            WHERE repo_path = ?
+            ORDER BY id
+            """,
+            (str(repo),),
+        ).fetchall()
+        for memory_type, key, payload_json in rows:
+            payload = json.loads(str(payload_json))
+            if memory_type == "rejected_edit":
+                source_refs = payload.get("source_refs", [])
+                if not isinstance(source_refs, list):
+                    source_refs = []
+                memory.rejected_edits[str(key)] = RejectedEditRecord(
+                    semantic_fingerprint=str(payload["semantic_fingerprint"]),
+                    rejection_reason=str(payload["rejection_reason"]),
+                    source_refs=tuple(str(ref) for ref in source_refs),
+                )
+            elif memory_type == "slow_update":
+                memory.slow_update_notes.append(str(payload["note"]))
+        return memory
 
 
 @dataclass(frozen=True)

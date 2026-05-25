@@ -15,6 +15,7 @@ class DaemonLoopConfig:
     max_jobs_per_cycle: int
     concurrency_limit: int
     lease_duration: timedelta
+    trace_dirs: tuple[Path, ...] = ()
     kill_switch: KillSwitch | None = None
     now: datetime | None = None
     max_attempts: int = 3
@@ -47,6 +48,7 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
     processed_jobs: list[int] = []
     failed_jobs: list[dict[str, Any]] = []
     resume_jobs: list[dict[str, Any]] = []
+    trace_discovery = discover_trace_jobs(repo, list(config.trace_dirs), now=config.now)
     with DaemonQueue.open_sidecar(repo) as queue:
         recovered = queue.mark_stale_leases(
             now=config.now,
@@ -82,6 +84,7 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
         "failed_jobs": failed_jobs,
         "resume_jobs": resume_jobs,
         "recovered_jobs": list(recovered),
+        "trace_discovery": trace_discovery,
         "rate_limited": remaining_queued > 0,
         "concurrency_limited": config.concurrency_limit < config.max_jobs_per_cycle,
     }

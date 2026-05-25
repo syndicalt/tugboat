@@ -521,6 +521,45 @@ class Store:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def record_optimizer_memory(
+        self,
+        *,
+        repo_path: str,
+        memory_type: str,
+        key: str,
+        payload: dict[str, Any],
+    ) -> int:
+        event = self.append_audit_event(
+            "optimizer_memory.recorded",
+            {
+                "repo": repo_path,
+                "memory_type": memory_type,
+                "key": key,
+            },
+        )
+        self.connection.execute(
+            """
+            DELETE FROM optimizer_memory
+            WHERE repo_path = ? AND memory_type = ? AND key = ?
+            """,
+            (repo_path, memory_type, key),
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO optimizer_memory(repo_path, memory_type, key, payload_json, audit_event_sequence)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                repo_path,
+                memory_type,
+                key,
+                json.dumps(payload, sort_keys=True),
+                event.sequence,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def append_audit_event(self, event_type: str, payload: dict[str, Any]) -> AuditEvent:
         previous = self.connection.execute(
             "SELECT event_hash FROM audit_events ORDER BY sequence DESC LIMIT 1"

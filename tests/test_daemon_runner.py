@@ -30,6 +30,49 @@ def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
         assert job.payload["trace_path"] == str(trace_dir / "episode.jsonl")
 
 
+def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueue(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "configured-traces"
+    trace_dir.mkdir()
+    (trace_dir / "episode.jsonl").write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    first = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=0,
+            concurrency_limit=0,
+            lease_duration=timedelta(seconds=30),
+            trace_dirs=(trace_dir,),
+            now=_at(0),
+        ),
+    )
+    second = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=0,
+            concurrency_limit=0,
+            lease_duration=timedelta(seconds=30),
+            trace_dirs=(trace_dir,),
+            now=_at(1),
+        ),
+    )
+
+    assert first["trace_discovery"] == {"discovered": 1, "skipped": 0}
+    assert second["trace_discovery"] == {"discovered": 0, "skipped": 1}
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        rows = queue.connection.execute(
+            "SELECT kind, payload_json FROM daemon_jobs ORDER BY id"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "trace_audit"
+    assert json.loads(rows[0]["payload_json"]) == {
+        "trace_path": str(trace_dir / "episode.jsonl")
+    }
+
+
 def test_run_daemon_cycle_applies_rate_and_concurrency_limits(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         for number in range(3):

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+from tugboat.db import Store
 from tugboat.optimization import (
     BoundedEdit,
     LearningRateBudget,
@@ -13,6 +16,7 @@ from tugboat.optimization import (
     reflect_on_minibatch,
     rank_candidates,
 )
+from tugboat.paths import sidecar_dir
 
 
 def test_build_minibatches_keeps_triggering_and_held_out_episodes_separate():
@@ -153,3 +157,62 @@ def test_slow_update_memory_records_successful_and_rejected_directions():
         "successful: Specific regression-test wording improved held-out cases",
         "rejected: Do not weaken approval requirements",
     ]
+
+
+def test_rejected_edit_memory_persists_to_optimizer_memory_table_with_audit_link(tmp_path):
+    repo = tmp_path
+    candidate = OptimizationCandidate(
+        candidate_id="bad",
+        edits=(BoundedEdit("delete", "CODEX.md", "Approval", 1, 1),),
+        trigger_score=ScoreSet(0.5, 0.0, True),
+        held_out_score=ScoreSet(0.4, 0.0, True),
+    )
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory.load(store, repo=repo)
+        memory.record_rejection(candidate, reason="held_out_not_improved", source_refs=("ev_1",))
+        memory.persist(store, repo=repo)
+        row = store.connection.execute(
+            """
+            SELECT o.memory_type, o.key, o.payload_json, a.event_type
+            FROM optimizer_memory o
+            JOIN audit_events a ON a.sequence = o.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "rejected_edit"
+    assert row[1] == candidate.edits[0].fingerprint
+    assert json.loads(row[2]) == {
+        "rejection_reason": "held_out_not_improved",
+        "semantic_fingerprint": candidate.edits[0].fingerprint,
+        "source_refs": ["ev_1"],
+    }
+    assert row[3] == "optimizer_memory.recorded"
+
+
+def test_persisted_rejected_edit_memory_suppresses_later_matching_candidate(tmp_path):
+    repo = tmp_path
+    rejected = OptimizationCandidate(
+        candidate_id="bad",
+        edits=(BoundedEdit("delete", "CODEX.md", "Approval", 1, 1),),
+        trigger_score=ScoreSet(0.5, 0.0, True),
+        held_out_score=ScoreSet(0.4, 0.0, True),
+    )
+    later = OptimizationCandidate(
+        candidate_id="later",
+        edits=(BoundedEdit("delete", "CODEX.md", "Approval", 1, 1),),
+        trigger_score=ScoreSet(0.7, 0.0, True),
+        held_out_score=ScoreSet(0.8, 0.0, True),
+    )
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory()
+        memory.record_rejection(rejected, reason="held_out_not_improved", source_refs=("ev_1",))
+        memory.persist(store, repo=repo)
+        loaded = OptimizationMemory.load(store, repo=repo)
+
+    decision = evaluate_candidate(later, baseline=ScoreSet(0.5, 0.0, True), memory=loaded)
+
+    assert decision.accepted is False
+    assert decision.reasons == ("suppressed_by_rejected_edit_memory",)
