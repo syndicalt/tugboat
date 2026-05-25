@@ -68,6 +68,7 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
     return CanonicalEpisode(
         trace_path=bundle.trace_path,
         request=request,
+        request_events=_events_of_type(bundle.events, "user_request"),
         instruction_snapshot=tuple(
             event.payload for event in bundle.events if event.event_type == "instruction_snapshot"
         ),
@@ -82,6 +83,7 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
         ),
         user_corrections=_events_of_type(bundle.events, "user_correction"),
         subagent_reports=_events_of_type(bundle.events, "subagent_report"),
+        final_answer_events=_events_of_type(bundle.events, "final_answer"),
         final_answer=final_answer,
         outcome_labels=tuple(
             str(event.payload["label"])

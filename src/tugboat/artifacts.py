@@ -34,6 +34,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "instruction_refs": {"type": "array"},
             "secret_findings": {"type": "array"},
             "scoring": {"type": "array"},
+            "trace_risk_findings": {"type": "array"},
             "llmff_exit_code": {"type": "integer"},
             "llmff_failure_kind": {"type": "string"},
             "llmff_failure_message": {"type": "string"},

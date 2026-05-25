@@ -26,6 +26,7 @@ class TraceBundle:
 class CanonicalEpisode:
     trace_path: Path
     request: str | None
+    request_events: tuple[TraceEvent, ...]
     instruction_snapshot: tuple[dict[str, Any], ...]
     tool_calls: tuple[TraceEvent, ...]
     command_outputs: tuple[TraceEvent, ...]
@@ -34,12 +35,14 @@ class CanonicalEpisode:
     policy_events: tuple[TraceEvent, ...]
     user_corrections: tuple[TraceEvent, ...]
     subagent_reports: tuple[TraceEvent, ...]
+    final_answer_events: tuple[TraceEvent, ...]
     final_answer: str | None
     outcome_labels: tuple[str, ...]
     verifier_scores: dict[str, float]
 
     def redacted_events(self) -> tuple[TraceEvent, ...]:
         events = (
+            *self.request_events,
             *self.tool_calls,
             *self.command_outputs,
             *self.diffs,
@@ -47,6 +50,7 @@ class CanonicalEpisode:
             *self.policy_events,
             *self.user_corrections,
             *self.subagent_reports,
+            *self.final_answer_events,
         )
         return tuple(
             TraceEvent(

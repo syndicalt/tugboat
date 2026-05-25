@@ -36,6 +36,7 @@ from tugboat.scoring import ScoreOutcome, score_episode
 from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.ingest import canonical_episode_from_bundle, ingest_jsonl_trace
+from tugboat.traces.threats import detect_trace_threats
 from tugboat.vcs import VcsAdapter, VcsStateError
 
 
@@ -554,7 +555,8 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
 
 
 def _scored_audit_payload(bundle) -> dict[str, object]:
-    outcomes = score_episode(canonical_episode_from_bundle(bundle))
+    episode = canonical_episode_from_bundle(bundle)
+    outcomes = score_episode(episode)
     evidence_refs = _score_evidence_refs(outcomes) or [event.evidence_id for event in bundle.events]
     payload: dict[str, object] = {
         "edit_warranted": True,
@@ -563,6 +565,9 @@ def _scored_audit_payload(bundle) -> dict[str, object]:
         "severity": "medium",
         "confidence": 0.75,
         "scoring": [_score_outcome_json(outcome) for outcome in outcomes],
+        "trace_risk_findings": [
+            finding.to_json() for finding in detect_trace_threats(episode)
+        ],
     }
     if any(outcome.label == "policy-violation" for outcome in outcomes):
         payload.update(
