@@ -116,3 +116,87 @@ def test_policy_gate_rejects_diff_over_configured_line_budget(tmp_path: Path):
 
     assert decision.allowed is False
     assert "max_changed_lines_exceeded" in decision.reasons
+
+
+def test_policy_gate_rejects_markdown_candidates_with_invalid_control_chars(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Policy\n\nKeep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n Keep this instruction.\n+Bad\x00text.\n",
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "markdown_parse_invalid" in decision.reasons
+
+
+def test_policy_gate_rejects_unbalanced_markdown_fences(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Policy\n\nKeep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " Keep this instruction.\n"
+            "+```python\n"
+            "+print('unterminated')\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "unbalanced_markdown_fence" in decision.reasons
+
+
+def test_policy_gate_rejects_removed_governance_constraints(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "Changes require human review before deploy.\n"
+        "Agents must preserve memory boundaries.\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            "-Changes require human review before deploy.\n"
+            "+Changes can merge when convenient.\n"
+            " Agents must preserve memory boundaries.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "governance_constraint_removed" in decision.reasons
+
+
+def test_policy_gate_allows_reworded_governance_constraints_when_terms_are_preserved(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Changes require human review before deploy.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            "-Changes require human review before deploy.\n"
+            "+Changes require reviewer approval before deploy.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is True
+    assert "governance_constraint_removed" not in decision.reasons

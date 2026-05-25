@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.paths import runs_dir
 
 
@@ -20,11 +21,13 @@ def write_eval_report(
     run_dir.mkdir(parents=True, exist_ok=True)
     report_path = run_dir / "eval-report.json"
     payload = {
+        "schema_version": SCHEMA_VERSION,
         "candidate_id": candidate_id,
         "metrics": metrics,
         "passed": passed,
         "suite_id": suite_id,
     }
+    validate_json_artifact("eval-report.json", payload)
     report_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

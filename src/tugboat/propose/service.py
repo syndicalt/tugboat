@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.paths import runs_dir
 from tugboat.policy.gate import CandidatePatch
 
@@ -20,8 +21,10 @@ def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> Candi
     diff_path = run_dir / "candidate.diff"
     json_path = run_dir / "candidate.json"
     diff_path.write_text(candidate.diff, encoding="utf-8")
+    artifact = {"schema_version": SCHEMA_VERSION, **candidate.to_json_dict()}
+    validate_json_artifact("candidate.json", artifact)
     json_path.write_text(
-        json.dumps(candidate.to_json_dict(), indent=2, sort_keys=True) + "\n",
+        json.dumps(artifact, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return CandidateArtifacts(diff_path=diff_path, json_path=json_path)

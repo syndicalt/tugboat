@@ -32,6 +32,7 @@ def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Pat
         "diff_hash": CandidatePatch.hash_text(_candidate().diff),
         "rationale": "Clarify ambiguous guidance.",
         "risk_class": "instruction_clarification",
+        "schema_version": 1,
         "sources": [{"source_id": "trace-1", "trusted": True}],
     }
 
@@ -51,6 +52,7 @@ def test_write_eval_report_writes_json_report(tmp_path: Path):
         "candidate_id": 5,
         "metrics": {"duration_seconds": 1.25, "failures": 0},
         "passed": True,
+        "schema_version": 1,
         "suite_id": "unit",
     }
 

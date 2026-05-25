@@ -56,6 +56,11 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    assert audit["schema_version"] == 1
+    assert candidate["schema_version"] == 1
+    assert eval_report["schema_version"] == 1
+    assert decision["schema_version"] == 1
     assert candidate["audit_id"] == audit["audit_id"]
     assert eval_report["candidate_id"] == candidate["candidate_id"]
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:

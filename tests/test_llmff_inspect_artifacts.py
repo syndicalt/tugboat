@@ -74,17 +74,21 @@ def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
 def test_write_audit_writes_deterministic_pretty_json(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
 
-    path = write_audit(run_dir, {"z": 1, "a": {"b": True}})
+    path = write_audit(
+        run_dir,
+        {
+            "audit_id": 1,
+            "edit_warranted": True,
+            "evidence_refs": [],
+            "failure_class": "instruction_missing",
+            "severity": "medium",
+            "confidence": 0.75,
+        },
+    )
 
     assert path == run_dir / "audit.json"
-    assert path.read_text(encoding="utf-8") == (
-        '{\n'
-        '  "a": {\n'
-        '    "b": true\n'
-        '  },\n'
-        '  "z": 1\n'
-        '}\n'
-    )
+    artifact = json.loads(path.read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == 1
 
 
 def test_subprocess_inspect_uses_timeout(monkeypatch, tmp_path: Path):

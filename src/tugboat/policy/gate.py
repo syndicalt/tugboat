@@ -13,6 +13,9 @@ DENIAL_REASON_ORDER = (
     "base_file_outside_repo",
     "base_file_not_allowed",
     "max_changed_lines_exceeded",
+    "markdown_parse_invalid",
+    "unbalanced_markdown_fence",
+    "governance_constraint_removed",
     "modal_weakening",
     "new_external_endpoint",
     "single_untrusted_source",
@@ -31,6 +34,23 @@ PROHIBITED_RISK_CLASSES = frozenset(
 STRONG_MODALS = re.compile(r"\b(must|never|required|shall)\b", re.IGNORECASE)
 WEAK_MODALS = re.compile(r"\b(should|may|can|could|optional|recommend)\b", re.IGNORECASE)
 EXTERNAL_ENDPOINT = re.compile(r"https?://[^\s)>\"]+", re.IGNORECASE)
+FENCE_START = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+GOVERNANCE_TERMS = frozenset(
+    {
+        "approval",
+        "sandbox",
+        "test",
+        "review",
+        "secret",
+        "secrets",
+        "memory",
+        "network",
+        "deploy",
+        "permission",
+    }
+)
+NON_GOVERNANCE_FORBIDDEN_TERMS = frozenset({"must", "never", "required", "shall"})
 
 
 @dataclass(frozen=True)
@@ -94,7 +114,12 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("base_hash_mismatch")
     if _changed_line_count(candidate.diff) > policy.auto_apply_max_changed_lines:
         found_reasons.add("max_changed_lines_exceeded")
-    if _has_modal_weakening(candidate.diff):
+    if _is_markdown_file(candidate.base_file) and _is_relative_to(base_path, repo_root):
+        found_reasons.update(_markdown_validation_reasons(base_path, candidate.diff))
+    has_modal_weakening = _has_modal_weakening(candidate.diff)
+    if _removes_governance_constraint(candidate.diff, policy) and not has_modal_weakening:
+        found_reasons.add("governance_constraint_removed")
+    if has_modal_weakening:
         found_reasons.add("modal_weakening")
     if _has_new_external_endpoint(candidate.diff):
         found_reasons.add("new_external_endpoint")
@@ -136,6 +161,140 @@ def _has_new_external_endpoint(diff: str) -> bool:
     return bool(added_endpoints - removed_endpoints)
 
 
+def _markdown_validation_reasons(base_path: Path, diff: str) -> set[str]:
+    if not base_path.exists():
+        return set()
+
+    base_text = base_path.read_text(encoding="utf-8")
+    preview = _apply_unified_diff(base_text, diff)
+    if preview is None:
+        return {"markdown_parse_invalid"}
+
+    reasons: set[str] = set()
+    if _has_invalid_markdown_text(preview):
+        reasons.add("markdown_parse_invalid")
+    if _has_unbalanced_fenced_block(preview) and not _has_unbalanced_fenced_block(base_text):
+        reasons.add("unbalanced_markdown_fence")
+    return reasons
+
+
+def _apply_unified_diff(base_text: str, diff: str) -> str | None:
+    base_lines = base_text.splitlines(keepends=True)
+    output: list[str] = []
+    position = 0
+    in_hunk = False
+
+    for line in diff.splitlines(keepends=True):
+        if line.startswith(("---", "+++")):
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if not in_hunk or line.startswith("\\"):
+            continue
+
+        marker = line[:1]
+        body = line[1:]
+        if marker in {" ", "-"}:
+            aligned = _align_base_line(base_lines, position, body)
+            if aligned is None:
+                return None
+            output.extend(base_lines[position:aligned])
+            position = aligned
+            if marker == " ":
+                output.append(base_lines[position])
+            position += 1
+            continue
+        if marker == "+":
+            output.append(body)
+            continue
+        return None
+
+    output.extend(base_lines[position:])
+    return "".join(output)
+
+
+def _align_base_line(base_lines: list[str], position: int, expected: str) -> int | None:
+    for index in range(position, len(base_lines)):
+        if base_lines[index] == expected:
+            return index
+    return None
+
+
+def _has_invalid_markdown_text(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return CONTROL_CHARS.search(text) is not None
+
+
+def _has_unbalanced_fenced_block(text: str) -> bool:
+    fence_char = ""
+    fence_length = 0
+
+    for line in text.splitlines():
+        match = FENCE_START.match(line)
+        if not match:
+            continue
+        marker = match.group(1)
+        marker_char = marker[0]
+        if not fence_char:
+            fence_char = marker_char
+            fence_length = len(marker)
+            continue
+        if marker_char == fence_char and len(marker) >= fence_length:
+            fence_char = ""
+            fence_length = 0
+
+    return bool(fence_char)
+
+
+def _removes_governance_constraint(diff: str, policy: Policy) -> bool:
+    protected_terms = _governance_terms(policy)
+    removed_terms = {
+        term
+        for line in diff.splitlines()
+        if _is_removed_line(line)
+        for term in _line_governance_terms(_diff_body(line), protected_terms)
+    }
+    if not removed_terms:
+        return False
+
+    added_terms = {
+        term
+        for line in diff.splitlines()
+        if _is_added_line(line)
+        for term in _line_governance_terms(_diff_body(line), protected_terms)
+    }
+    return bool(removed_terms - added_terms)
+
+
+def _governance_terms(policy: Policy) -> frozenset[str]:
+    configured_terms = {
+        term.lower()
+        for term in policy.forbidden_terms
+        if term.lower() not in NON_GOVERNANCE_FORBIDDEN_TERMS
+    }
+    return frozenset(configured_terms | GOVERNANCE_TERMS)
+
+
+def _line_governance_terms(line: str, terms: frozenset[str]) -> set[str]:
+    return {term for term in terms if _contains_governance_term(line, term)}
+
+
+def _contains_governance_term(line: str, term: str) -> bool:
+    if term in {"secret", "secrets"}:
+        pattern = r"\bsecrets?\b"
+    elif term == "review":
+        pattern = r"\breview\w*\b"
+    elif term == "deploy":
+        pattern = r"\bdeploy\w*\b"
+    else:
+        pattern = rf"\b{re.escape(term)}s?\b"
+    return re.search(pattern, line, re.IGNORECASE) is not None
+
+
 def _is_removed_line(line: str) -> bool:
     return line.startswith("-") and not line.startswith("---")
 
@@ -150,6 +309,10 @@ def _diff_body(line: str) -> str:
 
 def _changed_line_count(diff: str) -> int:
     return sum(1 for line in diff.splitlines() if _is_added_line(line) or _is_removed_line(line))
+
+
+def _is_markdown_file(path: str) -> bool:
+    return Path(path).suffix.lower() in {".md", ".markdown"}
 
 
 def _is_allowed_base_file(base_file: str, policy: Policy) -> bool:

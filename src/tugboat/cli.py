@@ -6,6 +6,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
@@ -229,17 +230,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             encoding="utf-8",
         )
         (run_dir / "decision.json").write_text(
-            json.dumps(
-                {
-                    "candidate_id": candidate_id,
-                    "decision": "needs_review" if decision.allowed else "rejected",
-                    "policy_allowed": decision.allowed,
-                    "policy_reasons": list(decision.reasons),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
+            _decision_json(
+                candidate_id=candidate_id,
+                decision_value="needs_review" if decision.allowed else "rejected",
+                policy_allowed=decision.allowed,
+                policy_reasons=list(decision.reasons),
+            ),
             encoding="utf-8",
         )
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -474,6 +470,24 @@ def _decision_from_artifact(run_dir: Path):
 
     payload = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     return PolicyDecision(bool(payload["allowed"]), tuple(payload["reasons"]))
+
+
+def _decision_json(
+    *,
+    candidate_id: int,
+    decision_value: str,
+    policy_allowed: bool,
+    policy_reasons: list[str],
+) -> str:
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "candidate_id": candidate_id,
+        "decision": decision_value,
+        "policy_allowed": policy_allowed,
+        "policy_reasons": policy_reasons,
+    }
+    validate_json_artifact("decision.json", payload)
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 def _merge_json(path: Path, updates: dict[str, object]) -> None:
