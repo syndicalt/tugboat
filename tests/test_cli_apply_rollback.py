@@ -245,6 +245,46 @@ def test_apply_commit_mode_creates_branch_commit_and_rollback_command(tmp_path: 
     ]
 
 
+def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'apply.applied'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload == {
+        "candidate_id": 7,
+        "mode": "commit",
+        "run_id": run_dir.name,
+        "target_files": ["CODEX.md"],
+        "applied_commit": apply_plan["applied_commit"],
+        "eval_report": {
+            "path": ".sidecar/runs/20260525T000000000000Z/eval-report.json",
+            "suite_id": "all",
+            "passed": True,
+        },
+        "policy_gate": {
+            "path": ".sidecar/runs/20260525T000000000000Z/policy-gate.json",
+            "allowed": True,
+            "reasons": [],
+        },
+        "pre_hashes": apply_plan["pre_hashes"],
+        "post_hashes": apply_plan["post_hashes"],
+        "rollback_command": apply_plan["rollback_command"],
+    }
+
+
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

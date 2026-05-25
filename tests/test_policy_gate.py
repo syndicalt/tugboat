@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tugboat.models import Policy
+from tugboat.models import InstructionFilePolicy, Policy
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 
 
@@ -292,3 +292,38 @@ def test_policy_gate_rejects_class_d_as_prohibited(tmp_path: Path):
 
     assert decision.allowed is False
     assert "prohibited_risk_class" in decision.reasons
+
+
+def test_policy_gate_rejects_pending_candidate_eval_definition_edits(tmp_path: Path):
+    eval_file = tmp_path / "tests" / "fixtures" / "evals" / "regression.json"
+    eval_file.parent.mkdir(parents=True)
+    eval_file.write_text('{"suite": "regression"}\n', encoding="utf-8")
+    candidate = _candidate(
+        base_file="tests/fixtures/evals/regression.json",
+        base_hash=CandidatePatch.hash_file(eval_file),
+        diff=(
+            "--- a/tests/fixtures/evals/regression.json\n"
+            "+++ b/tests/fixtures/evals/regression.json\n"
+            "@@\n"
+            '-{"suite": "regression"}\n'
+            '+{"suite": "easier-regression"}\n'
+        ),
+        pending_audit_eval_definition_paths=("tests/fixtures/evals/*.json",),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(
+                    path="tests/fixtures/evals/regression.json",
+                    kind="eval_definition",
+                    precedence=100,
+                ),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("pending_eval_definition_edit",)

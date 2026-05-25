@@ -765,7 +765,62 @@ def _write_apply_plan(
                 "applied_commit": applied_commit,
             },
         )
+        if applied_commit:
+            store.append_audit_event(
+                "apply.applied",
+                _apply_applied_event_payload(
+                    repo,
+                    run_dir,
+                    candidate_id=candidate_id,
+                    mode=mode,
+                    target_files=target_files,
+                    applied_commit=applied_commit,
+                    pre_hashes=pre_hashes,
+                    post_hashes=post_hashes,
+                    rollback_command=rollback_command,
+                ),
+            )
     return path
+
+
+def _apply_applied_event_payload(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    mode: str,
+    target_files: tuple[str, ...],
+    applied_commit: str,
+    pre_hashes: dict[str, str],
+    post_hashes: dict[str, str],
+    rollback_command: list[list[str]],
+) -> dict[str, object]:
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    return {
+        "candidate_id": candidate_id,
+        "mode": mode,
+        "run_id": run_dir.name,
+        "target_files": list(target_files),
+        "applied_commit": applied_commit,
+        "eval_report": {
+            "path": _relative_repo_path(repo, run_dir / "eval-report.json"),
+            "suite_id": str(eval_report["suite_id"]),
+            "passed": bool(eval_report["passed"]),
+        },
+        "policy_gate": {
+            "path": _relative_repo_path(repo, run_dir / "policy-gate.json"),
+            "allowed": bool(policy_gate["allowed"]),
+            "reasons": list(policy_gate["reasons"]),
+        },
+        "pre_hashes": pre_hashes,
+        "post_hashes": post_hashes,
+        "rollback_command": rollback_command,
+    }
+
+
+def _relative_repo_path(repo: Path, path: Path) -> str:
+    return path.resolve().relative_to(repo.resolve()).as_posix()
 
 
 def _requires_explicit_human_review(risk_class: str) -> bool:

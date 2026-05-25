@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import re
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ DENIAL_REASON_ORDER = (
     "base_hash_mismatch",
     "base_file_outside_repo",
     "base_file_not_allowed",
+    "pending_eval_definition_edit",
     "max_changed_lines_exceeded",
     "markdown_parse_invalid",
     "unbalanced_markdown_fence",
@@ -71,6 +73,7 @@ class CandidatePatch:
     risk_class: str
     rationale: str
     sources: tuple[SourceRef, ...] = ()
+    pending_audit_eval_definition_paths: tuple[str, ...] = ()
 
     @staticmethod
     def hash_text(value: str) -> str:
@@ -85,7 +88,7 @@ class CandidatePatch:
         return self.hash_text(self.diff)
 
     def to_json_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "audit_id": self.audit_id,
             "base_file": self.base_file,
             "base_hash": self.base_hash,
@@ -97,6 +100,11 @@ class CandidatePatch:
                 for source in self.sources
             ],
         }
+        if self.pending_audit_eval_definition_paths:
+            payload["pending_audit_eval_definition_paths"] = list(
+                self.pending_audit_eval_definition_paths
+            )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("base_file_outside_repo")
     if not _is_allowed_base_file(candidate.base_file, policy):
         found_reasons.add("base_file_not_allowed")
+    if _is_pending_eval_definition_edit(candidate.base_file, candidate):
+        found_reasons.add("pending_eval_definition_edit")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
         found_reasons.add("base_hash_mismatch")
     if _changed_line_count(candidate.diff) > policy.auto_apply_max_changed_lines:
@@ -361,6 +371,18 @@ def _is_allowed_base_file(base_file: str, policy: Policy) -> bool:
         "SKILL.md",
     }
     return base_file in allowed
+
+
+def _is_pending_eval_definition_edit(base_file: str, candidate: CandidatePatch) -> bool:
+    normalized_base = _repo_relative_posix(base_file)
+    return any(
+        fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
+        for pattern in candidate.pending_audit_eval_definition_paths
+    )
+
+
+def _repo_relative_posix(path: str) -> str:
+    return Path(path).as_posix().lstrip("/")
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
