@@ -77,6 +77,10 @@ def _candidate_run(repo: Path, *, risk_class: str = "instruction_clarification")
                 "candidate_id": 7,
                 "suite_id": "all",
                 "passed": True,
+                "trigger_score": 0.80,
+                "held_out_score": 0.90,
+                "governance_passed": True,
+                "recommendation": "accept",
                 "metrics": {"governance_regressions": 0},
             },
             indent=2,
@@ -163,6 +167,40 @@ def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path)
             sort_keys=True,
         )
         + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_rejects_equal_trigger_and_held_out_scores(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["trigger_score"] = 0.90
+    eval_report["held_out_score"] = 0.90
+    eval_report["governance_passed"] = True
+    eval_report["recommendation"] = "accept"
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_rejects_eval_report_without_validation_scores(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report.pop("trigger_score")
+    eval_report.pop("held_out_score")
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 

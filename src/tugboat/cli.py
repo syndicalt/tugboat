@@ -1218,8 +1218,8 @@ def _assert_eval_acceptance(eval_report: dict[str, object]) -> None:
         trigger_score = metrics.get("trigger_score")
         held_out_score = metrics.get("held_out_score")
         if trigger_score is None or held_out_score is None:
-            return
-    if float(held_out_score) < float(trigger_score):
+            raise ValueError("eval report is missing trigger and held-out validation scores")
+    if float(held_out_score) <= float(trigger_score):
         raise ValueError("held-out eval score did not improve")
 
 
