@@ -191,6 +191,52 @@ def test_policy_gate_rejects_removed_yaml_frontmatter_from_instruction_file(
     assert decision.reasons == ("frontmatter_removed",)
 
 
+def test_policy_gate_rejects_changes_to_protected_heading_sections(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "# Operating Constraints\n"
+        "\n"
+        "Keep this exact section intact.\n"
+        "\n"
+        "# Examples\n"
+        "\n"
+        "Examples can evolve separately.\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " # Operating Constraints\n"
+            " \n"
+            "-Keep this exact section intact.\n"
+            "+Keep this section mostly intact.\n"
+            " \n"
+            " # Examples\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(
+                    path="CODEX.md",
+                    kind="agent_policy",
+                    precedence=70,
+                    protected=True,
+                ),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("protected_heading_changed",)
+
+
 def test_policy_gate_rejects_removed_governance_constraints(tmp_path: Path):
     base_file = tmp_path / "CODEX.md"
     base_file.write_text(

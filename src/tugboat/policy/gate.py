@@ -18,6 +18,7 @@ DENIAL_REASON_ORDER = (
     "markdown_parse_invalid",
     "unbalanced_markdown_fence",
     "frontmatter_removed",
+    "protected_heading_changed",
     "governance_constraint_removed",
     "modal_weakening",
     "new_external_endpoint",
@@ -40,6 +41,7 @@ STRONG_MODALS = re.compile(r"\b(must|never|required|shall)\b", re.IGNORECASE)
 WEAK_MODALS = re.compile(r"\b(should|may|can|could|optional|recommend)\b", re.IGNORECASE)
 EXTERNAL_ENDPOINT = re.compile(r"https?://[^\s)>\"]+", re.IGNORECASE)
 FENCE_START = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+MARKDOWN_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 GOVERNANCE_TERMS = frozenset(
     {
@@ -53,6 +55,23 @@ GOVERNANCE_TERMS = frozenset(
         "network",
         "deploy",
         "permission",
+    }
+)
+PROTECTED_HEADING_TERMS = frozenset(
+    {
+        "approval",
+        "constraint",
+        "credential",
+        "deploy",
+        "governance",
+        "memory",
+        "network",
+        "operating constraint",
+        "permission",
+        "policy",
+        "sandbox",
+        "secret",
+        "security",
     }
 )
 NON_GOVERNANCE_FORBIDDEN_TERMS = frozenset({"must", "never", "required", "shall"})
@@ -74,6 +93,7 @@ class CandidatePatch:
     rationale: str
     sources: tuple[SourceRef, ...] = ()
     pending_audit_eval_definition_paths: tuple[str, ...] = ()
+    bounded_edit_metadata: tuple[dict[str, object], ...] = ()
 
     @staticmethod
     def hash_text(value: str) -> str:
@@ -104,6 +124,8 @@ class CandidatePatch:
             payload["pending_audit_eval_definition_paths"] = list(
                 self.pending_audit_eval_definition_paths
             )
+        if self.bounded_edit_metadata:
+            payload["bounded_edit_metadata"] = list(self.bounded_edit_metadata)
         return payload
 
 
@@ -132,6 +154,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("max_changed_lines_exceeded")
     if _is_markdown_file(candidate.base_file) and _is_relative_to(base_path, repo_root):
         found_reasons.update(_markdown_validation_reasons(base_path, candidate.diff))
+        if _is_protected_instruction_file(candidate.base_file, policy):
+            found_reasons.update(_protected_heading_reasons(base_path, candidate.diff))
     has_modal_weakening = _has_modal_weakening(candidate.diff)
     if _removes_governance_constraint(candidate.diff, policy) and not has_modal_weakening:
         found_reasons.add("governance_constraint_removed")
@@ -297,6 +321,88 @@ def _has_yaml_frontmatter(text: str) -> bool:
     return any(line.strip() == "---" for line in lines[1:])
 
 
+def _protected_heading_reasons(base_path: Path, diff: str) -> set[str]:
+    if not base_path.exists():
+        return set()
+
+    base_text = base_path.read_text(encoding="utf-8")
+    preview = _apply_unified_diff(base_text, diff)
+    if preview is None:
+        return set()
+    if _protected_heading_sections_changed(base_text, preview):
+        return {"protected_heading_changed"}
+    return set()
+
+
+def _protected_heading_sections_changed(base_text: str, preview: str) -> bool:
+    base_sections = _markdown_heading_sections(base_text)
+    if not base_sections:
+        return False
+
+    preview_sections = _markdown_heading_sections(preview)
+    if len(preview_sections) < len(base_sections):
+        return True
+
+    return any(
+        _is_protected_heading_path(base_section[0])
+        and (index >= len(preview_sections) or preview_sections[index] != base_section)
+        for index, base_section in enumerate(base_sections)
+    )
+
+
+def _is_protected_heading_path(heading_path: tuple[str, ...]) -> bool:
+    heading_text = " / ".join(heading_path).lower()
+    return any(term in heading_text for term in PROTECTED_HEADING_TERMS)
+
+
+def _markdown_heading_sections(text: str) -> tuple[tuple[tuple[str, ...], str], ...]:
+    headings = _find_markdown_headings(text)
+    sections: list[tuple[tuple[str, ...], str]] = []
+    stack: list[tuple[int, str]] = []
+
+    for index, (start, level, heading) in enumerate(headings):
+        end = headings[index + 1][0] if index + 1 < len(headings) else len(text)
+        stack = [(existing_level, name) for existing_level, name in stack if existing_level < level]
+        stack.append((level, heading))
+        sections.append(
+            (
+                tuple(name for _, name in stack),
+                CandidatePatch.hash_text(text[start:end]),
+            )
+        )
+
+    return tuple(sections)
+
+
+def _find_markdown_headings(text: str) -> list[tuple[int, int, str]]:
+    headings: list[tuple[int, int, str]] = []
+    in_fence = False
+    fence_marker = ""
+    char_offset = 0
+
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if not in_fence:
+                in_fence = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                in_fence = False
+                fence_marker = ""
+            char_offset += len(line)
+            continue
+
+        if not in_fence:
+            match = MARKDOWN_HEADING.match(line.rstrip("\r\n"))
+            if match:
+                headings.append((char_offset, len(match.group(1)), match.group(2).strip()))
+
+        char_offset += len(line)
+
+    return headings
+
+
 def _removes_governance_constraint(diff: str, policy: Policy) -> bool:
     protected_terms = _governance_terms(policy)
     removed_terms = {
@@ -371,6 +477,15 @@ def _is_allowed_base_file(base_file: str, policy: Policy) -> bool:
         "SKILL.md",
     }
     return base_file in allowed
+
+
+def _is_protected_instruction_file(base_file: str, policy: Policy) -> bool:
+    normalized_base = _repo_relative_posix(base_file)
+    return any(
+        entry.protected
+        and fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(entry.path))
+        for entry in policy.instruction_files
+    )
 
 
 def _is_pending_eval_definition_edit(base_file: str, candidate: CandidatePatch) -> bool:

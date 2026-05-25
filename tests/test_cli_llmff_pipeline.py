@@ -64,6 +64,13 @@ if args[:1] == ["run"]:
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
             "sources": [{"source_id": "ev_fake", "trusted": True}],
+            "bounded_edit_metadata": [{
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0
+            }],
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
         outputs["eval_report"].write_text(json.dumps({
@@ -210,6 +217,15 @@ llmff:
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
     assert candidate["rationale"] == "llmff proposed this from audited evidence"
+    assert candidate["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
     assert "llmff proposed regression guidance" in diff
     assert (run_dir / "candidate.raw.json").exists()
 

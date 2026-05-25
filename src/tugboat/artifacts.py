@@ -61,6 +61,8 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "risk_class": {"type": "string"},
             "rationale": {"type": "string"},
             "sources": {"type": "array"},
+            "pending_audit_eval_definition_paths": {"type": "array"},
+            "bounded_edit_metadata": {"type": "array"},
         },
     },
     "eval-report.json": {

@@ -637,7 +637,15 @@ def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> Can
             for source in payload.get("sources", [])
             if isinstance(source, dict)
         ),
+        bounded_edit_metadata=_bounded_edit_metadata_from_payload(payload),
     )
+
+
+def _bounded_edit_metadata_from_payload(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
+    raw_metadata = payload.get("bounded_edit_metadata", payload.get("operator_metadata", []))
+    if not isinstance(raw_metadata, list):
+        return ()
+    return tuple(dict(item) for item in raw_metadata if isinstance(item, dict))
 
 
 def _run_patch_eval(
@@ -694,6 +702,9 @@ def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
         sources=tuple(
             SourceRef(str(source["source_id"]), trusted=bool(source["trusted"]))
             for source in metadata.get("sources", [])
+        ),
+        bounded_edit_metadata=tuple(
+            dict(item) for item in metadata.get("bounded_edit_metadata", []) if isinstance(item, dict)
         ),
     )
 

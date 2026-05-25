@@ -40,6 +40,40 @@ def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Pat
     }
 
 
+def test_write_candidate_preserves_bounded_edit_operator_metadata(tmp_path: Path):
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="CODEX.md",
+        base_hash="abc123",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        sources=(SourceRef("trace-1", trusted=True),),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    artifacts = write_candidate(tmp_path, "run-1", candidate)
+
+    payload = json.loads(artifacts.json_path.read_text(encoding="utf-8"))
+    assert payload["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+
+
 def test_write_eval_report_writes_json_report(tmp_path: Path):
     report_path = write_eval_report(
         tmp_path,
