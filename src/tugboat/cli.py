@@ -13,7 +13,13 @@ from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.runner import DaemonLoopConfig, default_trace_dirs, run_daemon_cycle
-from tugboat.daemon.service import DaemonRunConfig, daemon_status, default_kill_switch, run_daemon_once
+from tugboat.daemon.service import (
+    DaemonRunConfig,
+    daemon_status,
+    default_kill_switch,
+    run_daemon_once,
+    serve_daemon_socket,
+)
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite
@@ -89,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_cycle.add_argument("--max-jobs", type=int, default=1)
     daemon_cycle.add_argument("--concurrency", type=int, default=1)
     daemon_cycle.add_argument("--trace-dir", action="append", default=[])
+    daemon_serve = daemon_subcommands.add_parser("serve")
+    daemon_serve.add_argument("--repo", required=True)
+    daemon_serve.add_argument("--worker-id", default="tugboat-daemon")
+    daemon_serve.add_argument("--lease-seconds", type=int, default=300)
+    daemon_serve.add_argument("--socket")
+    daemon_serve.add_argument("--max-requests", type=int)
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -461,6 +473,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 trace_dirs=trace_dirs,
                 kill_switch=default_kill_switch(repo),
             ),
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "daemon" and args.daemon_command == "serve":
+        repo = Path(args.repo)
+        socket_path = Path(args.socket) if args.socket else sidecar_dir(repo) / "daemon.sock"
+        result = serve_daemon_socket(
+            repo,
+            socket_path=socket_path,
+            config=DaemonRunConfig(
+                worker_id=args.worker_id,
+                lease_duration=timedelta(seconds=args.lease_seconds),
+                kill_switch=default_kill_switch(repo),
+            ),
+            max_requests=args.max_requests,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0

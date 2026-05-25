@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import socket
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +13,7 @@ from tugboat.daemon.service import (
     DaemonRunConfig,
     daemon_status,
     run_daemon_once,
+    serve_daemon_socket,
 )
 from tugboat.mcp import tugboat_daemon_status
 
@@ -139,6 +143,67 @@ def test_daemon_cycle_cli_watches_trace_dir_and_reports_discovery(tmp_path: Path
         assert job is not None
         assert job.kind == "trace_audit"
         assert job.payload == {"trace_path": str(trace_dir / "episode.jsonl")}
+
+
+def test_daemon_unix_socket_serves_status_and_exits_after_bounded_requests(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+    socket_path = tmp_path / ".sidecar" / "daemon.sock"
+    result: dict[str, object] = {}
+
+    thread = threading.Thread(
+        target=lambda: result.update(
+            serve_daemon_socket(
+                tmp_path,
+                socket_path=socket_path,
+                config=DaemonRunConfig(
+                    worker_id="socket-worker",
+                    lease_duration=timedelta(seconds=30),
+                    now=_at(10),
+                ),
+                max_requests=1,
+            )
+        )
+    )
+    thread.start()
+    with _connect_unix_socket(socket_path) as client:
+        client.sendall(b'{"command":"status"}\n')
+        response = json.loads(client.recv(4096).decode("utf-8"))
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert response["jobs_by_state"] == {"queued": 1}
+    assert response["socket_path"] == ".sidecar/daemon.sock"
+    assert result == {"requests_served": 1, "socket_path": ".sidecar/daemon.sock"}
+
+
+def test_daemon_serve_cli_can_exit_without_accepting_requests(tmp_path: Path, capsys):
+    exit_code = main(
+        [
+            "daemon",
+            "serve",
+            "--repo",
+            str(tmp_path),
+            "--max-requests",
+            "0",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"requests_served": 0, "socket_path": ".sidecar/daemon.sock"}
+
+
+def _connect_unix_socket(path: Path) -> socket.socket:
+    for _ in range(100):
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.connect(str(path))
+            return client
+        except (FileNotFoundError, ConnectionRefusedError):
+            client.close()
+            time.sleep(0.01)
+    raise AssertionError(f"socket was not created: {path}")
 
 
 def _at(seconds: int) -> datetime:

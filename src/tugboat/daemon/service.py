@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import socket
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -72,8 +74,64 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
         queue.close()
 
 
+def serve_daemon_socket(
+    repo: Path,
+    *,
+    socket_path: Path,
+    config: DaemonRunConfig,
+    max_requests: int | None = None,
+) -> dict[str, Any]:
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    socket_path.unlink(missing_ok=True)
+    requests_served = 0
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        server.bind(str(socket_path))
+        server.listen(1)
+        while max_requests is None or requests_served < max_requests:
+            connection, _ = server.accept()
+            with connection:
+                request = _read_socket_request(connection)
+                response = _handle_socket_request(repo, config, request)
+                response["socket_path"] = socket_path.relative_to(repo).as_posix()
+                connection.sendall((json.dumps(response, sort_keys=True) + "\n").encode("utf-8"))
+            requests_served += 1
+    socket_path.unlink(missing_ok=True)
+    return {
+        "requests_served": requests_served,
+        "socket_path": socket_path.relative_to(repo).as_posix(),
+    }
+
+
 def default_kill_switch(repo: Path) -> FileKillSwitch:
     return FileKillSwitch(repo / ".sidecar" / "read-only.kill")
+
+
+def _read_socket_request(connection: socket.socket) -> dict[str, Any]:
+    data = b""
+    while b"\n" not in data:
+        chunk = connection.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    if not data.strip():
+        return {}
+    payload = json.loads(data.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("daemon socket request must be a JSON object")
+    return payload
+
+
+def _handle_socket_request(
+    repo: Path,
+    config: DaemonRunConfig,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    command = str(request.get("command", "status"))
+    if command == "status":
+        return daemon_status(repo, kill_switch=config.kill_switch)
+    if command == "run_once":
+        return run_daemon_once(repo, config)
+    return {"error": f"unknown daemon command: {command}"}
 
 
 def _process_job(queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
