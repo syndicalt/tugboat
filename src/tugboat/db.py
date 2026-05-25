@@ -621,6 +621,63 @@ class Store:
         self.connection.commit()
         return eval_id
 
+    def record_eval_case(
+        self,
+        *,
+        suite_id: str,
+        case_id: str,
+        case_hash: str,
+    ) -> int:
+        event = self.append_audit_event(
+            "eval_case.recorded",
+            {
+                "suite_id": suite_id,
+                "case_id": case_id,
+                "case_hash": case_hash,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO eval_cases(suite_id, case_id, case_hash, audit_event_sequence)
+            VALUES (?, ?, ?, ?)
+            """,
+            (suite_id, case_id, case_hash, event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def record_validation_split(
+        self,
+        *,
+        suite_id: str,
+        split_name: str,
+        case_ids: tuple[str, ...],
+    ) -> int:
+        event = self.append_audit_event(
+            "validation_split.recorded",
+            {
+                "suite_id": suite_id,
+                "split_name": split_name,
+                "case_count": len(case_ids),
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO validation_splits(
+              suite_id, split_name, case_ids_json, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                suite_id,
+                split_name,
+                json.dumps(list(case_ids), sort_keys=True),
+                event.sequence,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def insert_decision(
         self,
         *,

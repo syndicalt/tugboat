@@ -368,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         governance_passed = True
         recommendation = "accept"
         policy_decision_payload: dict[str, object] | None = None
+        offline_report = None
         if args.suite == "all" and not (run_dir / "candidate.raw.json").exists():
             offline_report = run_offline_eval_suite(repo, suite_id=args.suite)
             passed = offline_report.passed
@@ -435,6 +436,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 passed=passed,
                 metrics=metrics,
             )
+            if offline_report is not None:
+                for case in offline_report.eval_cases:
+                    store.record_eval_case(
+                        suite_id=args.suite,
+                        case_id=case.case_id,
+                        case_hash=case.case_hash,
+                    )
+                for split_name, case_ids in offline_report.validation_splits.items():
+                    store.record_validation_split(
+                        suite_id=args.suite,
+                        split_name=split_name,
+                        case_ids=case_ids,
+                    )
         print(f"eval suite: {args.suite} {'passed' if passed else 'failed'}")
         return 0 if passed else 1
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -32,6 +33,13 @@ class StructuralEvalReport:
 
 
 @dataclass(frozen=True)
+class EvalCaseRecord:
+    case_id: str
+    case_hash: str
+    split_name: str
+
+
+@dataclass(frozen=True)
 class OfflineEvalReport:
     suite_id: str
     passed: bool
@@ -41,6 +49,8 @@ class OfflineEvalReport:
     governance_passed: bool
     recommendation: str
     live_provider_required: bool = False
+    eval_cases: tuple[EvalCaseRecord, ...] = ()
+    validation_splits: dict[str, tuple[str, ...]] | None = None
 
 
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -117,7 +127,14 @@ def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
     policy_text = _read_optional(root / "CODEX.md") or _read_optional(root / "AGENTS.md") or ""
     structural = evaluate_markdown_candidate(policy_text, root=root)
     governance_regressions = int(_has_governance_regression(policy_text))
-    fixture_metrics = _run_fixture_cases(root)
+    fixture_metrics, fixture_cases = _run_fixture_cases(root)
+    structural_case = EvalCaseRecord(
+        case_id="structural:current-policy",
+        case_hash=_text_hash(policy_text),
+        split_name="trigger",
+    )
+    eval_cases = (structural_case, *fixture_cases)
+    validation_splits = _validation_splits(eval_cases)
     behavioral_cases = max(
         1,
         fixture_metrics["incident_replay_cases"]
@@ -153,10 +170,12 @@ def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
         held_out_score=held_out_score,
         governance_passed=governance_regressions == 0,
         recommendation="accept" if passed else "reject",
+        eval_cases=eval_cases,
+        validation_splits=validation_splits,
     )
 
 
-def _run_fixture_cases(root: Path) -> dict[str, int]:
+def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord, ...]]:
     metrics = {
         "incident_replay_cases": 0,
         "held_out_cases": 0,
@@ -165,9 +184,10 @@ def _run_fixture_cases(root: Path) -> dict[str, int]:
         "held_out_passed": 0,
         "fixture_case_failures": 0,
     }
+    cases: list[EvalCaseRecord] = []
     fixture_root = root / ".sidecar" / "evals"
     if not fixture_root.exists():
-        return metrics
+        return metrics, ()
 
     category_metric = {
         "incident_replay": "incident_replay_cases",
@@ -188,12 +208,45 @@ def _run_fixture_cases(root: Path) -> dict[str, int]:
         markdown = str(payload["markdown"])
         expected_passed = bool(payload["expected_passed"])
         actual_passed = evaluate_markdown_candidate(markdown, root=root).passed and not _has_governance_regression(markdown)
+        cases.append(
+            EvalCaseRecord(
+                case_id=f"{category}:{path.stem}",
+                case_hash=_json_hash(payload),
+                split_name=_split_for_category(category),
+            )
+        )
         metrics[metric] += 1
         if category == "held_out" and actual_passed == expected_passed:
             metrics["held_out_passed"] += 1
         if actual_passed != expected_passed:
             metrics["fixture_case_failures"] += 1
-    return metrics
+    return metrics, tuple(cases)
+
+
+def _validation_splits(cases: tuple[EvalCaseRecord, ...]) -> dict[str, tuple[str, ...]]:
+    split_names = ("trigger", "held_out", "governance")
+    return {
+        split_name: tuple(sorted(case.case_id for case in cases if case.split_name == split_name))
+        for split_name in split_names
+    }
+
+
+def _split_for_category(category: str) -> str:
+    if category == "held_out":
+        return "held_out"
+    if category in {"adversarial", "cross_agent"}:
+        return "governance"
+    return "trigger"
+
+
+def _json_hash(payload: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _category_score(*, passed_cases: int, total_cases: int, fallback: float) -> float:

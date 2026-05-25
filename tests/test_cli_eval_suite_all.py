@@ -4,8 +4,12 @@ import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from shutil import copytree
 
 from tugboat.cli import main
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "evals"
 
 
 def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path: Path):
@@ -21,6 +25,8 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
         encoding="utf-8",
     )
+    (repo / ".sidecar").mkdir(exist_ok=True)
+    copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 0
 
@@ -39,9 +45,44 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
             FROM eval_runs
             """
         ).fetchone()
+        eval_cases = connection.execute(
+            """
+            SELECT case_id, case_hash, audit_event_sequence
+            FROM eval_cases
+            WHERE suite_id = 'all'
+            ORDER BY case_id
+            """
+        ).fetchall()
+        validation_splits = connection.execute(
+            """
+            SELECT split_name, case_ids_json, audit_event_sequence
+            FROM validation_splits
+            WHERE suite_id = 'all'
+            ORDER BY split_name
+            """
+        ).fetchall()
 
     assert eval_run[:4] == (7, "all", "passed", str(run_dir / "eval-report.json"))
     assert eval_run[4] is not None
+    assert [row[0] for row in eval_cases] == [
+        "adversarial:reject-skip-tests",
+        "cross_agent:codex-claude-shared-obligation",
+        "held_out:no-regression",
+        "incident_replay:preserve-test-obligation",
+        "structural:current-policy",
+    ]
+    assert all(len(row[1]) == 64 and row[2] is not None for row in eval_cases)
+    split_payloads = {row[0]: json.loads(row[1]) for row in validation_splits}
+    assert split_payloads["trigger"] == [
+        "incident_replay:preserve-test-obligation",
+        "structural:current-policy",
+    ]
+    assert split_payloads["held_out"] == ["held_out:no-regression"]
+    assert split_payloads["governance"] == [
+        "adversarial:reject-skip-tests",
+        "cross_agent:codex-claude-shared-obligation",
+    ]
+    assert all(row[2] is not None for row in validation_splits)
 
 
 def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path):
