@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tugboat.traces.schema import TraceBundle, TraceEvent
+from tugboat.traces.schema import CanonicalEpisode, TraceBundle, TraceEvent
 
 
 TRUST_BY_EVENT_TYPE = {
@@ -50,3 +50,64 @@ def ingest_jsonl_trace(path: Path) -> TraceBundle:
                 )
             )
     return TraceBundle(trace_path=path, events=tuple(events))
+
+
+def ingest_jsonl_trace_as_episode(path: Path) -> CanonicalEpisode:
+    bundle = ingest_jsonl_trace(path)
+    return canonical_episode_from_bundle(bundle)
+
+
+def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
+    request = _first_text(bundle.events, "user_request")
+    final_answer = _last_text(bundle.events, "final_answer")
+    verifier_scores = {
+        str(event.payload.get("name", "default")): float(event.payload["score"])
+        for event in bundle.events
+        if event.event_type == "verifier_score" and "score" in event.payload
+    }
+    return CanonicalEpisode(
+        trace_path=bundle.trace_path,
+        request=request,
+        instruction_snapshot=tuple(
+            event.payload for event in bundle.events if event.event_type == "instruction_snapshot"
+        ),
+        tool_calls=_events_of_type(bundle.events, "tool_call"),
+        command_outputs=_events_of_type(bundle.events, "tool_result"),
+        diffs=_events_of_type(bundle.events, "diff"),
+        test_results=_events_of_type(bundle.events, "test_result"),
+        user_corrections=_events_of_type(bundle.events, "user_correction"),
+        subagent_reports=_events_of_type(bundle.events, "subagent_report"),
+        final_answer=final_answer,
+        outcome_labels=tuple(
+            str(event.payload["label"])
+            for event in bundle.events
+            if event.event_type == "outcome_label" and "label" in event.payload
+        ),
+        verifier_scores=verifier_scores,
+    )
+
+
+def _events_of_type(events: tuple[TraceEvent, ...], event_type: str) -> tuple[TraceEvent, ...]:
+    return tuple(event for event in events if event.event_type == event_type)
+
+
+def _first_text(events: tuple[TraceEvent, ...], event_type: str) -> str | None:
+    for event in events:
+        if event.event_type == event_type:
+            return _payload_text(event.payload)
+    return None
+
+
+def _last_text(events: tuple[TraceEvent, ...], event_type: str) -> str | None:
+    found = None
+    for event in events:
+        if event.event_type == event_type:
+            found = _payload_text(event.payload)
+    return found
+
+
+def _payload_text(payload: dict[str, Any]) -> str | None:
+    for key in ("content", "text", "summary"):
+        if key in payload:
+            return str(payload[key])
+    return None
