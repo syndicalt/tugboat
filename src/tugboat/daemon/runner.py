@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
+from tugboat.db import Store
+from tugboat.paths import sidecar_dir
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,15 @@ def discover_trace_jobs(
                 if trace_key in registry:
                     skipped += 1
                     continue
-                queue.enqueue(kind="trace_audit", payload={"trace_path": str(path)}, now=now)
+                payload = {"trace_path": str(path)}
+                job = queue.enqueue(kind="trace_audit", payload=payload, now=now)
+                with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                    store.record_daemon_job(
+                        job_id=str(job.id),
+                        repo_path=repo,
+                        state=job.state.value,
+                        payload=payload,
+                    )
                 registry.add(trace_key)
                 discovered += 1
     _write_discovered_traces(repo, registry)

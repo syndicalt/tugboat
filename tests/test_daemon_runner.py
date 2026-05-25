@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +30,26 @@ def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
         assert job is not None
         assert job.kind == "trace_audit"
         assert job.payload["trace_path"] == str(trace_dir / "episode.jsonl")
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        ledger_job = connection.execute(
+            """
+            SELECT job_id, repo_path, state, payload_json, audit_event_sequence
+            FROM daemon_jobs
+            """
+        ).fetchone()
+        event_type = connection.execute(
+            "SELECT event_type FROM audit_events WHERE sequence = ?",
+            (ledger_job[4],),
+        ).fetchone()[0]
+
+    assert ledger_job[:4] == (
+        "1",
+        str(tmp_path),
+        "queued",
+        json.dumps({"trace_path": str(trace_dir / "episode.jsonl")}, sort_keys=True),
+    )
+    assert ledger_job[4] is not None
+    assert event_type == "daemon_job.recorded"
 
 
 def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueue(

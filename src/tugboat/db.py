@@ -792,6 +792,40 @@ class Store:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def record_daemon_job(
+        self,
+        *,
+        job_id: str,
+        repo_path: Path,
+        state: str,
+        payload: dict[str, Any],
+    ) -> int:
+        event = self.append_audit_event(
+            "daemon_job.recorded",
+            {
+                "job_id": job_id,
+                "repo": str(repo_path),
+                "state": state,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              job_id, repo_path, state, payload_json, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                job_id,
+                str(repo_path),
+                state,
+                json.dumps(payload, sort_keys=True),
+                event.sequence,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def record_mcp_call(
         self,
         *,
