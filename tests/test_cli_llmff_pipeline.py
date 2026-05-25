@@ -107,6 +107,38 @@ llmff:
     assert (run_dir / "audit.raw.json").exists()
 
 
+def test_audit_rejects_trace_with_secret_before_llmff_execution(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        '{"type":"tool_result","output":"OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx"}\n',
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "secret_detected"
+    assert audit["edit_warranted"] is False
+    assert not (run_dir / "audit.raw.json").exists()
+
+
 def test_propose_consumes_real_llmff_file_backed_candidate_output(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

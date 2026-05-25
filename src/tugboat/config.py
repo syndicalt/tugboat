@@ -26,6 +26,13 @@ def _as_instruction_file(raw: dict[str, Any]) -> InstructionFilePolicy:
     )
 
 
+def _as_non_negative_days(raw: Any, field_name: str) -> int:
+    days = int(raw)
+    if days < 0:
+        raise ValueError(f"{field_name} must be non-negative")
+    return days
+
+
 def load_policy(repo: Path) -> Policy:
     path = repo / ".sidecar" / "policy.yaml"
     if not path.exists():
@@ -34,6 +41,7 @@ def load_policy(repo: Path) -> Policy:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     auto_apply = raw.get("auto_apply", {}) or {}
     llmff = raw.get("llmff", {}) or {}
+    retention = raw.get("retention", {}) or {}
     entries = tuple(_as_instruction_file(item) for item in raw.get("instruction_files", []))
 
     allowed_manifest_hashes = llmff.get(
@@ -52,4 +60,12 @@ def load_policy(repo: Path) -> Policy:
         llmff_require_inspect=bool(llmff.get("require_inspect", True)),
         llmff_allow_network=bool(llmff.get("allow_network", False)),
         allowed_manifest_hashes=tuple(str(item) for item in allowed_manifest_hashes),
+        raw_traces_retention_days=_as_non_negative_days(
+            retention.get("raw_traces_days", Policy().raw_traces_retention_days),
+            "retention.raw_traces_days",
+        ),
+        checkpoints_retention_days=_as_non_negative_days(
+            retention.get("checkpoints_days", Policy().checkpoints_retention_days),
+            "retention.checkpoints_days",
+        ),
     )

@@ -8,6 +8,7 @@ from typing import Any
 
 from tugboat.llmff.contracts import InspectPolicyError, InspectResult, LlmffRunner, RunResult
 from tugboat.models import Policy
+from tugboat.security.secrets import scan_path
 
 
 class CheckpointMismatchError(RuntimeError):
@@ -101,6 +102,9 @@ class LlmffRunSupervisor:
             capture_output=True,
             text=True,
         )
+        for path in (trace_path, events_path, actual_checkpoint_path, *outputs.values()):
+            if path.exists():
+                scan_path(path)
         failure_kind, failure_message = (None, None)
         if completed.returncode != 0:
             failure_kind, failure_message = _last_run_failure(events_path)

@@ -5,6 +5,7 @@ from pathlib import Path
 from tugboat.artifacts import validate_report_markdown
 from tugboat.paths import runs_dir
 from tugboat.policy.gate import CandidatePatch, PolicyDecision
+from tugboat.security.secrets import SecretScanError, scan_text
 
 
 def write_report(
@@ -35,6 +36,9 @@ def write_report(
         ]
     )
     validate_report_markdown(text)
+    findings = scan_text(report_path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
     report_path.write_text(text, encoding="utf-8")
     return report_path
 

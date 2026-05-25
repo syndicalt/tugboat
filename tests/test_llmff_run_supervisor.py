@@ -8,6 +8,7 @@ import pytest
 
 from tugboat.llmff.runner import CheckpointMismatchError, OutputPathError, run_manifest
 from tugboat.models import Policy
+from tugboat.security.secrets import SecretScanError
 
 
 def test_run_manifest_invokes_subprocess_with_file_backed_streams(
@@ -246,4 +247,28 @@ def test_run_manifest_rejects_outputs_outside_run_dir(tmp_path: Path):
             retry_attempts=2,
             retry_backoff_ms=250,
             output_paths={"audit_report": tmp_path / "outside.json"},
+        )
+
+
+def test_run_manifest_rejects_secret_in_checkpoint(monkeypatch, tmp_path: Path):
+    def fake_run(*args, **kwargs):
+        checkpoint_path = Path(args[0][args[0].index("--checkpoint") + 1])
+        checkpoint_path.write_text(
+            json.dumps({"token": "ghp_abcdefghijklmnopqrstuvwx"}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        run_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
         )

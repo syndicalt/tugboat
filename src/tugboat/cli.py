@@ -19,6 +19,7 @@ from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
 from tugboat.report.service import write_report
+from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.ingest import ingest_jsonl_trace
 
 
@@ -106,6 +107,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = new_run_dir(repo)
         shutil.copyfile(trace, run_dir / "trace-input.jsonl")
         _write_instruction_snapshot(repo, run_dir)
+        try:
+            scan_path(run_dir / "trace-input.jsonl")
+            scan_path(run_dir / "instruction-snapshot")
+        except SecretScanError as error:
+            write_audit(
+                run_dir,
+                {
+                    "audit_id": 0,
+                    "edit_warranted": False,
+                    "evidence_refs": [],
+                    "failure_class": "secret_detected",
+                    "severity": "critical",
+                    "confidence": 1.0,
+                    "secret_findings": [
+                        {
+                            "path": finding.path,
+                            "line_number": finding.line_number,
+                            "kind": finding.kind,
+                        }
+                        for finding in error.findings
+                    ],
+                },
+            )
+            print("audit blocked: secret detected")
+            return 1
         manifests = materialize_manifests(repo)
         if not manifests_are_allowed_by_policy(manifests, policy):
             print("manifest hash is not allowed by policy")

@@ -7,6 +7,7 @@ from pathlib import Path
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.paths import runs_dir
 from tugboat.policy.gate import CandidatePatch
+from tugboat.security.secrets import scan_text
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,11 @@ def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> Candi
     run_dir.mkdir(parents=True, exist_ok=True)
     diff_path = run_dir / "candidate.diff"
     json_path = run_dir / "candidate.json"
+    findings = scan_text(diff_path.as_posix(), candidate.diff)
+    if findings:
+        from tugboat.security.secrets import SecretScanError
+
+        raise SecretScanError(findings)
     diff_path.write_text(candidate.diff, encoding="utf-8")
     artifact = {"schema_version": SCHEMA_VERSION, **candidate.to_json_dict()}
     validate_json_artifact("candidate.json", artifact)

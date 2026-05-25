@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from tugboat.config import load_policy
 from tugboat.paths import sidecar_dir
 
@@ -10,6 +12,8 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.mode == "proposal_only"
     assert policy.auto_apply_enabled is False
     assert policy.llmff_allow_network is False
+    assert policy.raw_traces_retention_days == 14
+    assert policy.checkpoints_retention_days == 7
     assert [entry.path for entry in policy.instruction_files] == [
         "AGENTS.md",
         "CODEX.md",
@@ -84,6 +88,42 @@ llmff:
     policy = load_policy(tmp_path)
 
     assert policy.allowed_manifest_hashes == ("abc123", "def456")
+
+
+def test_load_policy_yaml_reads_retention_policy(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 30
+  checkpoints_days: 10
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.raw_traces_retention_days == 30
+    assert policy.checkpoints_retention_days == 10
+
+
+def test_load_policy_yaml_rejects_negative_retention_days(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: -1
+  checkpoints_days: 7
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="retention.raw_traces_days"):
+        load_policy(tmp_path)
 
 
 def test_sidecar_dir_is_repo_local(tmp_path: Path):

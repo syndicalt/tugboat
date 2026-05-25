@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from tugboat.eval.service import write_eval_report
 from tugboat.policy.gate import CandidatePatch, PolicyDecision, SourceRef
 from tugboat.propose.service import write_candidate
 from tugboat.report.service import write_report
+from tugboat.security.secrets import SecretScanError
 
 
 def _candidate() -> CandidatePatch:
@@ -83,3 +86,39 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "",
         ]
     )
+
+
+def test_write_candidate_rejects_secret_in_diff(tmp_path: Path):
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="CODEX.md",
+        base_hash="abc123",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx\n",
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+
+    with pytest.raises(SecretScanError, match="openai_api_key"):
+        write_candidate(tmp_path, "run-1", candidate)
+
+
+def test_write_report_rejects_secret_in_rationale(tmp_path: Path):
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="CODEX.md",
+        base_hash="abc123",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        risk_class="instruction_clarification",
+        rationale="Leaked token ghp_abcdefghijklmnopqrstuvwx",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        write_report(
+            tmp_path,
+            "run-1",
+            candidate=candidate,
+            decision=PolicyDecision(True, ()),
+            eval_report_path=tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json",
+        )
