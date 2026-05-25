@@ -346,3 +346,24 @@ def test_apply_class_c_requires_explicit_human_review(tmp_path: Path):
         "class_c_explicit_human_review_required"
     ]
     assert apply_plan["review_actor"] == "alice"
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        review_action = connection.execute(
+            """
+            SELECT candidate_id, actor, action, reason, audit_event_sequence
+            FROM review_actions
+            """
+        ).fetchone()
+        event_type = connection.execute(
+            "SELECT event_type FROM audit_events WHERE sequence = ?",
+            (review_action[4],),
+        ).fetchone()[0]
+
+    assert review_action == (
+        7,
+        "alice",
+        "approved",
+        "class_c_explicit_human_review_required",
+        review_action[4],
+    )
+    assert review_action[4] is not None
+    assert event_type == "review_action.recorded"

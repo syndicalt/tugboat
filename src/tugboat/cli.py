@@ -1059,6 +1059,13 @@ def _write_apply_plan(
                     rollback_command=rollback_command,
                 ),
             )
+        if explicit_human_review and human_review:
+            store.record_review_action(
+                candidate_id=candidate_id,
+                actor=review_actor,
+                action="approved",
+                reason=",".join(decision.review_required_reasons),
+            )
     return path
 
 

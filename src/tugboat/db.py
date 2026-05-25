@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS decisions (
   policy TEXT NOT NULL,
   decision TEXT NOT NULL,
   reason TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  audit_event_sequence INTEGER
 );
 CREATE TABLE IF NOT EXISTS audit_events (
   sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,6 +265,7 @@ class Store:
         connection = sqlite3.connect(path)
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(SCHEMA)
+        _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
         connection.commit()
         return cls(connection)
 
@@ -689,15 +691,52 @@ class Store:
     ) -> int:
         cursor = self.connection.execute(
             """
-            INSERT INTO decisions(candidate_id, actor, policy, decision, reason, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO decisions(
+              candidate_id, actor, policy, decision, reason, created_at, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NULL)
             """,
             (candidate_id, actor, policy, decision, reason, _now()),
         )
         self.connection.commit()
         decision_id = int(cursor.lastrowid)
-        self.append_audit_event("decision.recorded", {"decision_id": decision_id, "candidate_id": candidate_id})
+        event = self.append_audit_event(
+            "decision.recorded",
+            {"decision_id": decision_id, "candidate_id": candidate_id},
+        )
+        self.connection.execute(
+            "UPDATE decisions SET audit_event_sequence = ? WHERE id = ?",
+            (event.sequence, decision_id),
+        )
+        self.connection.commit()
         return decision_id
+
+    def record_review_action(
+        self,
+        *,
+        candidate_id: int,
+        actor: str,
+        action: str,
+        reason: str,
+    ) -> int:
+        event = self.append_audit_event(
+            "review_action.recorded",
+            {
+                "candidate_id": candidate_id,
+                "actor": actor,
+                "action": action,
+                "reason": reason,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO review_actions(candidate_id, actor, action, reason, audit_event_sequence)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (candidate_id, actor, action, reason, event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
 
     def record_mcp_call(
         self,
@@ -889,6 +928,20 @@ class Store:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _jsonl_payloads(path: Path) -> tuple[dict[str, Any], ...]:

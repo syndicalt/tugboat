@@ -67,6 +67,29 @@ def test_audit_event_update_is_not_supported(tmp_path: Path):
             store.update_audit_event(event.sequence, {"event_type": "tampered"})
 
 
+def test_insert_decision_stores_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        decision_id = store.insert_decision(
+            candidate_id=7,
+            actor="tugboat",
+            policy="deterministic_policy_gate",
+            decision="needs_review",
+            reason="policy passed",
+        )
+        row = store.connection.execute(
+            """
+            SELECT decisions.id, decisions.audit_event_sequence, audit_events.event_type
+            FROM decisions
+            JOIN audit_events ON audit_events.sequence = decisions.audit_event_sequence
+            WHERE decisions.id = ?
+            """,
+            (decision_id,),
+        ).fetchone()
+
+    assert row == (decision_id, row[1], "decision.recorded")
+    assert row[1] is not None
+
+
 def test_store_can_be_used_as_context_manager(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         store.append_audit_event("run.created", {"run_id": "run-1"})
