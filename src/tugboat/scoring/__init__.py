@@ -29,7 +29,7 @@ def score_episode(episode: Any) -> tuple[ScoreOutcome, ...]:
                     evidence=evidence,
                 )
             )
-        elif event_type in {"human_decision", "human_label", "human_review"}:
+        elif event_type in {"human_decision", "human_label", "human_review", "outcome_label"}:
             human_label = str(_field(event, "label") or _field(event, "status")).lower()
             if human_label in {"accepted", "accept", "approved", "approve"}:
                 outcomes.append(
@@ -46,6 +46,17 @@ def score_episode(episode: Any) -> tuple[ScoreOutcome, ...]:
                         plugin="human",
                         label="human-rejected",
                         metrics={"rejected": 1},
+                        evidence=evidence,
+                    )
+                )
+        elif event_type == "verifier_score":
+            score = _verifier_score(event)
+            if score < 0.5:
+                outcomes.append(
+                    ScoreOutcome(
+                        plugin="verifier",
+                        label="verifier-failed",
+                        metrics={"score_percent": int(score * 100)},
                         evidence=evidence,
                     )
                 )
@@ -109,6 +120,9 @@ _CANONICAL_EVENT_GROUPS = (
     "policy_events",
     "user_corrections",
     "subagent_reports",
+    "final_answer_events",
+    "outcome_label_events",
+    "verifier_score_events",
 )
 
 
@@ -171,6 +185,14 @@ def _severity_score(severity: str) -> int:
         "critical": 4,
         "blocker": 4,
     }.get(severity, 0)
+
+
+def _verifier_score(event: dict[str, Any]) -> float:
+    value = _field(event, "score")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _score_user_correction_recurrence(events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:

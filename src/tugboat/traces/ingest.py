@@ -85,11 +85,13 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
         subagent_reports=_events_of_type(bundle.events, "subagent_report"),
         final_answer_events=_events_of_type(bundle.events, "final_answer"),
         final_answer=final_answer,
+        outcome_label_events=_events_of_type(bundle.events, "outcome_label"),
         outcome_labels=tuple(
             str(event.payload["label"])
             for event in bundle.events
             if event.event_type == "outcome_label" and "label" in event.payload
         ),
+        verifier_score_events=_events_of_type(bundle.events, "verifier_score"),
         verifier_scores=verifier_scores,
     )
 

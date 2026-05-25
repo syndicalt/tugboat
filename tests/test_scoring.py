@@ -141,3 +141,26 @@ def test_scoring_accepts_canonical_episode_objects(tmp_path):
 
     assert outcomes[0].label == "failed-tests"
     assert outcomes[0].evidence[0].startswith("ev_")
+
+
+def test_scoring_uses_canonical_outcome_label_and_verifier_evidence(tmp_path):
+    trace = tmp_path / "episode.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                '{"type":"outcome_label","label":"rejected"}',
+                '{"type":"verifier_score","name":"governance","score":0.25}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    episode = ingest_jsonl_trace_as_episode(trace)
+
+    outcomes = score_episode(episode)
+
+    assert [(outcome.plugin, outcome.label, outcome.metrics) for outcome in outcomes] == [
+        ("human", "human-rejected", {"rejected": 1}),
+        ("verifier", "verifier-failed", {"score_percent": 25}),
+    ]
+    assert all(outcome.evidence[0].startswith("ev_") for outcome in outcomes)

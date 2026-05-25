@@ -37,7 +37,9 @@ class CanonicalEpisode:
     subagent_reports: tuple[TraceEvent, ...]
     final_answer_events: tuple[TraceEvent, ...]
     final_answer: str | None
+    outcome_label_events: tuple[TraceEvent, ...]
     outcome_labels: tuple[str, ...]
+    verifier_score_events: tuple[TraceEvent, ...]
     verifier_scores: dict[str, float]
 
     def redacted_events(self) -> tuple[TraceEvent, ...]:
@@ -51,6 +53,8 @@ class CanonicalEpisode:
             *self.user_corrections,
             *self.subagent_reports,
             *self.final_answer_events,
+            *self.outcome_label_events,
+            *self.verifier_score_events,
         )
         return tuple(
             TraceEvent(

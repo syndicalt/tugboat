@@ -90,7 +90,9 @@ def test_ingest_jsonl_trace_builds_canonical_episode(tmp_path: Path):
     assert episode.user_corrections[0].payload["content"] == "You skipped regression tests"
     assert episode.subagent_reports[0].payload["agent"] == "reviewer"
     assert episode.final_answer == "Fixed"
+    assert episode.outcome_label_events[0].payload["label"] == "rejected"
     assert episode.outcome_labels == ("rejected",)
+    assert episode.verifier_score_events[0].payload["name"] == "governance"
     assert episode.verifier_scores == {"governance": 0.25}
 
 
