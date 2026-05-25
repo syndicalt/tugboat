@@ -10,6 +10,7 @@ from typing import Any
 
 from tugboat.models import IndexResult
 from tugboat.policy.gate import CandidatePatch
+from tugboat.traces.schema import TraceBundle
 
 
 SCHEMA = """
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS trace_events (
   episode_id INTEGER,
   evidence_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
+  line_number INTEGER NOT NULL,
   payload_json TEXT NOT NULL,
   audit_event_sequence INTEGER
 );
@@ -338,6 +340,61 @@ class Store:
         )
         self.connection.commit()
         self.append_audit_event("run.recorded", {"run_id": run_id, "stage": stage, "status": status})
+
+    def record_trace_episode(self, *, repo: Path, bundle: TraceBundle) -> int:
+        summary_hash = hashlib.sha256(
+            json.dumps(
+                [event.evidence_id for event in bundle.events],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO episodes(repo_path, trace_path, started_at, outcome, summary_hash)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (str(repo), str(bundle.trace_path), _now(), "captured", summary_hash),
+        )
+        episode_id = int(cursor.lastrowid)
+        self.connection.commit()
+        self.append_audit_event(
+            "episode.recorded",
+            {
+                "episode_id": episode_id,
+                "repo": str(repo),
+                "trace_path": str(bundle.trace_path),
+                "events": len(bundle.events),
+            },
+        )
+        for event in bundle.events:
+            audit_event = self.append_audit_event(
+                "trace_event.recorded",
+                {
+                    "episode_id": episode_id,
+                    "evidence_id": event.evidence_id,
+                    "event_type": event.event_type,
+                    "line_number": event.line_number,
+                },
+            )
+            self.connection.execute(
+                """
+                INSERT INTO trace_events(
+                  episode_id, evidence_id, event_type, line_number, payload_json, audit_event_sequence
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    episode_id,
+                    event.evidence_id,
+                    event.event_type,
+                    event.line_number,
+                    json.dumps(event.payload, sort_keys=True),
+                    audit_event.sequence,
+                ),
+            )
+        self.connection.commit()
+        return episode_id
 
     def insert_audit(
         self,

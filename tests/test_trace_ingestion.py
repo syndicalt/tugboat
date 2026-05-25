@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tugboat.db import Store
+from tugboat.paths import sidecar_dir
 from tugboat.traces.ingest import ingest_jsonl_trace, ingest_jsonl_trace_as_episode
 
 
@@ -105,3 +107,41 @@ def test_canonical_episode_exposes_redacted_events_for_model_payloads(tmp_path: 
         "type": "tool_result",
         "output": "OPENAI_API_KEY=[REDACTED:openai_api_key]",
     }
+
+
+def test_store_records_canonical_episode_and_trace_events_with_audit_reachability(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    trace_path = repo / "episode.jsonl"
+    rows = [
+        {"type": "user_request", "content": "Fix bug"},
+        {"type": "tool_call", "tool": "pytest", "args": ["-q"]},
+        {"type": "tool_result", "tool": "pytest", "exit_code": 0},
+    ]
+    _write_jsonl(trace_path, rows)
+    bundle = ingest_jsonl_trace(trace_path)
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
+        episode_count = store.count("episodes")
+        trace_event_rows = store.connection.execute(
+            """
+            SELECT t.evidence_id, t.event_type, a.event_type, a.payload_json
+            FROM trace_events t
+            JOIN audit_events a ON a.sequence = t.audit_event_sequence
+            ORDER BY t.line_number
+            """
+        ).fetchall()
+
+    assert episode_id == 1
+    assert episode_count == 1
+    assert [row[0] for row in trace_event_rows] == [event.evidence_id for event in bundle.events]
+    assert [row[1] for row in trace_event_rows] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+    ]
+    assert {row[2] for row in trace_event_rows} == {"trace_event.recorded"}
+    assert json.loads(trace_event_rows[0][3])["episode_id"] == episode_id
