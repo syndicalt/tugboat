@@ -106,6 +106,7 @@ _CANONICAL_EVENT_GROUPS = (
     "command_outputs",
     "diffs",
     "test_results",
+    "policy_events",
     "user_corrections",
     "subagent_reports",
 )

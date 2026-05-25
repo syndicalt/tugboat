@@ -31,6 +31,7 @@ class CanonicalEpisode:
     command_outputs: tuple[TraceEvent, ...]
     diffs: tuple[TraceEvent, ...]
     test_results: tuple[TraceEvent, ...]
+    policy_events: tuple[TraceEvent, ...]
     user_corrections: tuple[TraceEvent, ...]
     subagent_reports: tuple[TraceEvent, ...]
     final_answer: str | None
@@ -43,6 +44,7 @@ class CanonicalEpisode:
             *self.command_outputs,
             *self.diffs,
             *self.test_results,
+            *self.policy_events,
             *self.user_corrections,
             *self.subagent_reports,
         )

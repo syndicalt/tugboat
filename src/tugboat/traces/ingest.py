@@ -75,6 +75,11 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
         command_outputs=_events_of_type(bundle.events, "tool_result"),
         diffs=_events_of_type(bundle.events, "diff"),
         test_results=_events_of_type(bundle.events, "test_result"),
+        policy_events=tuple(
+            event
+            for event in bundle.events
+            if event.event_type in {"policy_violation", "policy_denial", "policy_failure"}
+        ),
         user_corrections=_events_of_type(bundle.events, "user_correction"),
         subagent_reports=_events_of_type(bundle.events, "subagent_report"),
         final_answer=final_answer,

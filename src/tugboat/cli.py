@@ -564,7 +564,15 @@ def _scored_audit_payload(bundle) -> dict[str, object]:
         "confidence": 0.75,
         "scoring": [_score_outcome_json(outcome) for outcome in outcomes],
     }
-    if any(outcome.label == "failed-tests" for outcome in outcomes):
+    if any(outcome.label == "policy-violation" for outcome in outcomes):
+        payload.update(
+            {
+                "failure_class": "unsafe_instruction_pressure",
+                "severity": "critical",
+                "confidence": 0.90,
+            }
+        )
+    elif any(outcome.label == "failed-tests" for outcome in outcomes):
         payload.update(
             {
                 "failure_class": "agent_ignored_instruction",
@@ -578,14 +586,6 @@ def _scored_audit_payload(bundle) -> dict[str, object]:
                 "failure_class": "user_preference_not_encoded",
                 "severity": "medium",
                 "confidence": 0.80,
-            }
-        )
-    elif any(outcome.label == "policy-violation" for outcome in outcomes):
-        payload.update(
-            {
-                "failure_class": "unsafe_instruction_pressure",
-                "severity": "critical",
-                "confidence": 0.90,
             }
         )
     return payload

@@ -70,6 +70,7 @@ def test_ingest_jsonl_trace_builds_canonical_episode(tmp_path: Path):
         {"type": "tool_result", "tool": "pytest", "exit_code": 1, "output": "failed"},
         {"type": "diff", "path": "CODEX.md", "patch": "@@ +Use tests"},
         {"type": "test_result", "suite": "unit", "passed": False},
+        {"type": "policy_violation", "policy": "secrets", "status": "failed"},
         {"type": "user_correction", "content": "You skipped regression tests"},
         {"type": "subagent_report", "agent": "reviewer", "summary": "missing test"},
         {"type": "final_answer", "content": "Fixed"},
@@ -85,6 +86,7 @@ def test_ingest_jsonl_trace_builds_canonical_episode(tmp_path: Path):
     assert episode.command_outputs[0].payload["exit_code"] == 1
     assert episode.diffs[0].payload["path"] == "CODEX.md"
     assert episode.test_results[0].payload["passed"] is False
+    assert episode.policy_events[0].payload["policy"] == "secrets"
     assert episode.user_corrections[0].payload["content"] == "You skipped regression tests"
     assert episode.subagent_reports[0].payload["agent"] == "reviewer"
     assert episode.final_answer == "Fixed"
