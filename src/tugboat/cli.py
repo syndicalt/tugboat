@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from tugboat.evals import run_offline_eval_suite
 from tugboat.harness.checks import check_harness_legibility, generate_harness_report
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
+from tugboat.mcp import run_stdio_server
 from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
@@ -60,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("--repo", required=True)
     rollback.add_argument("--decision", required=True)
+
+    mcp = subcommands.add_parser("mcp")
+    mcp_subcommands = mcp.add_subparsers(dest="mcp_command", required=True)
+    mcp_subcommands.add_parser("stdio")
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -378,6 +384,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"rollback plan: {rollback_path}")
         return 0
+
+    if args.command == "mcp" and args.mcp_command == "stdio":
+        return run_stdio_server(sys.stdin, sys.stdout)
 
     if args.command == "report":
         repo = Path(args.repo)

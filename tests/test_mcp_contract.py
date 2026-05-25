@@ -7,10 +7,16 @@ import pytest
 
 from tugboat.db import Store
 from tugboat.mcp import (
+    handle_jsonrpc_request,
+    list_mcp_tools,
     tugboat_candidate,
     tugboat_harness_findings,
     tugboat_instruction_graph,
     tugboat_latest_runs,
+    tugboat_record_episode,
+    tugboat_request_audit,
+    tugboat_request_eval,
+    tugboat_request_proposal,
     tugboat_run_report,
     tugboat_status,
 )
@@ -206,6 +212,97 @@ def test_candidate_returns_summary_and_diff_ref_without_raw_diff(tmp_path: Path)
 def test_repo_must_be_local_path():
     with pytest.raises(ValueError, match="local repo path"):
         tugboat_status("https://example.com/repo.git")
+
+
+def test_write_intent_tools_create_request_artifacts_without_mutating_instructions(tmp_path: Path):
+    repo = tmp_path
+    codex = repo / "CODEX.md"
+    original = "# Rules\n\nUse tests.\n"
+    codex.write_text(original, encoding="utf-8")
+
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","text":"Fix bug"}\n'
+        '{"type":"user_correction","text":"Need regression test"}\n',
+    )
+    audit_request = tugboat_request_audit(repo, episode["trace_id"])
+    proposal_request = tugboat_request_proposal(repo, "audit-7")
+    eval_request = tugboat_request_eval(repo, "candidate-9", "all")
+
+    assert episode["trace_id"].startswith("mcp-trace-")
+    assert episode["artifact_ref"].startswith(".sidecar/mcp/episodes/")
+    assert audit_request == {
+        "request_id": audit_request["request_id"],
+        "kind": "audit",
+        "state": "requested",
+        "artifact_ref": audit_request["artifact_ref"],
+    }
+    assert proposal_request["kind"] == "proposal"
+    assert eval_request["kind"] == "eval"
+    assert json.loads((repo / eval_request["artifact_ref"]).read_text(encoding="utf-8"))[
+        "candidate_id"
+    ] == "candidate-9"
+    assert codex.read_text(encoding="utf-8") == original
+    assert [event["tool"] for event in _mcp_events(repo)[-4:]] == [
+        "tugboat_record_episode",
+        "tugboat_request_audit",
+        "tugboat_request_proposal",
+        "tugboat_request_eval",
+    ]
+
+
+def test_write_intent_episode_rejects_secret_payloads(tmp_path: Path):
+    with pytest.raises(ValueError, match="secret"):
+        tugboat_record_episode(
+            tmp_path,
+            '{"type":"user_request","text":"sk-thissecretkeyvalue1234567890"}\n',
+        )
+
+
+def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
+    repo = tmp_path
+    tools = list_mcp_tools()
+
+    assert "tugboat_status" in [tool["name"] for tool in tools]
+    assert "tugboat_request_audit" in [tool["name"] for tool in tools]
+    assert handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {},
+        }
+    ) == {"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}}
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_status",
+                "arguments": {"repo": str(repo)},
+            },
+        }
+    )
+
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == 2
+    assert response["result"]["content"][0]["type"] == "json"
+    assert response["result"]["content"][0]["json"]["mode"] == "proposal_only"
+
+
+def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "tugboat_apply", "arguments": {"repo": str(tmp_path)}},
+        }
+    )
+
+    assert response["error"]["code"] == -32601
+    assert "unknown MCP tool" in response["error"]["message"]
 
 
 def _mcp_events(repo: Path) -> list[dict[str, object]]:

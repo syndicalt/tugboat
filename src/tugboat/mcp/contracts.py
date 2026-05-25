@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -11,6 +12,7 @@ from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
 from tugboat.paths import runs_dir, sidecar_dir
 from tugboat.security.redaction import redact_payload, redact_text
+from tugboat.security.secrets import SecretScanError, scan_path
 
 
 T = TypeVar("T")
@@ -188,6 +190,118 @@ def tugboat_candidate(repo: str | Path, candidate_id: int) -> dict[str, Any]:
     )
 
 
+def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def write() -> dict[str, Any]:
+        trace_id = f"mcp-trace-{_stamp()}"
+        path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(trace_jsonl, encoding="utf-8")
+        try:
+            scan_path(path)
+        except SecretScanError as error:
+            path.unlink(missing_ok=True)
+            raise ValueError("secret detected in episode payload") from error
+        return {
+            "trace_id": trace_id,
+            "artifact_ref": _relative_ref(repo_path, path),
+        }
+
+    return _audit_call(
+        repo_path,
+        "tugboat_record_episode",
+        {"trace_jsonl": "[artifact-payload]"},
+        write,
+    )
+
+
+def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
+    return _write_request_artifact(
+        repo,
+        tool="tugboat_request_audit",
+        kind="audit",
+        payload={"trace_id": trace_id},
+    )
+
+
+def tugboat_request_proposal(repo: str | Path, audit_id: str) -> dict[str, Any]:
+    return _write_request_artifact(
+        repo,
+        tool="tugboat_request_proposal",
+        kind="proposal",
+        payload={"audit_id": audit_id},
+    )
+
+
+def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dict[str, Any]:
+    return _write_request_artifact(
+        repo,
+        tool="tugboat_request_eval",
+        kind="eval",
+        payload={"candidate_id": candidate_id, "suite": suite},
+    )
+
+
+def list_mcp_tools() -> list[dict[str, Any]]:
+    return [
+        {"name": name, "mutates_instructions": False}
+        for name in sorted(MCP_TOOLS)
+    ]
+
+
+def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
+    request_id = request.get("id")
+    method = request.get("method")
+    try:
+        if method == "tools/list":
+            return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": list_mcp_tools()}}
+        if method == "tools/call":
+            params = request.get("params", {})
+            if not isinstance(params, dict):
+                raise ValueError("params must be an object")
+            name = str(params.get("name", ""))
+            arguments = params.get("arguments", {})
+            if not isinstance(arguments, dict):
+                raise ValueError("arguments must be an object")
+            tool = MCP_TOOLS.get(name)
+            if tool is None:
+                return _jsonrpc_error(request_id, -32601, f"unknown MCP tool: {name}")
+            result = tool(**arguments)
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"content": [{"type": "json", "json": result}]},
+            }
+        return _jsonrpc_error(request_id, -32601, f"unknown JSON-RPC method: {method}")
+    except Exception as error:
+        return _jsonrpc_error(request_id, -32000, str(error))
+
+
+MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
+    "tugboat_candidate": tugboat_candidate,
+    "tugboat_harness_findings": tugboat_harness_findings,
+    "tugboat_instruction_graph": tugboat_instruction_graph,
+    "tugboat_latest_runs": tugboat_latest_runs,
+    "tugboat_record_episode": tugboat_record_episode,
+    "tugboat_request_audit": tugboat_request_audit,
+    "tugboat_request_eval": tugboat_request_eval,
+    "tugboat_request_proposal": tugboat_request_proposal,
+    "tugboat_run_report": tugboat_run_report,
+    "tugboat_status": tugboat_status,
+}
+
+
+def run_stdio_server(input_stream, output_stream) -> int:
+    for line in input_stream:
+        if not line.strip():
+            continue
+        response = handle_jsonrpc_request(json.loads(line))
+        output_stream.write(json.dumps(response, sort_keys=True) + "\n")
+        output_stream.flush()
+    return 0
+
+
 def _audit_call(
     repo: Path,
     tool: str,
@@ -211,6 +325,36 @@ def _audit_call(
                     "status": status,
                 },
             )
+
+
+def _write_request_artifact(
+    repo: str | Path,
+    *,
+    tool: str,
+    kind: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def write() -> dict[str, Any]:
+        request_id = f"mcp-{kind}-{_stamp()}"
+        path = sidecar_dir(repo_path) / "mcp" / "requests" / f"{request_id}.json"
+        artifact = {
+            "request_id": request_id,
+            "kind": kind,
+            "state": "requested",
+            **payload,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return {
+            "request_id": request_id,
+            "kind": kind,
+            "state": "requested",
+            "artifact_ref": _relative_ref(repo_path, path),
+        }
+
+    return _audit_call(repo_path, tool, payload, write)
 
 
 def _resolve_local_repo(repo: str | Path) -> Path:
@@ -288,3 +432,11 @@ def _summarize_text(text: str, max_length: int = 240) -> str:
     if len(redacted) <= max_length:
         return redacted
     return redacted[: max_length - 3].rstrip() + "..."
+
+
+def _stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _jsonrpc_error(request_id: object, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}

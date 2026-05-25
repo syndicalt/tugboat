@@ -1,19 +1,33 @@
 from __future__ import annotations
 
 from tugboat.mcp.contracts import (
+    handle_jsonrpc_request,
+    list_mcp_tools,
+    run_stdio_server,
     tugboat_candidate,
     tugboat_harness_findings,
     tugboat_instruction_graph,
     tugboat_latest_runs,
+    tugboat_record_episode,
+    tugboat_request_audit,
+    tugboat_request_eval,
+    tugboat_request_proposal,
     tugboat_run_report,
     tugboat_status,
 )
 
 __all__ = [
+    "handle_jsonrpc_request",
+    "list_mcp_tools",
+    "run_stdio_server",
     "tugboat_candidate",
     "tugboat_harness_findings",
     "tugboat_instruction_graph",
     "tugboat_latest_runs",
+    "tugboat_record_episode",
+    "tugboat_request_audit",
+    "tugboat_request_eval",
+    "tugboat_request_proposal",
     "tugboat_run_report",
     "tugboat_status",
 ]

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -49,3 +50,31 @@ def test_cli_module_can_run_audit_from_source_tree(tmp_path: Path):
 
     assert completed.returncode == 0, completed.stderr
     assert "audit run:" in completed.stdout
+
+
+def test_cli_module_can_run_mcp_stdio_from_source_tree(tmp_path: Path):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "tugboat_status",
+            "arguments": {"repo": str(tmp_path)},
+        },
+    }
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "tugboat.cli", "mcp", "stdio"],
+        input=json.dumps(request) + "\n",
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    response = json.loads(completed.stdout)
+    assert response["id"] == 1
+    assert response["result"]["content"][0]["json"]["mode"] == "proposal_only"
