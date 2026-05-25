@@ -12,6 +12,7 @@ from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
+from tugboat.daemon.runner import DaemonLoopConfig, default_trace_dirs, run_daemon_cycle
 from tugboat.daemon.service import DaemonRunConfig, daemon_status, default_kill_switch, run_daemon_once
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
@@ -80,6 +81,13 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_run_once.add_argument("--repo", required=True)
     daemon_run_once.add_argument("--worker-id", default="tugboat-daemon")
     daemon_run_once.add_argument("--lease-seconds", type=int, default=300)
+    daemon_cycle = daemon_subcommands.add_parser("cycle")
+    daemon_cycle.add_argument("--repo", required=True)
+    daemon_cycle.add_argument("--worker-id", default="tugboat-daemon")
+    daemon_cycle.add_argument("--lease-seconds", type=int, default=300)
+    daemon_cycle.add_argument("--max-jobs", type=int, default=1)
+    daemon_cycle.add_argument("--concurrency", type=int, default=1)
+    daemon_cycle.add_argument("--trace-dir", action="append", default=[])
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -425,6 +433,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             DaemonRunConfig(
                 worker_id=args.worker_id,
                 lease_duration=timedelta(seconds=args.lease_seconds),
+                kill_switch=default_kill_switch(repo),
+            ),
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "daemon" and args.daemon_command == "cycle":
+        repo = Path(args.repo)
+        trace_dirs = (
+            tuple(Path(trace_dir) for trace_dir in args.trace_dir)
+            if args.trace_dir
+            else tuple(default_trace_dirs(repo))
+        )
+        result = run_daemon_cycle(
+            repo,
+            DaemonLoopConfig(
+                worker_id=args.worker_id,
+                max_jobs_per_cycle=args.max_jobs,
+                concurrency_limit=args.concurrency,
+                lease_duration=timedelta(seconds=args.lease_seconds),
+                trace_dirs=trace_dirs,
                 kill_switch=default_kill_switch(repo),
             ),
         )

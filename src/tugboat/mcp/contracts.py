@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from typing import Any, TypeVar
 
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
+from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
@@ -320,9 +322,16 @@ def _audit_call(
     read: Callable[[], T],
 ) -> T:
     status = "completed"
+    result: T | None = None
+    event_extra: dict[str, Any] = {}
     try:
         _enforce_mcp_policy(repo, tool)
-        return read()
+        result = read()
+        if isinstance(result, dict):
+            raw_extra = result.pop("_mcp_event", None)
+            if isinstance(raw_extra, dict):
+                event_extra = raw_extra
+        return result
     except ValueError as error:
         if "MCP" in str(error):
             status = "denied"
@@ -339,6 +348,12 @@ def _audit_call(
             "arguments": redact_payload(arguments),
             "status": status,
         }
+        payload.update(redact_payload(event_extra))
+        if not event_extra and isinstance(result, dict):
+            request = _request_audit_summary(result)
+            if request is not None:
+                payload["write_intent"] = True
+                payload["request"] = request
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.record_mcp_call(
                 tool_name=tool,
@@ -370,22 +385,71 @@ def _write_request_artifact(
     def write() -> dict[str, Any]:
         request_id = f"mcp-{kind}-{_stamp()}"
         path = sidecar_dir(repo_path) / "mcp" / "requests" / f"{request_id}.json"
+        repo_policy = _repo_policy_ref(repo_path)
         artifact = {
             "request_id": request_id,
             "kind": kind,
-            "state": "requested",
+            "state": "queued",
+            "write_intent": True,
+            "repo_policy": repo_policy,
             **payload,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        artifact_ref = _relative_ref(repo_path, path)
+        with DaemonQueue.open_sidecar(repo_path) as queue:
+            queue.enqueue(
+                kind=kind,
+                payload={
+                    "request_id": request_id,
+                    "artifact_ref": artifact_ref,
+                    **payload,
+                },
+            )
         return {
             "request_id": request_id,
             "kind": kind,
-            "state": "requested",
-            "artifact_ref": _relative_ref(repo_path, path),
+            "state": "queued",
+            "write_intent": True,
+            "repo_policy": repo_policy,
+            "artifact_ref": artifact_ref,
+            "_mcp_event": {
+                "write_intent": True,
+                "request": {
+                    "request_id": request_id,
+                    "kind": kind,
+                    "state": "queued",
+                    "artifact_ref": artifact_ref,
+                    "repo_policy": repo_policy,
+                },
+            },
         }
 
     return _audit_call(repo_path, tool, payload, write)
+
+
+def _request_audit_summary(result: dict[str, Any]) -> dict[str, Any] | None:
+    required = ("request_id", "kind", "state", "artifact_ref", "repo_policy")
+    if not all(key in result for key in required):
+        return None
+    return redact_payload({key: result[key] for key in required})
+
+
+def _repo_policy_ref(repo: Path) -> dict[str, Any]:
+    path = sidecar_dir(repo) / "policy.yaml"
+    policy = load_policy(repo)
+    if not path.exists():
+        return {
+            "path": ".sidecar/policy.yaml",
+            "version": policy.version,
+            "hash": None,
+        }
+    content = path.read_bytes()
+    return {
+        "path": _relative_ref(repo, path),
+        "version": policy.version,
+        "hash": hashlib.sha256(content).hexdigest(),
+    }
 
 
 def _resolve_local_repo(repo: str | Path) -> Path:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -301,7 +302,9 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
     assert audit_request == {
         "request_id": audit_request["request_id"],
         "kind": "audit",
-        "state": "requested",
+        "state": "queued",
+        "write_intent": True,
+        "repo_policy": audit_request["repo_policy"],
         "artifact_ref": audit_request["artifact_ref"],
     }
     assert proposal_request["kind"] == "proposal"
@@ -316,6 +319,56 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
         "tugboat_request_proposal",
         "tugboat_request_eval",
     ]
+
+
+def test_request_audit_records_policy_tied_write_intent_without_mutating_instructions(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    codex = repo / "CODEX.md"
+    original = "# Rules\n\nUse tests before changing instructions.\n"
+    codex.write_text(original, encoding="utf-8")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    policy_text = f"""
+version: 7
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_request_audit: allow
+""".lstrip()
+    (policy_dir / "policy.yaml").write_text(policy_text, encoding="utf-8")
+
+    result = tugboat_request_audit(repo, "trace-42")
+
+    artifact = json.loads((repo / result["artifact_ref"]).read_text(encoding="utf-8"))
+    assert result["state"] == "queued"
+    assert artifact == {
+        "request_id": result["request_id"],
+        "kind": "audit",
+        "state": "queued",
+        "write_intent": True,
+        "trace_id": "trace-42",
+        "repo_policy": {
+            "path": ".sidecar/policy.yaml",
+            "version": 7,
+            "hash": hashlib.sha256(policy_text.encode("utf-8")).hexdigest(),
+        },
+    }
+    assert codex.read_text(encoding="utf-8") == original
+
+    event = _mcp_events(repo)[-1]
+    assert event["tool"] == "tugboat_request_audit"
+    assert event["status"] == "completed"
+    assert event["write_intent"] is True
+    assert event["request"] == {
+        "request_id": result["request_id"],
+        "kind": "audit",
+        "state": "queued",
+        "artifact_ref": result["artifact_ref"],
+        "repo_policy": artifact["repo_policy"],
+    }
 
 
 def test_write_intent_episode_rejects_secret_payloads(tmp_path: Path):

@@ -108,5 +108,38 @@ def test_daemon_run_once_cli_returns_processed_summary(tmp_path: Path, capsys):
     assert payload["final_state"] == "waiting_review"
 
 
+def test_daemon_cycle_cli_watches_trace_dir_and_reports_discovery(tmp_path: Path, capsys):
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    (trace_dir / "episode.jsonl").write_text(
+        '{"type":"user_request","text":"Keep the runbook current"}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "daemon",
+            "cycle",
+            "--repo",
+            str(tmp_path),
+            "--trace-dir",
+            str(trace_dir),
+            "--max-jobs",
+            "0",
+            "--concurrency",
+            "0",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["trace_discovery"] == {"discovered": 1, "skipped": 0}
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.get_job(1)
+        assert job is not None
+        assert job.kind == "trace_audit"
+        assert job.payload == {"trace_path": str(trace_dir / "episode.jsonl")}
+
+
 def _at(seconds: int) -> datetime:
     return datetime(2026, 1, 1, 0, 0, seconds, tzinfo=timezone.utc)
