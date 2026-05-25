@@ -21,6 +21,7 @@ from tugboat.harness.checks import check_harness_legibility, generate_harness_re
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
+from tugboat.optimization import OptimizationMemory
 from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
@@ -550,6 +551,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         raise RuntimeError("manifest hash is not allowed by policy")
     manifest = next(record.path for record in manifests if record.name == "patch-propose.yaml")
     inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    optimizer_memory_path = _write_optimizer_memory_artifact(repo, run_dir)
     run = run_manifest(
         manifest,
         run_dir=run_dir,
@@ -562,6 +564,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             "instruction_index": run_dir / "instruction-snapshot",
             "drift_clusters": run_dir / "audit.raw.json",
             "optimizer_notes": run_dir / "audit.json",
+            "optimizer_memory": optimizer_memory_path,
             "policy": sidecar_dir(repo) / "policy.yaml",
         },
         output_paths={"candidate_patch": run_dir / "candidate.raw.json"},
@@ -572,6 +575,25 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     if not isinstance(payload, dict):
         raise ValueError("llmff candidate_patch output must be a JSON object")
     return _candidate_from_payload(payload, audit_id=audit_id)
+
+
+def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory.load(store, repo=repo)
+    payload = {
+        "rejected_edits": [
+            {
+                "semantic_fingerprint": record.semantic_fingerprint,
+                "rejection_reason": record.rejection_reason,
+                "source_refs": list(record.source_refs),
+            }
+            for _, record in sorted(memory.rejected_edits.items())
+        ],
+        "slow_update_notes": list(memory.slow_update_notes),
+    }
+    path = run_dir / "optimizer-memory.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
 
 
 def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> CandidatePatch:

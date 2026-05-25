@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from tugboat.cli import main
+from tugboat.db import Store
+from tugboat.paths import sidecar_dir
 
 
 def _write_fake_llmff(path: Path) -> Path:
@@ -210,6 +212,57 @@ llmff:
     assert candidate["rationale"] == "llmff proposed this from audited evidence"
     assert "llmff proposed regression guidance" in diff
     assert (run_dir / "candidate.raw.json").exists()
+
+
+def test_propose_passes_persisted_optimizer_memory_to_llmff(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key="fingerprint-1",
+            payload={
+                "semantic_fingerprint": "fingerprint-1",
+                "rejection_reason": "held_out_not_improved",
+                "source_refs": ["audit:1"],
+            },
+        )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    llmff_inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
+    assert Path(llmff_inputs["optimizer_memory"]) == run_dir / "optimizer-memory.json"
+    optimizer_memory = json.loads((run_dir / "optimizer-memory.json").read_text(encoding="utf-8"))
+    assert optimizer_memory == {
+        "rejected_edits": [
+            {
+                "rejection_reason": "held_out_not_improved",
+                "semantic_fingerprint": "fingerprint-1",
+                "source_refs": ["audit:1"],
+            }
+        ],
+        "slow_update_notes": [],
+    }
 
 
 def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):
