@@ -142,6 +142,35 @@ def test_apply_rejects_prohibited_risk_class(tmp_path: Path):
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "suite_id": "all",
+                "passed": True,
+                "metrics": {
+                    "governance_regressions": 0,
+                    "trigger_score": 0.90,
+                    "held_out_score": 0.80,
+                    "recommendation": "reject",
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_rollback_writes_revert_plan_from_apply_decision(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

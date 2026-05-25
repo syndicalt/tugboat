@@ -155,6 +155,42 @@ def test_policy_gate_rejects_unbalanced_markdown_fences(tmp_path: Path):
     assert "unbalanced_markdown_fence" in decision.reasons
 
 
+def test_policy_gate_rejects_removed_yaml_frontmatter_from_instruction_file(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "---\n"
+        "owner: platform\n"
+        "verification_status: current\n"
+        "---\n"
+        "\n"
+        "# Policy\n"
+        "\n"
+        "Keep this instruction.\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            "----\n"
+            "-owner: platform\n"
+            "-verification_status: current\n"
+            "----\n"
+            "-\n"
+            " # Policy\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("frontmatter_removed",)
+
+
 def test_policy_gate_rejects_removed_governance_constraints(tmp_path: Path):
     base_file = tmp_path / "CODEX.md"
     base_file.write_text(

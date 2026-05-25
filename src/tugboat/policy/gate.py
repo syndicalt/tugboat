@@ -15,6 +15,7 @@ DENIAL_REASON_ORDER = (
     "max_changed_lines_exceeded",
     "markdown_parse_invalid",
     "unbalanced_markdown_fence",
+    "frontmatter_removed",
     "governance_constraint_removed",
     "modal_weakening",
     "new_external_endpoint",
@@ -202,6 +203,8 @@ def _markdown_validation_reasons(base_path: Path, diff: str) -> set[str]:
         reasons.add("markdown_parse_invalid")
     if _has_unbalanced_fenced_block(preview) and not _has_unbalanced_fenced_block(base_text):
         reasons.add("unbalanced_markdown_fence")
+    if _has_yaml_frontmatter(base_text) and not _has_yaml_frontmatter(preview):
+        reasons.add("frontmatter_removed")
     return reasons
 
 
@@ -212,7 +215,7 @@ def _apply_unified_diff(base_text: str, diff: str) -> str | None:
     in_hunk = False
 
     for line in diff.splitlines(keepends=True):
-        if line.startswith(("---", "+++")):
+        if not in_hunk and line.startswith(("---", "+++")):
             continue
         if line.startswith("@@"):
             in_hunk = True
@@ -275,6 +278,13 @@ def _has_unbalanced_fenced_block(text: str) -> bool:
             fence_length = 0
 
     return bool(fence_char)
+
+
+def _has_yaml_frontmatter(text: str) -> bool:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    return any(line.strip() == "---" for line in lines[1:])
 
 
 def _removes_governance_constraint(diff: str, policy: Policy) -> bool:

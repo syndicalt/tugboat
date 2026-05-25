@@ -673,6 +673,7 @@ def _write_apply_plan(
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     if not bool(eval_report["passed"]):
         raise ValueError("eval report did not pass")
+    _assert_eval_acceptance(eval_report)
     explicit_human_review = _requires_explicit_human_review(candidate.risk_class)
     if explicit_human_review and (not human_review or review_actor == "tugboat"):
         raise ValueError("Class C candidates require explicit human review")
@@ -766,6 +767,21 @@ def _write_apply_plan(
 def _requires_explicit_human_review(risk_class: str) -> bool:
     normalized = risk_class.strip().lower().replace("-", "_").replace(" ", "_")
     return normalized in {"c", "class_c", "restricted_policy_change"}
+
+
+def _assert_eval_acceptance(eval_report: dict[str, object]) -> None:
+    metrics = eval_report.get("metrics", {})
+    if not isinstance(metrics, dict):
+        raise ValueError("eval report metrics must be an object")
+    recommendation = metrics.get("recommendation")
+    if recommendation is not None and str(recommendation) != "accept":
+        raise ValueError(f"eval report recommendation was {recommendation}")
+    trigger_score = metrics.get("trigger_score")
+    held_out_score = metrics.get("held_out_score")
+    if trigger_score is None or held_out_score is None:
+        return
+    if float(held_out_score) < float(trigger_score):
+        raise ValueError("held-out eval score did not improve")
 
 
 def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) -> Path:
