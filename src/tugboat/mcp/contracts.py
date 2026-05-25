@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
+from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
 from tugboat.paths import runs_dir, sidecar_dir
@@ -190,6 +191,15 @@ def tugboat_candidate(repo: str | Path, candidate_id: int) -> dict[str, Any]:
     )
 
 
+def tugboat_daemon_status(repo: str | Path) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        return daemon_status(repo_path, kill_switch=default_kill_switch(repo_path))
+
+    return _audit_call(repo_path, "tugboat_daemon_status", {}, read)
+
+
 def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -280,6 +290,7 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
 
 MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_candidate": tugboat_candidate,
+    "tugboat_daemon_status": tugboat_daemon_status,
     "tugboat_harness_findings": tugboat_harness_findings,
     "tugboat_instruction_graph": tugboat_instruction_graph,
     "tugboat_latest_runs": tugboat_latest_runs,

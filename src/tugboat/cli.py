@@ -5,12 +5,14 @@ import json
 import shutil
 import sys
 from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
+from tugboat.daemon.service import DaemonRunConfig, daemon_status, default_kill_switch, run_daemon_once
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite
@@ -66,6 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
     mcp = subcommands.add_parser("mcp")
     mcp_subcommands = mcp.add_subparsers(dest="mcp_command", required=True)
     mcp_subcommands.add_parser("stdio")
+
+    daemon = subcommands.add_parser("daemon")
+    daemon_subcommands = daemon.add_subparsers(dest="daemon_command", required=True)
+    daemon_status_parser = daemon_subcommands.add_parser("status")
+    daemon_status_parser.add_argument("--repo", required=True)
+    daemon_run_once = daemon_subcommands.add_parser("run-once")
+    daemon_run_once.add_argument("--repo", required=True)
+    daemon_run_once.add_argument("--worker-id", default="tugboat-daemon")
+    daemon_run_once.add_argument("--lease-seconds", type=int, default=300)
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -387,6 +398,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "mcp" and args.mcp_command == "stdio":
         return run_stdio_server(sys.stdin, sys.stdout)
+
+    if args.command == "daemon" and args.daemon_command == "status":
+        repo = Path(args.repo)
+        status = daemon_status(repo, kill_switch=default_kill_switch(repo))
+        print(f"queue_path: {status['queue_path']}")
+        print(f"kill_switch_enabled: {str(status['kill_switch_enabled']).lower()}")
+        for state, count in sorted(status["jobs_by_state"].items()):
+            print(f"{state}: {count}")
+        print(f"oldest_queued_job_id: {status['oldest_queued_job_id']}")
+        return 0
+
+    if args.command == "daemon" and args.daemon_command == "run-once":
+        repo = Path(args.repo)
+        result = run_daemon_once(
+            repo,
+            DaemonRunConfig(
+                worker_id=args.worker_id,
+                lease_duration=timedelta(seconds=args.lease_seconds),
+                kill_switch=default_kill_switch(repo),
+            ),
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
 
     if args.command == "report":
         repo = Path(args.repo)

@@ -116,6 +116,12 @@ class DaemonQueue:
         self.path = path
         self.connection = connection
 
+    def __enter__(self) -> "DaemonQueue":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
+
     @classmethod
     def open_sidecar(cls, root: Path) -> "DaemonQueue":
         return cls.open(root / ".sidecar" / "daemon.sqlite")
