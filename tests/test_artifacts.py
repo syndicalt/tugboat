@@ -66,9 +66,13 @@ def test_validate_eval_report_artifact_accepts_current_schema():
         {
             "schema_version": 1,
             "candidate_id": 1,
+            "governance_passed": True,
+            "held_out_score": 1.0,
             "metrics": {"governance_regressions": 0},
             "passed": True,
+            "recommendation": "accept",
             "suite_id": "governance-regression",
+            "trigger_score": 1.0,
         },
     )
 
@@ -89,9 +93,13 @@ def test_validate_json_artifact_rejects_additional_properties():
             {
                 "schema_version": 1,
                 "candidate_id": 1,
+                "governance_passed": True,
+                "held_out_score": 1.0,
                 "metrics": {},
                 "passed": True,
+                "recommendation": "accept",
                 "suite_id": "all",
+                "trigger_score": 1.0,
                 "raw_model_payload": "must not appear",
             },
         )

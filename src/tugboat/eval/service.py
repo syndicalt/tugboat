@@ -16,6 +16,10 @@ def write_eval_report(
     suite_id: str,
     passed: bool,
     metrics: dict[str, Any],
+    trigger_score: float,
+    held_out_score: float,
+    governance_passed: bool,
+    recommendation: str,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -23,9 +27,13 @@ def write_eval_report(
     payload = {
         "schema_version": SCHEMA_VERSION,
         "candidate_id": candidate_id,
+        "governance_passed": governance_passed,
+        "held_out_score": held_out_score,
         "metrics": metrics,
         "passed": passed,
+        "recommendation": recommendation,
         "suite_id": suite_id,
+        "trigger_score": trigger_score,
     }
     validate_json_artifact("eval-report.json", payload)
     report_path.write_text(

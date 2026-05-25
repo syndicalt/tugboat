@@ -345,17 +345,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         policy = load_policy(repo)
         passed = True
         metrics = {"governance_regressions": 0}
+        trigger_score = 1.0
+        held_out_score = 1.0
+        governance_passed = True
+        recommendation = "accept"
         policy_decision_payload: dict[str, object] | None = None
         if args.suite == "all" and not (run_dir / "candidate.raw.json").exists():
             offline_report = run_offline_eval_suite(repo, suite_id=args.suite)
             passed = offline_report.passed
-            metrics = {
-                **offline_report.metrics,
-                "trigger_score": offline_report.trigger_score,
-                "held_out_score": offline_report.held_out_score,
-                "governance_passed": offline_report.governance_passed,
-                "recommendation": offline_report.recommendation,
-            }
+            metrics = offline_report.metrics
+            trigger_score = offline_report.trigger_score
+            held_out_score = offline_report.held_out_score
+            governance_passed = offline_report.governance_passed
+            recommendation = offline_report.recommendation
         elif (run_dir / "candidate.raw.json").exists():
             eval_payload, policy_decision_payload = _run_patch_eval(
                 repo,
@@ -368,6 +370,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not isinstance(raw_metrics, dict):
                 raise ValueError("llmff eval_report metrics must be a JSON object")
             metrics = raw_metrics
+            trigger_score = _float_eval_field(eval_payload, metrics, "trigger_score", passed)
+            held_out_score = _float_eval_field(eval_payload, metrics, "held_out_score", passed)
+            governance_passed = _bool_eval_field(
+                eval_payload,
+                metrics,
+                "governance_passed",
+                bool(policy_decision_payload and policy_decision_payload["allowed"]),
+            )
+            recommendation = _str_eval_field(
+                eval_payload,
+                metrics,
+                "recommendation",
+                "accept" if passed and governance_passed else "reject",
+            )
         report_path = write_eval_report(
             repo,
             run_dir.name,
@@ -375,6 +391,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             suite_id=args.suite,
             passed=passed,
             metrics=metrics,
+            trigger_score=trigger_score,
+            held_out_score=held_out_score,
+            governance_passed=governance_passed,
+            recommendation=recommendation,
         )
         if policy_decision_payload is not None:
             (run_dir / "policy-gate.json").write_text(
@@ -942,17 +962,56 @@ def _requires_explicit_human_review(risk_class: str) -> bool:
     return normalized in {"c", "class_c", "restricted_policy_change"}
 
 
+def _float_eval_field(
+    payload: dict[str, object],
+    metrics: dict[str, object],
+    field: str,
+    passed: bool,
+) -> float:
+    value = payload.get(field, metrics.get(field))
+    if value is None:
+        return 1.0 if passed else 0.0
+    return float(value)
+
+
+def _bool_eval_field(
+    payload: dict[str, object],
+    metrics: dict[str, object],
+    field: str,
+    default: bool,
+) -> bool:
+    value = payload.get(field, metrics.get(field))
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _str_eval_field(
+    payload: dict[str, object],
+    metrics: dict[str, object],
+    field: str,
+    default: str,
+) -> str:
+    value = payload.get(field, metrics.get(field))
+    if value is None:
+        return default
+    return str(value)
+
+
 def _assert_eval_acceptance(eval_report: dict[str, object]) -> None:
-    metrics = eval_report.get("metrics", {})
-    if not isinstance(metrics, dict):
-        raise ValueError("eval report metrics must be an object")
-    recommendation = metrics.get("recommendation")
+    recommendation = eval_report.get("recommendation")
     if recommendation is not None and str(recommendation) != "accept":
         raise ValueError(f"eval report recommendation was {recommendation}")
-    trigger_score = metrics.get("trigger_score")
-    held_out_score = metrics.get("held_out_score")
+    trigger_score = eval_report.get("trigger_score")
+    held_out_score = eval_report.get("held_out_score")
     if trigger_score is None or held_out_score is None:
-        return
+        metrics = eval_report.get("metrics", {})
+        if not isinstance(metrics, dict):
+            raise ValueError("eval report metrics must be an object")
+        trigger_score = metrics.get("trigger_score")
+        held_out_score = metrics.get("held_out_score")
+        if trigger_score is None or held_out_score is None:
+            return
     if float(held_out_score) < float(trigger_score):
         raise ValueError("held-out eval score did not improve")
 

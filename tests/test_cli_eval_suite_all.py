@@ -25,10 +25,11 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     assert report["passed"] is True
     assert report["suite_id"] == "all"
-    assert report["metrics"]["trigger_score"] == 1.0
-    assert report["metrics"]["held_out_score"] == 1.0
-    assert report["metrics"]["governance_passed"] is True
-    assert report["metrics"]["recommendation"] == "accept"
+    assert report["trigger_score"] == 1.0
+    assert report["held_out_score"] == 1.0
+    assert report["governance_passed"] is True
+    assert report["recommendation"] == "accept"
+    assert "trigger_score" not in report["metrics"]
 
 
 def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path):
@@ -50,4 +51,4 @@ def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path
     report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     assert report["passed"] is False
     assert report["metrics"]["governance_regressions"] == 1
-    assert report["metrics"]["recommendation"] == "reject"
+    assert report["recommendation"] == "reject"

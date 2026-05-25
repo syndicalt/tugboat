@@ -82,15 +82,23 @@ def test_write_eval_report_writes_json_report(tmp_path: Path):
         suite_id="unit",
         passed=True,
         metrics={"failures": 0, "duration_seconds": 1.25},
+        trigger_score=1.0,
+        held_out_score=1.0,
+        governance_passed=True,
+        recommendation="accept",
     )
 
     assert report_path == tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
     assert json.loads(report_path.read_text(encoding="utf-8")) == {
         "candidate_id": 5,
+        "governance_passed": True,
+        "held_out_score": 1.0,
         "metrics": {"duration_seconds": 1.25, "failures": 0},
         "passed": True,
+        "recommendation": "accept",
         "schema_version": 1,
         "suite_id": "unit",
+        "trigger_score": 1.0,
     }
 
 

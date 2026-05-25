@@ -310,6 +310,8 @@ llmff:
     policy_decision = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     assert eval_report["passed"] is False
     assert eval_report["metrics"] == {"governance_regressions": 1, "held_out_cases": 3}
+    assert eval_report["governance_passed"] is False
+    assert eval_report["recommendation"] == "reject"
     assert policy_decision == {"allowed": False, "reasons": ["held_out_regression"]}
     assert (run_dir / "eval-report.raw.json").exists()
     assert (run_dir / "policy-decision.raw.json").exists()
