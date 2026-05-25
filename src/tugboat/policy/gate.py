@@ -14,6 +14,7 @@ DENIAL_REASON_ORDER = (
     "base_file_outside_repo",
     "base_file_not_allowed",
     "pending_eval_definition_edit",
+    "higher_priority_contradiction",
     "max_changed_lines_exceeded",
     "markdown_parse_invalid",
     "unbalanced_markdown_fence",
@@ -148,6 +149,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("base_file_not_allowed")
     if _is_pending_eval_definition_edit(candidate.base_file, candidate):
         found_reasons.add("pending_eval_definition_edit")
+    if _has_higher_priority_contradiction(repo, policy, candidate):
+        found_reasons.add("higher_priority_contradiction")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
         found_reasons.add("base_hash_mismatch")
     if _changed_line_count(candidate.diff) > policy.auto_apply_max_changed_lines:
@@ -494,6 +497,63 @@ def _is_pending_eval_definition_edit(base_file: str, candidate: CandidatePatch) 
         fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
         for pattern in candidate.pending_audit_eval_definition_paths
     )
+
+
+def _has_higher_priority_contradiction(
+    repo: Path,
+    policy: Policy,
+    candidate: CandidatePatch,
+) -> bool:
+    candidate_entry = next(
+        (entry for entry in policy.instruction_files if entry.path == candidate.base_file),
+        None,
+    )
+    if candidate_entry is None:
+        return False
+    higher_priority_rules = tuple(
+        _modal_rule(line)
+        for entry in policy.instruction_files
+        if entry.precedence > candidate_entry.precedence
+        for line in _read_policy_lines(repo / entry.path)
+    )
+    if not higher_priority_rules:
+        return False
+    added_rules = tuple(
+        rule
+        for line in candidate.diff.splitlines()
+        if _is_added_line(line)
+        for rule in (_modal_rule(_diff_body(line)),)
+        if rule is not None
+    )
+    return any(
+        added is not None
+        and existing is not None
+        and added[0] == existing[0]
+        and added[1] != existing[1]
+        for added in added_rules
+        for existing in higher_priority_rules
+    )
+
+
+def _read_policy_lines(path: Path) -> tuple[str, ...]:
+    if not path.is_file():
+        return ()
+    return tuple(path.read_text(encoding="utf-8").splitlines())
+
+
+def _modal_rule(line: str) -> tuple[str, str] | None:
+    normalized = line.strip().lower()
+    if not normalized:
+        return None
+    strong_match = STRONG_MODALS.search(normalized)
+    weak_match = WEAK_MODALS.search(normalized)
+    if strong_match is None and weak_match is None:
+        return None
+    strength = "strong" if strong_match is not None else "weak"
+    topic = re.sub(r"\b(must|never|required|shall|should|may|can|could|optional|recommend)\b", "", normalized)
+    topic = re.sub(r"\b(agents?|the|a|an|run|skip)\b", "", topic)
+    topic = re.sub(r"\s+", " ", topic).strip(" .")
+    return (topic, strength) if topic else None
 
 
 def _repo_relative_posix(path: str) -> str:

@@ -90,6 +90,39 @@ def test_policy_gate_rejects_base_file_not_in_allowlist(tmp_path: Path):
     assert "base_file_not_allowed" in decision.reasons
 
 
+def test_policy_gate_rejects_lower_priority_instruction_contradicting_higher_priority(
+    tmp_path: Path,
+):
+    agents = tmp_path / "AGENTS.md"
+    codex = tmp_path / "CODEX.md"
+    agents.write_text("Agents must run tests before applying patches.\n", encoding="utf-8")
+    codex.write_text("Agents must keep reports concise.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(codex),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " Agents must keep reports concise.\n"
+            "+Agents may skip tests before applying patches.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy("AGENTS.md", "repo_policy", 100, True),
+                InstructionFilePolicy("CODEX.md", "agent_policy", 70, True),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert "higher_priority_contradiction" in decision.reasons
+
+
 def test_policy_gate_rejects_constraint_deletion_without_replacement(tmp_path: Path):
     base_file = tmp_path / "CODEX.md"
     base_file.write_text("Agents must run tests.\n", encoding="utf-8")
