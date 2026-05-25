@@ -105,6 +105,39 @@ def test_validate_json_artifact_rejects_additional_properties():
         )
 
 
+def test_validate_audit_artifact_rejects_non_string_evidence_refs():
+    with pytest.raises(ArtifactValidationError, match="evidence_refs"):
+        validate_json_artifact(
+            "audit.json",
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "edit_warranted": True,
+                "evidence_refs": [7],
+                "failure_class": "instruction_missing",
+                "severity": "medium",
+                "confidence": 0.75,
+            },
+        )
+
+
+def test_validate_candidate_artifact_rejects_malformed_sources():
+    with pytest.raises(ArtifactValidationError, match="sources"):
+        validate_json_artifact(
+            "candidate.json",
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "def",
+                "risk_class": "instruction_clarification",
+                "rationale": "because",
+                "sources": [{"source_id": 123, "trusted": "yes"}],
+            },
+        )
+
+
 def test_validate_decision_artifact_requires_policy_reasons():
     with pytest.raises(ArtifactValidationError, match="policy_reasons"):
         validate_json_artifact(

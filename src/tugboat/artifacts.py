@@ -27,14 +27,53 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
             "audit_id": {"type": "integer"},
             "edit_warranted": {"type": "boolean"},
-            "evidence_refs": {"type": "array"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
             "failure_class": {"type": "string"},
             "severity": {"type": "string"},
             "confidence": {"type": "number"},
-            "instruction_refs": {"type": "array"},
-            "secret_findings": {"type": "array"},
-            "scoring": {"type": "array"},
-            "trace_risk_findings": {"type": "array"},
+            "instruction_refs": {"type": "array", "items": {"type": "string"}},
+            "secret_findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["path", "line_number", "kind"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "line_number": {"type": "integer"},
+                        "kind": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "scoring": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["plugin", "label", "metrics", "evidence"],
+                    "properties": {
+                        "plugin": {"type": "string"},
+                        "label": {"type": "string"},
+                        "metrics": {"type": "object"},
+                        "evidence": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "trace_risk_findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["code", "severity", "evidence_id", "message", "source_trust"],
+                    "properties": {
+                        "code": {"type": "string"},
+                        "severity": {"type": "string"},
+                        "evidence_id": {"type": "string"},
+                        "message": {"type": "string"},
+                        "source_trust": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
             "llmff_exit_code": {"type": "integer"},
             "llmff_failure_kind": {"type": "string"},
             "llmff_failure_message": {"type": "string"},
@@ -63,9 +102,23 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "diff_hash": {"type": "string"},
             "risk_class": {"type": "string"},
             "rationale": {"type": "string"},
-            "sources": {"type": "array"},
-            "pending_audit_eval_definition_paths": {"type": "array"},
-            "bounded_edit_metadata": {"type": "array"},
+            "sources": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["source_id", "trusted"],
+                    "properties": {
+                        "source_id": {"type": "string"},
+                        "trusted": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "pending_audit_eval_definition_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "bounded_edit_metadata": {"type": "array", "items": {"type": "object"}},
         },
     },
     "eval-report.json": {
@@ -111,7 +164,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "candidate_id": {"type": "integer"},
             "decision": {"type": "string"},
             "policy_allowed": {"type": "boolean"},
-            "policy_reasons": {"type": "array"},
+            "policy_reasons": {"type": "array", "items": {"type": "string"}},
         },
     },
 }
@@ -142,11 +195,7 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
         field_schema = properties.get(field)
         if field_schema is None:
             continue
-        expected_type = field_schema.get("type")
-        if expected_type is not None and not _matches_json_schema_type(value, str(expected_type)):
-            raise ArtifactValidationError(f"{name} field has wrong type: {field}")
-        if "const" in field_schema and value != field_schema["const"]:
-            raise ArtifactValidationError(f"{name} has unsupported schema_version")
+        _validate_schema_value(name, field, field_schema, value)
 
 
 def validate_report_markdown(text: str) -> None:
@@ -170,6 +219,55 @@ def _matches_json_schema_type(value: object, expected_type: str) -> bool:
     if expected_type == "string":
         return isinstance(value, str)
     raise ArtifactValidationError(f"unsupported JSON Schema type: {expected_type}")
+
+
+def _validate_schema_value(
+    artifact_name: str,
+    field_path: str,
+    schema: dict[str, Any],
+    value: object,
+) -> None:
+    expected_type = schema.get("type")
+    if expected_type is not None and not _matches_json_schema_type(value, str(expected_type)):
+        raise ArtifactValidationError(f"{artifact_name} field has wrong type: {field_path}")
+    if "const" in schema and value != schema["const"]:
+        raise ArtifactValidationError(f"{artifact_name} has unsupported schema_version")
+
+    if expected_type == "array":
+        item_schema = schema.get("items")
+        if item_schema is None:
+            return
+        if not isinstance(item_schema, dict):
+            raise ArtifactValidationError(f"{artifact_name} schema items must be an object")
+        for index, item in enumerate(value if isinstance(value, list) else []):
+            _validate_schema_value(artifact_name, f"{field_path}[{index}]", item_schema, item)
+
+    if expected_type == "object":
+        if not isinstance(value, dict):
+            return
+        properties = schema.get("properties", {})
+        if properties is not None and not isinstance(properties, dict):
+            raise ArtifactValidationError(f"{artifact_name} schema properties must be an object")
+        for required_field in schema.get("required", []):
+            if required_field not in value:
+                raise ArtifactValidationError(
+                    f"{artifact_name} missing required field: {field_path}.{required_field}"
+                )
+        if schema.get("additionalProperties") is False:
+            extra = sorted(set(value) - set(properties))
+            if extra:
+                raise ArtifactValidationError(
+                    f"{artifact_name} has additional property: {field_path}.{extra[0]}"
+                )
+        for child_field, child_value in value.items():
+            child_schema = properties.get(child_field)
+            if isinstance(child_schema, dict):
+                _validate_schema_value(
+                    artifact_name,
+                    f"{field_path}.{child_field}",
+                    child_schema,
+                    child_value,
+                )
 
 
 def write_json_artifact(path: Path, payload: dict[str, Any]) -> Path:
