@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from tugboat.cli import main
@@ -30,6 +32,16 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert report["governance_passed"] is True
     assert report["recommendation"] == "accept"
     assert "trigger_score" not in report["metrics"]
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        eval_run = connection.execute(
+            """
+            SELECT candidate_id, suite_id, status, report_path, audit_event_sequence
+            FROM eval_runs
+            """
+        ).fetchone()
+
+    assert eval_run[:4] == (7, "all", "passed", str(run_dir / "eval-report.json"))
+    assert eval_run[4] is not None
 
 
 def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path):

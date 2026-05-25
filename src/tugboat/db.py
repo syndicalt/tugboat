@@ -541,6 +541,28 @@ class Store:
         self.connection.commit()
         eval_id = int(cursor.lastrowid)
         self.append_audit_event("eval.recorded", {"eval_id": eval_id, "candidate_id": candidate_id})
+        eval_run_event = self.append_audit_event(
+            "eval_run.recorded",
+            {
+                "candidate_id": candidate_id,
+                "suite_id": suite_id,
+                "status": "passed" if passed else "failed",
+            },
+        )
+        self.connection.execute(
+            """
+            INSERT INTO eval_runs(candidate_id, suite_id, status, report_path, audit_event_sequence)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                candidate_id,
+                suite_id,
+                "passed" if passed else "failed",
+                str(report_path),
+                eval_run_event.sequence,
+            ),
+        )
+        self.connection.commit()
         return eval_id
 
     def insert_decision(
