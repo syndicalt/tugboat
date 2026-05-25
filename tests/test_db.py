@@ -9,15 +9,43 @@ def test_store_initializes_core_tables(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         tables = store.table_names()
 
-        assert "documents" in tables
-        assert "chunks" in tables
-        assert "episodes" in tables
-        assert "runs" in tables
-        assert "audits" in tables
-        assert "candidates" in tables
-        assert "evals" in tables
-        assert "decisions" in tables
-        assert "audit_events" in tables
+        assert {
+            "documents",
+            "chunks",
+            "episodes",
+            "runs",
+            "audits",
+            "candidates",
+            "evals",
+            "decisions",
+            "audit_events",
+        }.issubset(tables)
+
+
+def test_store_initializes_roadmap_extension_tables(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        tables = store.table_names()
+
+        assert {
+            "trace_events",
+            "instruction_snapshots",
+            "instruction_graphs",
+            "llmff_jobs",
+            "llmff_events",
+            "llmff_outputs",
+            "reflections",
+            "edit_operations",
+            "candidate_edits",
+            "eval_cases",
+            "eval_runs",
+            "validation_splits",
+            "review_actions",
+            "mcp_calls",
+            "daemon_jobs",
+            "harness_findings",
+            "doc_gardening_runs",
+            "optimizer_memory",
+        }.issubset(tables)
 
 
 def test_audit_events_are_hash_chained(tmp_path: Path):

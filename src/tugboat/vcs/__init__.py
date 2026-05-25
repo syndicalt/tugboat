@@ -43,6 +43,24 @@ class RollbackMetadata:
         }
 
 
+@dataclass(frozen=True)
+class PullRequestMetadata:
+    title: str
+    body: str
+    branch_name: str
+    base_branch: str
+    draft: bool = True
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "base_branch": self.base_branch,
+            "body": self.body,
+            "branch_name": self.branch_name,
+            "draft": self.draft,
+            "title": self.title,
+        }
+
+
 class VcsAdapter:
     def __init__(self, repo: Path):
         self.repo = repo
@@ -112,6 +130,38 @@ class VcsAdapter:
             reason=reason,
         )
 
+    def current_branch(self) -> str:
+        return self._git("branch", "--show-current")
+
+    def pull_request_metadata(
+        self,
+        *,
+        candidate_id: int,
+        base_file: str,
+        branch_name: str,
+        base_branch: str,
+        rationale: str,
+    ) -> PullRequestMetadata:
+        title = f"tugboat: apply candidate {candidate_id} for {base_file}"
+        body = "\n".join(
+            [
+                f"Candidate: {candidate_id}",
+                f"Base file: {base_file}",
+                f"Branch: {branch_name}",
+                "",
+                "Rationale:",
+                rationale.rstrip(),
+                "",
+                "This pull request was generated from Tugboat review artifacts.",
+            ]
+        )
+        return PullRequestMetadata(
+            title=title,
+            body=body,
+            branch_name=branch_name,
+            base_branch=base_branch,
+        )
+
     def create_branch(self, branch_name: str) -> None:
         self._git("switch", "-c", branch_name)
 
@@ -121,6 +171,11 @@ class VcsAdapter:
     def commit_files(self, files: tuple[str, ...], message: str) -> str:
         self._git("add", "--", *files)
         self._git("commit", "-m", message)
+        return self._git("rev-parse", "HEAD")
+
+    def revert_commit(self, *, branch_name: str, commit_sha: str) -> str:
+        self._git("switch", branch_name)
+        self._git("revert", "--no-edit", commit_sha)
         return self._git("rev-parse", "HEAD")
 
     def _dirty_paths(self) -> tuple[str, ...]:

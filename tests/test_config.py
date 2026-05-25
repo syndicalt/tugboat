@@ -126,5 +126,30 @@ retention:
         load_policy(tmp_path)
 
 
+def test_load_policy_yaml_reads_mcp_allowlist_and_tool_policy(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+mcp:
+  allowed_repositories:
+    - /workspace/allowed
+  tool_policy:
+    tugboat_status: allow
+    tugboat_request_audit: deny
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.mcp_allowed_repositories == ("/workspace/allowed",)
+    assert policy.mcp_tool_policy == {
+        "tugboat_status": "allow",
+        "tugboat_request_audit": "deny",
+    }
+
+
 def test_sidecar_dir_is_repo_local(tmp_path: Path):
     assert sidecar_dir(tmp_path) == tmp_path / ".sidecar"

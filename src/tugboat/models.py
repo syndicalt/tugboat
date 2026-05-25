@@ -70,3 +70,5 @@ class Policy:
     allowed_manifest_hashes: tuple[str, ...] = field(default_factory=tuple)
     raw_traces_retention_days: int = 14
     checkpoints_retention_days: int = 7
+    mcp_allowed_repositories: tuple[str, ...] = field(default_factory=tuple)
+    mcp_tool_policy: dict[str, str] = field(default_factory=dict)

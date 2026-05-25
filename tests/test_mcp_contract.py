@@ -214,6 +214,52 @@ def test_repo_must_be_local_path():
         tugboat_status("https://example.com/repo.git")
 
 
+def test_mcp_repo_allowlist_blocks_unlisted_repo_and_audits_denial(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+mcp:
+  allowed_repositories:
+    - /some/other/repo
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="not allowed for MCP"):
+        tugboat_status(repo)
+
+    event = _mcp_events(repo)[-1]
+    assert event["tool"] == "tugboat_status"
+    assert event["status"] == "denied"
+
+
+def test_mcp_per_tool_policy_blocks_denied_tool_and_audits_denial(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {tmp_path.resolve().as_posix()}
+  tool_policy:
+    tugboat_status: deny
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="MCP tool denied by policy"):
+        tugboat_status(tmp_path)
+
+    event = _mcp_events(tmp_path)[-1]
+    assert event["tool"] == "tugboat_status"
+    assert event["status"] == "denied"
+
+
 def test_write_intent_tools_create_request_artifacts_without_mutating_instructions(tmp_path: Path):
     repo = tmp_path
     codex = repo / "CODEX.md"

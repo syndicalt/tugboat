@@ -120,6 +120,90 @@ DOC_CONTRACTS = {
             "tugboat propose --repo . --audit latest",
         ],
     },
+    "docs/quickstart.md": {
+        "sections": [
+            "## Install",
+            "## Initialize",
+            "## Proposal Loop",
+            "## Next Checks",
+        ],
+        "required_text": [
+            "tugboat doctor",
+            "tugboat index --repo .",
+            "tugboat audit --repo . --trace",
+            "tugboat propose --repo . --audit latest",
+            "under 15 minutes",
+        ],
+    },
+    "docs/architecture.md": {
+        "sections": [
+            "## Boundary",
+            "## Components",
+            "## Data Flow",
+            "## Authority Model",
+        ],
+        "required_text": [
+            "llmff",
+            "CLI",
+            "MCP",
+            "daemon",
+            "VCS adapter",
+        ],
+    },
+    "docs/threat-model.md": {
+        "sections": [
+            "## Assets",
+            "## Trust Boundaries",
+            "## Threats",
+            "## Controls",
+        ],
+        "required_text": [
+            "untrusted traces",
+            "secret",
+            "local-only",
+            "audit ledger",
+            "VCS",
+        ],
+    },
+    "docs/policy-examples.md": {
+        "sections": [
+            "## Proposal Only",
+            "## Provider Backed",
+            "## MCP Allowlist",
+            "## Auto-Apply Disabled",
+        ],
+        "required_text": [
+            ".sidecar/policy.yaml",
+            "instruction_files",
+            "allowed_repositories",
+            "tool_policy",
+            "auto_apply",
+        ],
+    },
+    "docs/mcp-guide.md": {
+        "sections": [
+            "## Transport",
+            "## Read Tools",
+            "## Write-Intent Tools",
+            "## Security Policy",
+        ],
+        "required_text": [
+            "tugboat mcp stdio",
+            "tugboat_status",
+            "tugboat_request_audit",
+            "repo allowlist",
+            "direct apply",
+        ],
+    },
+    "docs/ci/github-actions-template.yml": {
+        "sections": [],
+        "required_text": [
+            "tugboat doctor",
+            "tugboat index --repo . --check",
+            "tugboat harness check --repo .",
+            "python -m pytest --cov -q",
+        ],
+    },
 }
 
 
@@ -132,7 +216,8 @@ def test_phase_10_operations_docs_exist_with_required_sections_and_commands(
     assert doc_path.exists(), f"{relative_path} is required by Phase 10 operations docs"
 
     content = doc_path.read_text(encoding="utf-8")
-    assert content.startswith("# "), f"{relative_path} must start with a markdown title"
+    if relative_path.endswith(".md"):
+        assert content.startswith("# "), f"{relative_path} must start with a markdown title"
 
     for section in contract["sections"]:
         assert section in content, f"{relative_path} is missing section {section!r}"

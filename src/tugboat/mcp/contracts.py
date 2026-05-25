@@ -321,7 +321,14 @@ def _audit_call(
 ) -> T:
     status = "completed"
     try:
+        _enforce_mcp_policy(repo, tool)
         return read()
+    except ValueError as error:
+        if "MCP" in str(error):
+            status = "denied"
+        else:
+            status = "failed"
+        raise
     except Exception:
         status = "failed"
         raise
@@ -336,6 +343,16 @@ def _audit_call(
                     "status": status,
                 },
             )
+
+
+def _enforce_mcp_policy(repo: Path, tool: str) -> None:
+    policy = load_policy(repo)
+    allowed_repositories = tuple(Path(path).expanduser().resolve() for path in policy.mcp_allowed_repositories)
+    if allowed_repositories and repo.resolve() not in allowed_repositories:
+        raise ValueError(f"repo is not allowed for MCP: {repo}")
+    decision = policy.mcp_tool_policy.get(tool, "allow").lower()
+    if decision != "allow":
+        raise ValueError(f"MCP tool denied by policy: {tool}")
 
 
 def _write_request_artifact(

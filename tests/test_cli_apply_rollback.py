@@ -179,6 +179,25 @@ def test_rollback_writes_revert_plan_from_apply_decision(tmp_path: Path):
         ).fetchone()[0] == 1
 
 
+def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    assert "Record rollback notes." in (repo / "CODEX.md").read_text(encoding="utf-8")
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 0
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    rollback = json.loads((run_dir / "rollback-plan.json").read_text(encoding="utf-8"))
+    assert rollback["executed"] is True
+    assert rollback["revert_commit"] == _git(repo, "rev-parse", "HEAD")
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'rollback.applied'"
+        ).fetchone()[0] == 1
+
+
 def test_apply_commit_mode_creates_branch_commit_and_rollback_command(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
@@ -195,3 +214,63 @@ def test_apply_commit_mode_creates_branch_commit_and_rollback_command(tmp_path: 
         ["git", "switch", apply_plan["branch_name"]],
         ["git", "revert", "--no-edit", apply_plan["applied_commit"]],
     ]
+
+
+def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 0
+
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    assert _git(repo, "branch", "--show-current") == apply_plan["branch_name"]
+    assert apply_plan["mode"] == "branch"
+    assert apply_plan["applied_commit"] == ""
+    assert "Record rollback notes." in (repo / "CODEX.md").read_text(encoding="utf-8")
+
+
+def test_apply_pr_mode_writes_pr_metadata_bundle(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 0
+
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    assert apply_plan["mode"] == "pr"
+    assert apply_plan["pr_metadata"] == {
+        "base_branch": "main",
+        "body": apply_plan["pr_metadata"]["body"],
+        "branch_name": apply_plan["branch_name"],
+        "draft": True,
+        "title": "tugboat: apply candidate 7 for CODEX.md",
+    }
+    assert "Candidate: 7" in apply_plan["pr_metadata"]["body"]
+
+
+def test_apply_class_c_requires_explicit_human_review(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="restricted_policy_change")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+    assert not (run_dir / "apply-plan.json").exists()
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "proposal",
+                "--human-review",
+                "--review-actor",
+                "alice",
+            ]
+        )
+        == 0
+    )
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    assert apply_plan["explicit_human_review"] is True
+    assert apply_plan["review_actor"] == "alice"

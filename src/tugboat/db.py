@@ -95,6 +95,144 @@ CREATE TABLE IF NOT EXISTS audit_events (
   previous_hash TEXT NOT NULL,
   event_hash TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trace_events (
+  id INTEGER PRIMARY KEY,
+  episode_id INTEGER,
+  evidence_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS instruction_snapshots (
+  id INTEGER PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  artifact_path TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS instruction_graphs (
+  id INTEGER PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  graph_hash TEXT NOT NULL,
+  artifact_path TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS llmff_jobs (
+  id INTEGER PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  manifest_name TEXT NOT NULL,
+  manifest_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS llmff_events (
+  id INTEGER PRIMARY KEY,
+  job_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS llmff_outputs (
+  id INTEGER PRIMARY KEY,
+  job_id INTEGER NOT NULL,
+  output_name TEXT NOT NULL,
+  artifact_path TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS reflections (
+  id INTEGER PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  source_ref TEXT NOT NULL,
+  reflection_hash TEXT NOT NULL,
+  artifact_path TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS edit_operations (
+  id INTEGER PRIMARY KEY,
+  candidate_id INTEGER NOT NULL,
+  operator TEXT NOT NULL,
+  target_path TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS candidate_edits (
+  id INTEGER PRIMARY KEY,
+  candidate_id INTEGER NOT NULL,
+  edit_operation_id INTEGER NOT NULL,
+  target_path TEXT NOT NULL,
+  risk_class TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS eval_cases (
+  id INTEGER PRIMARY KEY,
+  suite_id TEXT NOT NULL,
+  case_id TEXT NOT NULL,
+  case_hash TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id INTEGER PRIMARY KEY,
+  candidate_id INTEGER NOT NULL,
+  suite_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  report_path TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS validation_splits (
+  id INTEGER PRIMARY KEY,
+  suite_id TEXT NOT NULL,
+  split_name TEXT NOT NULL,
+  case_ids_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS review_actions (
+  id INTEGER PRIMARY KEY,
+  candidate_id INTEGER NOT NULL,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS mcp_calls (
+  id INTEGER PRIMARY KEY,
+  tool_name TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS daemon_jobs (
+  id INTEGER PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  state TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS harness_findings (
+  id INTEGER PRIMARY KEY,
+  repo_path TEXT NOT NULL,
+  finding TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS doc_gardening_runs (
+  id INTEGER PRIMARY KEY,
+  repo_path TEXT NOT NULL,
+  status TEXT NOT NULL,
+  report_path TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
+CREATE TABLE IF NOT EXISTS optimizer_memory (
+  id INTEGER PRIMARY KEY,
+  repo_path TEXT NOT NULL,
+  memory_type TEXT NOT NULL,
+  key TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
+);
 """
 
 

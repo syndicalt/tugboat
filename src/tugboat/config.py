@@ -41,6 +41,7 @@ def load_policy(repo: Path) -> Policy:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     auto_apply = raw.get("auto_apply", {}) or {}
     llmff = raw.get("llmff", {}) or {}
+    mcp = raw.get("mcp", {}) or {}
     retention = raw.get("retention", {}) or {}
     entries = tuple(_as_instruction_file(item) for item in raw.get("instruction_files", []))
 
@@ -68,4 +69,12 @@ def load_policy(repo: Path) -> Policy:
             retention.get("checkpoints_days", Policy().checkpoints_retention_days),
             "retention.checkpoints_days",
         ),
+        mcp_allowed_repositories=tuple(
+            str(Path(item).expanduser().resolve())
+            for item in mcp.get("allowed_repositories", [])
+        ),
+        mcp_tool_policy={
+            str(tool): str(decision)
+            for tool, decision in (mcp.get("tool_policy", {}) or {}).items()
+        },
     )
