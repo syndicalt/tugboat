@@ -112,6 +112,17 @@ class VcsAdapter:
             reason=reason,
         )
 
+    def create_branch(self, branch_name: str) -> None:
+        self._git("switch", "-c", branch_name)
+
+    def apply_diff(self, diff_path: Path) -> None:
+        self._git("apply", str(diff_path))
+
+    def commit_files(self, files: tuple[str, ...], message: str) -> str:
+        self._git("add", "--", *files)
+        self._git("commit", "-m", message)
+        return self._git("rev-parse", "HEAD")
+
     def _dirty_paths(self) -> tuple[str, ...]:
         output = self._git("status", "--porcelain=v1", "--untracked-files=all")
         paths: set[str] = set()

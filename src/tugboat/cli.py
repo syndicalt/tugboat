@@ -22,6 +22,7 @@ from tugboat.propose.service import write_candidate
 from tugboat.report.service import write_report
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.ingest import ingest_jsonl_trace
+from tugboat.vcs import VcsAdapter, VcsStateError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--repo", required=True)
     evaluate.add_argument("--candidate", required=True)
     evaluate.add_argument("--suite", required=True)
+
+    apply = subcommands.add_parser("apply")
+    apply.add_argument("--repo", required=True)
+    apply.add_argument("--candidate", required=True)
+    apply.add_argument("--mode", choices=("proposal", "branch", "commit"), default="proposal")
+    apply.add_argument("--review-actor", default="tugboat")
+
+    rollback = subcommands.add_parser("rollback")
+    rollback.add_argument("--repo", required=True)
+    rollback.add_argument("--decision", required=True)
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -339,6 +350,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"eval suite: {args.suite} {'passed' if passed else 'failed'}")
         return 0 if passed else 1
 
+    if args.command == "apply":
+        repo = Path(args.repo)
+        run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
+        try:
+            apply_path = _write_apply_plan(
+                repo,
+                run_dir,
+                mode=args.mode,
+                review_actor=args.review_actor,
+            )
+        except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+            print(f"apply blocked: {error}")
+            return 1
+        print(f"apply plan: {apply_path}")
+        return 0
+
+    if args.command == "rollback":
+        repo = Path(args.repo)
+        run_dir = latest_run_dir(repo) if args.decision == "latest" else runs_dir(repo) / args.decision
+        try:
+            rollback_path = _write_rollback_plan(repo, run_dir)
+        except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+            print(f"rollback blocked: {error}")
+            return 1
+        print(f"rollback plan: {rollback_path}")
+        return 0
+
     if args.command == "report":
         repo = Path(args.repo)
         run_dir = latest_run_dir(repo) if args.run == "latest" else runs_dir(repo) / args.run
@@ -507,6 +545,123 @@ def _decision_from_artifact(run_dir: Path):
 
     payload = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     return PolicyDecision(bool(payload["allowed"]), tuple(payload["reasons"]))
+
+
+def _write_apply_plan(repo: Path, run_dir: Path, *, mode: str, review_actor: str) -> Path:
+    candidate = _candidate_from_artifacts(run_dir)
+    candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    candidate_id = int(candidate_meta["candidate_id"])
+    target_files = (candidate.base_file,)
+    policy = load_policy(repo)
+    decision = evaluate_candidate(repo, policy, candidate)
+    if not decision.allowed:
+        raise ValueError(f"policy gate rejected candidate: {', '.join(decision.reasons)}")
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    if not bool(policy_gate["allowed"]):
+        raise ValueError("stored policy gate rejected candidate")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    if not bool(eval_report["passed"]):
+        raise ValueError("eval report did not pass")
+
+    adapter = VcsAdapter(repo)
+    adapter.assert_target_files_clean(target_files)
+    adapter.assert_base_hashes({candidate.base_file: candidate.base_hash})
+    branch_name = adapter.branch_name(
+        run_id=run_dir.name,
+        candidate_id=candidate_id,
+        base_file=candidate.base_file,
+    )
+    commit_message = adapter.commit_message(
+        run_id=run_dir.name,
+        candidate_id=candidate_id,
+        base_file=candidate.base_file,
+        rationale=candidate.rationale,
+    )
+    pre_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+    post_hashes: dict[str, str] = {}
+    applied_commit = ""
+    rollback_command: list[list[str]] = []
+
+    if mode == "branch":
+        adapter.create_branch(branch_name)
+    elif mode == "commit":
+        adapter.create_branch(branch_name)
+        adapter.apply_diff(run_dir / "candidate.diff")
+        post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+        applied_commit = adapter.commit_files(target_files, commit_message)
+        rollback_command = [
+            list(command)
+            for command in adapter.rollback_metadata(
+                commit_sha=applied_commit,
+                branch_name=branch_name,
+                files=target_files,
+                reason=f"rollback candidate {candidate_id}",
+            ).commands
+        ]
+
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": mode,
+        "candidate_id": candidate_id,
+        "decision_id": run_dir.name,
+        "run_id": run_dir.name,
+        "target_files": list(target_files),
+        "branch_name": branch_name,
+        "commit_message": commit_message,
+        "pre_hashes": pre_hashes,
+        "post_hashes": post_hashes,
+        "applied_commit": applied_commit,
+        "rollback_command": rollback_command,
+        "review_actor": review_actor,
+        "decision_rationale": "policy gate and eval report passed",
+    }
+    path = run_dir / "apply-plan.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "apply.planned",
+            {
+                "candidate_id": candidate_id,
+                "mode": mode,
+                "run_id": run_dir.name,
+                "target_files": list(target_files),
+                "applied_commit": applied_commit,
+            },
+        )
+    return path
+
+
+def _write_rollback_plan(repo: Path, run_dir: Path) -> Path:
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    commit_sha = str(apply_plan["applied_commit"])
+    if not commit_sha:
+        raise ValueError("apply plan has no applied commit")
+    target_files = tuple(str(path) for path in apply_plan["target_files"])
+    metadata = VcsAdapter(repo).rollback_metadata(
+        commit_sha=commit_sha,
+        branch_name=str(apply_plan["branch_name"]),
+        files=target_files,
+        reason=f"rollback decision {apply_plan['decision_id']}",
+    )
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "decision_id": str(apply_plan["decision_id"]),
+        "candidate_id": int(apply_plan["candidate_id"]),
+        "metadata": metadata.to_json_dict(),
+    }
+    path = run_dir / "rollback-plan.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "rollback.planned",
+            {
+                "candidate_id": int(apply_plan["candidate_id"]),
+                "commit_sha": commit_sha,
+                "decision_id": str(apply_plan["decision_id"]),
+                "target_files": list(target_files),
+            },
+        )
+    return path
 
 
 def _decision_json(
