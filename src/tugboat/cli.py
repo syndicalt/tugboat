@@ -232,6 +232,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if run.exit_code != 0:
                 with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                    store.record_llmff_run(
+                        run_id=run_dir.name,
+                        manifest_hash=inspect.manifest_hash,
+                        result=run,
+                    )
                     store.insert_run(
                         run_id=run_dir.name,
                         stage="audit",
@@ -255,6 +260,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 print(f"audit run failed: {run.exit_code}")
                 return run.exit_code
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.record_llmff_run(
+                    run_id=run_dir.name,
+                    manifest_hash=inspect.manifest_hash,
+                    result=run,
+                )
             raw_audit = json.loads(run.output_paths["audit_report"].read_text(encoding="utf-8"))
             if not isinstance(raw_audit, dict):
                 raise ValueError("llmff audit_report output must be a JSON object")
@@ -651,7 +662,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
     manifest = next(record.path for record in manifests if record.name == "patch-propose.yaml")
-    inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     optimizer_memory_path = _write_optimizer_memory_artifact(repo, run_dir)
     run = run_manifest(
         manifest,
@@ -671,7 +682,19 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         output_paths={"candidate_patch": run_dir / "candidate.raw.json"},
     )
     if run.exit_code != 0:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.record_llmff_run(
+                run_id=run_dir.name,
+                manifest_hash=inspect.manifest_hash,
+                result=run,
+            )
         raise RuntimeError(f"llmff patch-propose failed with exit code {run.exit_code}")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id=run_dir.name,
+            manifest_hash=inspect.manifest_hash,
+            result=run,
+        )
     payload = json.loads(run.output_paths["candidate_patch"].read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("llmff candidate_patch output must be a JSON object")
@@ -732,7 +755,7 @@ def _run_patch_eval(
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
     manifest = next(record.path for record in manifests if record.name == "patch-eval.yaml")
-    inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     suite_path = run_dir / "eval-suite.json"
     suite_path.write_text(json.dumps({"suite_id": suite_id}, indent=2) + "\n", encoding="utf-8")
     run = run_manifest(
@@ -754,7 +777,19 @@ def _run_patch_eval(
         },
     )
     if run.exit_code != 0:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.record_llmff_run(
+                run_id=run_dir.name,
+                manifest_hash=inspect.manifest_hash,
+                result=run,
+            )
         raise RuntimeError(f"llmff patch-eval failed with exit code {run.exit_code}")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id=run_dir.name,
+            manifest_hash=inspect.manifest_hash,
+            result=run,
+        )
     eval_payload = json.loads(run.output_paths["eval_report"].read_text(encoding="utf-8"))
     decision_payload = json.loads(run.output_paths["policy_decision"].read_text(encoding="utf-8"))
     if not isinstance(eval_payload, dict) or not isinstance(decision_payload, dict):

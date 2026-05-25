@@ -123,6 +123,34 @@ llmff:
     assert (run_dir / "llmff-events.jsonl").exists()
     assert (run_dir / "checkpoint.json").exists()
     assert (run_dir / "audit.raw.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        job = store.connection.execute(
+            """
+            SELECT id, manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            """,
+            (run_dir.name,),
+        ).fetchone()
+        event_count = store.connection.execute(
+            "SELECT COUNT(*) FROM llmff_events WHERE job_id = ?",
+            (job[0],),
+        ).fetchone()[0]
+        output = store.connection.execute(
+            """
+            SELECT output_name, artifact_path, content_hash, audit_event_sequence
+            FROM llmff_outputs
+            WHERE job_id = ?
+            """,
+            (job[0],),
+        ).fetchone()
+
+    assert job[1:] == ("episode-audit.yaml", "completed")
+    assert event_count == 1
+    assert output[0] == "audit_report"
+    assert output[1] == str(run_dir / "audit.raw.json")
+    assert len(output[2]) == 64
+    assert output[3] is not None
 
 
 def test_audit_passes_redacted_trace_artifact_to_llmff(tmp_path: Path):
@@ -315,3 +343,35 @@ llmff:
     assert policy_decision == {"allowed": False, "reasons": ["held_out_regression"]}
     assert (run_dir / "eval-report.raw.json").exists()
     assert (run_dir / "policy-decision.raw.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        output_names = [
+            row[0]
+            for row in store.connection.execute(
+                """
+                SELECT output_name
+                FROM llmff_outputs
+                ORDER BY id
+                """
+            )
+        ]
+
+    assert jobs == [
+        ("episode-audit.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+        ("patch-eval.yaml", "completed"),
+    ]
+    assert output_names == [
+        "audit_report",
+        "candidate_patch",
+        "eval_report",
+        "policy_decision",
+    ]

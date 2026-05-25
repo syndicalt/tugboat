@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tugboat.llmff.contracts import RunResult
 from tugboat.models import IndexResult
 from tugboat.policy.gate import CandidatePatch
 from tugboat.traces.schema import TraceBundle
@@ -341,6 +342,73 @@ class Store:
         self.connection.commit()
         self.append_audit_event("run.recorded", {"run_id": run_id, "stage": stage, "status": status})
 
+    def record_llmff_run(
+        self,
+        *,
+        run_id: str,
+        manifest_hash: str,
+        result: RunResult,
+    ) -> int:
+        status = "completed" if result.exit_code == 0 else "failed"
+        job_event = self.append_audit_event(
+            "llmff_job.recorded",
+            {
+                "run_id": run_id,
+                "manifest_name": result.manifest_path.name,
+                "status": status,
+                "exit_code": result.exit_code,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO llmff_jobs(run_id, manifest_name, manifest_hash, status, audit_event_sequence)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                result.manifest_path.name,
+                manifest_hash,
+                status,
+                job_event.sequence,
+            ),
+        )
+        job_id = int(cursor.lastrowid)
+        for payload in _jsonl_payloads(result.events_path):
+            event_type = str(payload.get("event", "unknown"))
+            event = self.append_audit_event(
+                "llmff_event.recorded",
+                {"job_id": job_id, "event_type": event_type},
+            )
+            self.connection.execute(
+                """
+                INSERT INTO llmff_events(job_id, event_type, payload_json, audit_event_sequence)
+                VALUES (?, ?, ?, ?)
+                """,
+                (job_id, event_type, json.dumps(payload, sort_keys=True), event.sequence),
+            )
+        for output_name, path in sorted(result.output_paths.items()):
+            if not path.exists():
+                continue
+            event = self.append_audit_event(
+                "llmff_output.recorded",
+                {
+                    "job_id": job_id,
+                    "output_name": output_name,
+                    "artifact_path": str(path),
+                },
+            )
+            self.connection.execute(
+                """
+                INSERT INTO llmff_outputs(
+                  job_id, output_name, artifact_path, content_hash, audit_event_sequence
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (job_id, output_name, str(path), _file_hash(path), event.sequence),
+            )
+        self.connection.commit()
+        return job_id
+
     def record_trace_episode(self, *, repo: Path, bundle: TraceBundle) -> int:
         summary_hash = hashlib.sha256(
             json.dumps(
@@ -594,3 +662,24 @@ class Store:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _jsonl_payloads(path: Path) -> tuple[dict[str, Any], ...]:
+    if not path.exists():
+        return ()
+    payloads: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                payloads.append(payload)
+    return tuple(payloads)
+
+
+def _file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
