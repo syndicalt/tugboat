@@ -568,7 +568,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     if args.command == "harness" and args.harness_command == "report":
-        report = generate_harness_report(Path(args.repo))
+        repo = Path(args.repo)
+        report = generate_harness_report(repo)
+        _persist_harness_report(repo, report)
         print("# Tugboat Harness Report")
         print("## Knowledge Map")
         for source, targets in report.knowledge_map.items():
@@ -594,6 +596,59 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def console_main() -> None:
     raise SystemExit(main())
+
+
+def _persist_harness_report(repo: Path, report) -> Path:
+    report_path = sidecar_dir(repo) / "harness-report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "knowledge_map": report.knowledge_map,
+                "missing_docs": report.missing_docs,
+                "stale_docs": report.stale_docs,
+                "orphaned_runbooks": report.orphaned_runbooks,
+                "recurring_failures_without_docs": report.recurring_failures_without_docs,
+                "doc_gardening_tasks": report.doc_gardening_tasks,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        for finding in report.missing_docs:
+            store.record_harness_finding(
+                repo_path=repo,
+                finding=finding,
+                severity="missing_doc",
+            )
+        for finding in report.stale_docs:
+            store.record_harness_finding(
+                repo_path=repo,
+                finding=finding,
+                severity="stale_doc",
+            )
+        for finding in report.orphaned_runbooks:
+            store.record_harness_finding(
+                repo_path=repo,
+                finding=finding,
+                severity="orphaned_runbook",
+            )
+        for task in report.doc_gardening_tasks:
+            store.record_harness_finding(
+                repo_path=repo,
+                finding=task,
+                severity="task",
+            )
+        store.record_doc_gardening_run(
+            repo_path=repo,
+            status="completed",
+            report_path=report_path,
+        )
+    return report_path
 
 
 def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:

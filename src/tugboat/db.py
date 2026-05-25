@@ -738,6 +738,60 @@ class Store:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def record_harness_finding(
+        self,
+        *,
+        repo_path: Path,
+        finding: str,
+        severity: str,
+    ) -> int:
+        event = self.append_audit_event(
+            "harness_finding.recorded",
+            {
+                "repo": str(repo_path),
+                "finding": finding,
+                "severity": severity,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO harness_findings(
+              repo_path, finding, severity, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (str(repo_path), finding, severity, event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def record_doc_gardening_run(
+        self,
+        *,
+        repo_path: Path,
+        status: str,
+        report_path: Path,
+    ) -> int:
+        event = self.append_audit_event(
+            "doc_gardening_run.recorded",
+            {
+                "repo": str(repo_path),
+                "status": status,
+                "report_path": str(report_path),
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO doc_gardening_runs(
+              repo_path, status, report_path, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (str(repo_path), status, str(report_path), event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def record_mcp_call(
         self,
         *,
