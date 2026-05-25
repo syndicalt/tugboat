@@ -333,15 +333,18 @@ def _audit_call(
         status = "failed"
         raise
     finally:
+        payload = {
+            "tool": tool,
+            "repo": repo.as_posix(),
+            "arguments": redact_payload(arguments),
+            "status": status,
+        }
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
-            store.append_audit_event(
-                "mcp.tool_called",
-                {
-                    "tool": tool,
-                    "repo": repo.as_posix(),
-                    "arguments": redact_payload(arguments),
-                    "status": status,
-                },
+            store.record_mcp_call(
+                tool_name=tool,
+                repo_path=repo,
+                status=status,
+                payload=payload,
             )
 
 

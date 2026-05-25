@@ -47,6 +47,27 @@ def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_status"
 
 
+def test_mcp_call_rows_are_reachable_from_append_only_audit_event(tmp_path: Path):
+    repo = tmp_path
+
+    tugboat_status(repo)
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        row = store.connection.execute(
+            """
+            SELECT m.tool_name, m.status, a.event_type, a.payload_json
+            FROM mcp_calls m
+            JOIN audit_events a ON a.sequence = m.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "tugboat_status"
+    assert row[1] == "completed"
+    assert row[2] == "mcp.tool_called"
+    assert json.loads(row[3])["tool"] == "tugboat_status"
+
+
 def test_instruction_graph_returns_metadata_not_instruction_text(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text(

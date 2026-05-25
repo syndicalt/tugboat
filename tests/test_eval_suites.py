@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from shutil import copytree
 
 from tugboat.evals import run_offline_eval_suite
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "evals"
+
+
+def _install_eval_fixtures(repo: Path, fixture_name: str) -> None:
+    (repo / ".sidecar").mkdir()
+    copytree(FIXTURES / fixture_name, repo / ".sidecar" / "evals")
 
 
 def test_run_offline_eval_suite_all_reports_structural_behavioral_and_adversarial_metrics(
@@ -40,4 +49,40 @@ def test_run_offline_eval_suite_all_rejects_governance_regressions(tmp_path: Pat
     assert report.passed is False
     assert report.governance_passed is False
     assert report.metrics["governance_regressions"] == 1
+    assert report.recommendation == "reject"
+
+
+def test_run_offline_eval_suite_all_loads_fixture_backed_phase_4_cases(tmp_path: Path):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.metrics["incident_replay_cases"] == 1
+    assert report.metrics["held_out_cases"] == 1
+    assert report.metrics["adversarial_cases"] == 1
+    assert report.metrics["cross_agent_cases"] == 1
+    assert report.metrics["behavioral_cases"] == 3
+    assert report.metrics["fixture_case_failures"] == 0
+    assert report.trigger_score == 1.0
+    assert report.held_out_score == 1.0
+
+
+def test_run_offline_eval_suite_all_rejects_failing_fixture_cases(tmp_path: Path):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "failing")
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is False
+    assert report.metrics["held_out_cases"] == 1
+    assert report.metrics["fixture_case_failures"] == 1
+    assert report.held_out_score == 0.0
     assert report.recommendation == "reject"

@@ -439,6 +439,31 @@ class Store:
         self.append_audit_event("decision.recorded", {"decision_id": decision_id, "candidate_id": candidate_id})
         return decision_id
 
+    def record_mcp_call(
+        self,
+        *,
+        tool_name: str,
+        repo_path: Path,
+        status: str,
+        payload: dict[str, Any],
+    ) -> int:
+        event = self.append_audit_event("mcp.tool_called", payload)
+        cursor = self.connection.execute(
+            """
+            INSERT INTO mcp_calls(tool_name, repo_path, status, payload_json, audit_event_sequence)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                tool_name,
+                str(repo_path),
+                status,
+                json.dumps(payload, sort_keys=True),
+                event.sequence,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def append_audit_event(self, event_type: str, payload: dict[str, Any]) -> AuditEvent:
         previous = self.connection.execute(
             "SELECT event_hash FROM audit_events ORDER BY sequence DESC LIMIT 1"

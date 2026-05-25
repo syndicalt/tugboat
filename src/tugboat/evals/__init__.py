@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import json
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -116,27 +117,89 @@ def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
     policy_text = _read_optional(root / "CODEX.md") or _read_optional(root / "AGENTS.md") or ""
     structural = evaluate_markdown_candidate(policy_text, root=root)
     governance_regressions = int(_has_governance_regression(policy_text))
-    behavioral_cases = 1
-    adversarial_cases = 1
+    fixture_metrics = _run_fixture_cases(root)
+    behavioral_cases = max(
+        1,
+        fixture_metrics["incident_replay_cases"]
+        + fixture_metrics["held_out_cases"]
+        + fixture_metrics["cross_agent_cases"],
+    )
+    adversarial_cases = max(1, fixture_metrics["adversarial_cases"])
     structural_cases = 1
-    passed = structural.passed and governance_regressions == 0
+    passed = (
+        structural.passed
+        and governance_regressions == 0
+        and fixture_metrics["fixture_case_failures"] == 0
+    )
     metrics = {
+        **fixture_metrics,
         "structural_cases": structural_cases,
         "behavioral_cases": behavioral_cases,
         "adversarial_cases": adversarial_cases,
         "governance_regressions": governance_regressions,
         "structural_findings": len(structural.findings),
     }
-    score = 1.0 if passed else 0.0
+    trigger_score = 1.0 if structural.passed and governance_regressions == 0 else 0.0
+    held_out_score = _category_score(
+        passed_cases=fixture_metrics["held_out_passed"],
+        total_cases=fixture_metrics["held_out_cases"],
+        fallback=trigger_score,
+    )
     return OfflineEvalReport(
         suite_id=suite_id,
         passed=passed,
         metrics=metrics,
-        trigger_score=score,
-        held_out_score=score,
+        trigger_score=trigger_score if fixture_metrics["fixture_case_failures"] == 0 else 0.0,
+        held_out_score=held_out_score,
         governance_passed=governance_regressions == 0,
         recommendation="accept" if passed else "reject",
     )
+
+
+def _run_fixture_cases(root: Path) -> dict[str, int]:
+    metrics = {
+        "incident_replay_cases": 0,
+        "held_out_cases": 0,
+        "adversarial_cases": 0,
+        "cross_agent_cases": 0,
+        "held_out_passed": 0,
+        "fixture_case_failures": 0,
+    }
+    fixture_root = root / ".sidecar" / "evals"
+    if not fixture_root.exists():
+        return metrics
+
+    category_metric = {
+        "incident_replay": "incident_replay_cases",
+        "held_out": "held_out_cases",
+        "adversarial": "adversarial_cases",
+        "cross_agent": "cross_agent_cases",
+    }
+    for path in sorted(fixture_root.rglob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"eval fixture must be a JSON object: {path}")
+        if int(payload.get("schema_version", 0)) != 1:
+            raise ValueError(f"unsupported eval fixture schema_version: {path}")
+        category = str(payload["category"])
+        metric = category_metric.get(category)
+        if metric is None:
+            raise ValueError(f"unknown eval fixture category: {category}")
+        markdown = str(payload["markdown"])
+        expected_passed = bool(payload["expected_passed"])
+        actual_passed = evaluate_markdown_candidate(markdown, root=root).passed and not _has_governance_regression(markdown)
+        metrics[metric] += 1
+        if category == "held_out" and actual_passed == expected_passed:
+            metrics["held_out_passed"] += 1
+        if actual_passed != expected_passed:
+            metrics["fixture_case_failures"] += 1
+    return metrics
+
+
+def _category_score(*, passed_cases: int, total_cases: int, fallback: float) -> float:
+    if total_cases == 0:
+        return fallback
+    return passed_cases / total_cases
 
 
 def _anchors(markdown: str) -> tuple[str, ...]:

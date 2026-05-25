@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "held-out-no-regression",
+  "category": "held_out",
+  "markdown": "# Policy\n\nYou must preserve approval and testing requirements.\n",
+  "expected_passed": true
+}

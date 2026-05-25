@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "cross-agent-codex-claude-shared-obligation",
+  "category": "cross_agent",
+  "markdown": "# Agent Policy\n\nCodex and Claude must both cite verification before reporting completion.\n",
+  "expected_passed": true
+}

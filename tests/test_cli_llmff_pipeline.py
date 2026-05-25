@@ -24,13 +24,22 @@ if args[:1] == ["run"]:
     events = Path(args[args.index("--events") + 1])
     checkpoint = Path(args[args.index("--checkpoint") + 1])
     outputs = {}
+    inputs = {}
     index = 0
     while index < len(args):
+        if args[index] == "--input":
+            inputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
         if args[index] == "--output":
             outputs[args[index + 1]] = Path(args[index + 2])
             index += 3
             continue
         index += 1
+    if outputs:
+        next(iter(outputs.values())).parent.joinpath("llmff-inputs.json").write_text(json.dumps({
+            name: str(path) for name, path in inputs.items()
+        }, sort_keys=True) + "\\n", encoding="utf-8")
     trace.write_text('{"event":"step","name":"episode-audit"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
@@ -105,6 +114,39 @@ llmff:
     assert (run_dir / "llmff-events.jsonl").exists()
     assert (run_dir / "checkpoint.json").exists()
     assert (run_dir / "audit.raw.json").exists()
+
+
+def test_audit_passes_redacted_trace_artifact_to_llmff(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug without secrets"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    llmff_inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
+    assert Path(llmff_inputs["episode_trace"]) == run_dir / "trace-redacted.jsonl"
+    assert (run_dir / "trace-input.jsonl").read_text(encoding="utf-8") == trace.read_text(
+        encoding="utf-8"
+    )
+    assert (run_dir / "trace-redacted.jsonl").read_text(encoding="utf-8") == trace.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_audit_rejects_trace_with_secret_before_llmff_execution(tmp_path: Path):

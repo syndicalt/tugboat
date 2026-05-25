@@ -24,6 +24,7 @@ from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
 from tugboat.report.service import write_report
+from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.ingest import ingest_jsonl_trace
 from tugboat.vcs import VcsAdapter, VcsStateError
@@ -165,6 +166,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print("audit blocked: secret detected")
             return 1
+        redacted_trace = run_dir / "trace-redacted.jsonl"
+        redacted_trace.write_text(
+            redact_text((run_dir / "trace-input.jsonl").read_text(encoding="utf-8")),
+            encoding="utf-8",
+        )
         manifests = materialize_manifests(repo)
         if not manifests_are_allowed_by_policy(manifests, policy):
             print("manifest hash is not allowed by policy")
@@ -199,7 +205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 retry_attempts=0,
                 retry_backoff_ms=0,
                 input_paths={
-                    "episode_trace": run_dir / "trace-input.jsonl",
+                    "episode_trace": redacted_trace,
                     "instruction_index": run_dir / "instruction-snapshot",
                     "policy": sidecar_dir(repo) / "policy.yaml",
                 },
