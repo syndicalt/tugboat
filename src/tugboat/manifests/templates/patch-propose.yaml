@@ -1,0 +1,10 @@
+name: patch-propose
+purpose: Propose bounded instruction edits from audited evidence and drift clusters.
+inputs:
+  - instruction_index
+  - drift_clusters
+  - optimizer_notes
+  - policy
+outputs:
+  - candidate_patch
+  - proposal_rationale

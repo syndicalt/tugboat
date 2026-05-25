@@ -1,0 +1,9 @@
+name: patch-eval
+purpose: Evaluate a candidate instruction patch against held-out checks.
+inputs:
+  - candidate_patch
+  - eval_suite
+  - policy
+outputs:
+  - eval_report
+  - policy_decision

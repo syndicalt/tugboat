@@ -1,0 +1,7 @@
+name: instruction-index
+purpose: Build a structured index of repo instruction files and their precedence.
+inputs:
+  - instruction_corpus
+  - policy
+outputs:
+  - instruction_index

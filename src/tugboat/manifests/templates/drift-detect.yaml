@@ -1,0 +1,8 @@
+name: drift-detect
+purpose: Detect recurring gaps between agent behavior and repository instructions.
+inputs:
+  - audit_reports
+  - instruction_index
+outputs:
+  - drift_clusters
+  - optimizer_notes

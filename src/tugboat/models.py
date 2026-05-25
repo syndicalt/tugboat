@@ -67,3 +67,4 @@ class Policy:
     llmff_binary: str = "llmff"
     llmff_require_inspect: bool = True
     llmff_allow_network: bool = False
+    allowed_manifest_hashes: tuple[str, ...] = field(default_factory=tuple)

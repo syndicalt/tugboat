@@ -111,6 +111,12 @@ class Store:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
 
+    def __enter__(self) -> "Store":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
+
     @classmethod
     def open(cls, path: Path) -> "Store":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,6 +328,9 @@ class Store:
 
     def update_audit_event(self, sequence: int, changes: dict[str, Any]) -> None:
         raise PermissionError("audit events are append-only")
+
+    def close(self) -> None:
+        self.connection.close()
 
 
 def _now() -> str:

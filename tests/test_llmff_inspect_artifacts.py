@@ -55,6 +55,22 @@ def test_inspect_manifest_fails_closed_when_network_is_disallowed(tmp_path: Path
     assert not (tmp_path / ".sidecar" / "runs" / "run-1" / "llmff-inspect.json").exists()
 
 
+def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    runner = FixtureLlmffRunner(inspect_payload={"network_required": False})
+
+    with pytest.raises(InspectPolicyError, match="manifest hash"):
+        inspect_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(allowed_manifest_hashes=("not-this-manifest",)),
+            runner=runner,
+        )
+
+    assert not (tmp_path / ".sidecar" / "runs" / "run-1" / "llmff-inspect.json").exists()
+
+
 def test_write_audit_writes_deterministic_pretty_json(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
 

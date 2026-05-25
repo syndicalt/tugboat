@@ -15,6 +15,18 @@ class LlmffRunner(Protocol):
 
 
 @dataclass(frozen=True)
+class RunResult:
+    manifest_path: Path
+    exit_code: int
+    trace_path: Path
+    events_path: Path
+    checkpoint_path: Path
+    output_paths: dict[str, Path]
+    failure_kind: str | None = None
+    failure_message: str | None = None
+
+
+@dataclass(frozen=True)
 class InspectResult:
     manifest_path: Path
     manifest_hash: str

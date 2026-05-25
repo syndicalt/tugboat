@@ -12,7 +12,8 @@ from tugboat.corpus.indexer import index_repo
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.harness.checks import check_harness_legibility
-from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest
+from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
+from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
@@ -69,7 +70,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         result = index_repo(repo, load_policy(repo))
         if not args.check:
-            Store.open(sidecar_dir(repo) / "db.sqlite").index_documents(repo, result)
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.index_documents(repo, result)
         print(f"indexed documents: {result.indexed_count}")
         return 0
 
@@ -80,7 +82,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = new_run_dir(repo)
         shutil.copyfile(trace, run_dir / "trace-input.jsonl")
         _write_instruction_snapshot(repo, run_dir)
-        manifest = _ensure_manifest(repo, "episode-audit")
+        manifests = materialize_manifests(repo)
+        if not manifests_are_allowed_by_policy(manifests, policy):
+            print("manifest hash is not allowed by policy")
+            return 1
+        manifest = next(record.path for record in manifests if record.name == "episode-audit.yaml")
         runner = (
             FixtureLlmffRunner(
                 {
@@ -94,34 +100,76 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy, runner=runner)
         bundle = ingest_jsonl_trace(trace)
-        store = Store.open(sidecar_dir(repo) / "db.sqlite")
-        store.insert_run(
-            run_id=run_dir.name,
-            stage="audit",
-            manifest_hash=inspect.manifest_hash,
-            status="completed",
-            run_dir=run_dir,
-        )
-        evidence_refs = [event.evidence_id for event in bundle.events]
-        audit_id = store.insert_audit(
-            run_id=run_dir.name,
-            failure_class="instruction_missing",
-            severity="medium",
-            confidence=0.75,
-            evidence_refs=evidence_refs,
-            instruction_refs=[document.path for document in index_repo(repo, policy).documents],
-        )
-        write_audit(
-            run_dir,
-            {
-                "audit_id": audit_id,
-                "edit_warranted": True,
-                "evidence_refs": evidence_refs,
-                "failure_class": "instruction_missing",
-                "severity": "medium",
-                "confidence": 0.75,
-            },
-        )
+        audit_payload = {
+            "edit_warranted": True,
+            "evidence_refs": [event.evidence_id for event in bundle.events],
+            "failure_class": "instruction_missing",
+            "severity": "medium",
+            "confidence": 0.75,
+        }
+        if not args.mock_llmff_inspect:
+            run = run_manifest(
+                manifest,
+                run_dir=run_dir,
+                policy=policy,
+                timeout_ms=60_000,
+                retry_attempts=0,
+                retry_backoff_ms=0,
+                input_paths={
+                    "episode_trace": run_dir / "trace-input.jsonl",
+                    "instruction_index": run_dir / "instruction-snapshot",
+                    "policy": sidecar_dir(repo) / "policy.yaml",
+                },
+                output_paths={"audit_report": run_dir / "audit.raw.json"},
+            )
+            if run.exit_code != 0:
+                with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                    store.insert_run(
+                        run_id=run_dir.name,
+                        stage="audit",
+                        manifest_hash=inspect.manifest_hash,
+                        status="failed",
+                        run_dir=run_dir,
+                    )
+                write_audit(
+                    run_dir,
+                    {
+                        "edit_warranted": False,
+                        "evidence_refs": audit_payload["evidence_refs"],
+                        "failure_class": "llmff_run_failed",
+                        "severity": "high",
+                        "confidence": 1.0,
+                        "llmff_exit_code": run.exit_code,
+                        "llmff_failure_kind": run.failure_kind,
+                        "llmff_failure_message": run.failure_message,
+                    },
+                )
+                print(f"audit run failed: {run.exit_code}")
+                return run.exit_code
+            raw_audit = json.loads(run.output_paths["audit_report"].read_text(encoding="utf-8"))
+            if not isinstance(raw_audit, dict):
+                raise ValueError("llmff audit_report output must be a JSON object")
+            audit_payload.update(raw_audit)
+        evidence_refs = [str(ref) for ref in audit_payload.get("evidence_refs", [])]
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash=inspect.manifest_hash,
+                status="completed",
+                run_dir=run_dir,
+            )
+            audit_id = store.insert_audit(
+                run_id=run_dir.name,
+                failure_class=str(audit_payload["failure_class"]),
+                severity=str(audit_payload["severity"]),
+                confidence=float(audit_payload["confidence"]),
+                evidence_refs=evidence_refs,
+                instruction_refs=[document.path for document in index_repo(repo, policy).documents],
+            )
+        audit_payload["audit_id"] = audit_id
+        audit_payload["evidence_refs"] = evidence_refs
+        write_audit(run_dir, audit_payload)
         print(f"audit run: {run_dir.name}")
         return 0
 
@@ -132,16 +180,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not audit.get("edit_warranted", False):
             print("audit does not warrant an instruction edit")
             return 1
-        candidate = _default_candidate(repo, audit_id=int(audit["audit_id"]))
-        decision = evaluate_candidate(repo, load_policy(repo), candidate)
-        artifacts = write_candidate(repo, run_dir.name, candidate)
-        store = Store.open(sidecar_dir(repo) / "db.sqlite")
-        candidate_id = store.insert_candidate(
-            audit_id=int(audit["audit_id"]),
-            candidate=candidate,
-            diff_path=artifacts.diff_path,
-            state="needs_review" if decision.allowed else "rejected",
+        policy = load_policy(repo)
+        candidate = (
+            _run_patch_propose(repo, run_dir, policy, audit_id=int(audit["audit_id"]))
+            if (run_dir / "audit.raw.json").exists()
+            else _default_candidate(repo, audit_id=int(audit["audit_id"]))
         )
+        decision = evaluate_candidate(repo, policy, candidate)
+        artifacts = write_candidate(repo, run_dir.name, candidate)
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            candidate_id = store.insert_candidate(
+                audit_id=int(audit["audit_id"]),
+                candidate=candidate,
+                diff_path=artifacts.diff_path,
+                state="needs_review" if decision.allowed else "rejected",
+            )
         _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
         (run_dir / "policy-gate.json").write_text(
             json.dumps(
@@ -166,13 +219,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             + "\n",
             encoding="utf-8",
         )
-        store.insert_decision(
-            candidate_id=candidate_id,
-            actor="tugboat",
-            policy="deterministic_policy_gate",
-            decision="needs_review" if decision.allowed else "rejected",
-            reason=",".join(decision.reasons),
-        )
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_decision(
+                candidate_id=candidate_id,
+                actor="tugboat",
+                policy="deterministic_policy_gate",
+                decision="needs_review" if decision.allowed else "rejected",
+                reason=",".join(decision.reasons),
+            )
         print(f"candidate: {run_dir / 'candidate.diff'}")
         return 0 if decision.allowed else 1
 
@@ -181,24 +235,53 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
         candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
         candidate_id = int(candidate_meta["candidate_id"])
+        policy = load_policy(repo)
+        passed = True
         metrics = {"governance_regressions": 0}
+        policy_decision_payload: dict[str, object] | None = None
+        if (run_dir / "candidate.raw.json").exists():
+            eval_payload, policy_decision_payload = _run_patch_eval(
+                repo,
+                run_dir,
+                policy,
+                suite_id=args.suite,
+            )
+            passed = bool(eval_payload["passed"])
+            raw_metrics = eval_payload.get("metrics", {})
+            if not isinstance(raw_metrics, dict):
+                raise ValueError("llmff eval_report metrics must be a JSON object")
+            metrics = raw_metrics
         report_path = write_eval_report(
             repo,
             run_dir.name,
             candidate_id=candidate_id,
             suite_id=args.suite,
-            passed=True,
+            passed=passed,
             metrics=metrics,
         )
-        Store.open(sidecar_dir(repo) / "db.sqlite").insert_eval(
-            candidate_id=candidate_id,
-            suite_id=args.suite,
-            report_path=report_path,
-            passed=True,
-            metrics=metrics,
-        )
-        print(f"eval suite: {args.suite} passed")
-        return 0
+        if policy_decision_payload is not None:
+            (run_dir / "policy-gate.json").write_text(
+                json.dumps(
+                    {
+                        "allowed": bool(policy_decision_payload["allowed"]),
+                        "reasons": list(policy_decision_payload.get("reasons", [])),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_eval(
+                candidate_id=candidate_id,
+                suite_id=args.suite,
+                report_path=report_path,
+                passed=passed,
+                metrics=metrics,
+            )
+        print(f"eval suite: {args.suite} {'passed' if passed else 'failed'}")
+        return 0 if passed else 1
 
     if args.command == "report":
         repo = Path(args.repo)
@@ -242,15 +325,6 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
         shutil.copyfile(source, target)
 
 
-def _ensure_manifest(repo: Path, name: str) -> Path:
-    manifest_dir = sidecar_dir(repo) / "manifests"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest = manifest_dir / f"{name}.yaml"
-    if not manifest.exists():
-        manifest.write_text(f"name: {name}\noutputs:\n  - audit.json\n", encoding="utf-8")
-    return manifest
-
-
 def _default_candidate(repo: Path, audit_id: int) -> CandidatePatch:
     base_file = "CODEX.md"
     base_path = repo / base_file
@@ -266,6 +340,93 @@ def _default_candidate(repo: Path, audit_id: int) -> CandidatePatch:
         rationale="User correction showed missing regression-test guidance.",
         sources=(SourceRef("audit:latest", trusted=True),),
     )
+
+
+def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> CandidatePatch:
+    manifests = materialize_manifests(repo)
+    if not manifests_are_allowed_by_policy(manifests, policy):
+        raise RuntimeError("manifest hash is not allowed by policy")
+    manifest = next(record.path for record in manifests if record.name == "patch-propose.yaml")
+    inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    run = run_manifest(
+        manifest,
+        run_dir=run_dir,
+        policy=policy,
+        timeout_ms=60_000,
+        retry_attempts=0,
+        retry_backoff_ms=0,
+        checkpoint_path=run_dir / "checkpoint-patch-propose.json",
+        input_paths={
+            "instruction_index": run_dir / "instruction-snapshot",
+            "drift_clusters": run_dir / "audit.raw.json",
+            "optimizer_notes": run_dir / "audit.json",
+            "policy": sidecar_dir(repo) / "policy.yaml",
+        },
+        output_paths={"candidate_patch": run_dir / "candidate.raw.json"},
+    )
+    if run.exit_code != 0:
+        raise RuntimeError(f"llmff patch-propose failed with exit code {run.exit_code}")
+    payload = json.loads(run.output_paths["candidate_patch"].read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("llmff candidate_patch output must be a JSON object")
+    return _candidate_from_payload(payload, audit_id=audit_id)
+
+
+def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> CandidatePatch:
+    return CandidatePatch(
+        audit_id=audit_id,
+        base_file=str(payload["base_file"]),
+        base_hash=str(payload["base_hash"]),
+        diff=str(payload["diff"]),
+        risk_class=str(payload["risk_class"]),
+        rationale=str(payload["rationale"]),
+        sources=tuple(
+            SourceRef(str(source["source_id"]), trusted=bool(source["trusted"]))
+            for source in payload.get("sources", [])
+            if isinstance(source, dict)
+        ),
+    )
+
+
+def _run_patch_eval(
+    repo: Path,
+    run_dir: Path,
+    policy,
+    *,
+    suite_id: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    manifests = materialize_manifests(repo)
+    if not manifests_are_allowed_by_policy(manifests, policy):
+        raise RuntimeError("manifest hash is not allowed by policy")
+    manifest = next(record.path for record in manifests if record.name == "patch-eval.yaml")
+    inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    suite_path = run_dir / "eval-suite.json"
+    suite_path.write_text(json.dumps({"suite_id": suite_id}, indent=2) + "\n", encoding="utf-8")
+    run = run_manifest(
+        manifest,
+        run_dir=run_dir,
+        policy=policy,
+        timeout_ms=60_000,
+        retry_attempts=0,
+        retry_backoff_ms=0,
+        checkpoint_path=run_dir / "checkpoint-patch-eval.json",
+        input_paths={
+            "candidate_patch": run_dir / "candidate.raw.json",
+            "eval_suite": suite_path,
+            "policy": sidecar_dir(repo) / "policy.yaml",
+        },
+        output_paths={
+            "eval_report": run_dir / "eval-report.raw.json",
+            "policy_decision": run_dir / "policy-decision.raw.json",
+        },
+    )
+    if run.exit_code != 0:
+        raise RuntimeError(f"llmff patch-eval failed with exit code {run.exit_code}")
+    eval_payload = json.loads(run.output_paths["eval_report"].read_text(encoding="utf-8"))
+    decision_payload = json.loads(run.output_paths["policy_decision"].read_text(encoding="utf-8"))
+    if not isinstance(eval_payload, dict) or not isinstance(decision_payload, dict):
+        raise ValueError("llmff patch-eval outputs must be JSON objects")
+    return eval_payload, decision_payload
 
 
 def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:

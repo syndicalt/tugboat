@@ -1,0 +1,9 @@
+name: episode-audit
+purpose: Score an agent episode against the indexed instruction corpus.
+inputs:
+  - episode_trace
+  - instruction_index
+  - policy
+outputs:
+  - audit_report
+  - evidence_ids

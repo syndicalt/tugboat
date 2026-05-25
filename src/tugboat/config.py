@@ -36,6 +36,11 @@ def load_policy(repo: Path) -> Policy:
     llmff = raw.get("llmff", {}) or {}
     entries = tuple(_as_instruction_file(item) for item in raw.get("instruction_files", []))
 
+    allowed_manifest_hashes = llmff.get(
+        "allowed_manifest_hashes",
+        raw.get("allowed_manifest_hashes", []),
+    )
+
     return Policy(
         version=int(raw.get("version", 1)),
         mode=str(raw.get("mode", "proposal_only")),
@@ -46,4 +51,5 @@ def load_policy(repo: Path) -> Policy:
         llmff_binary=str(llmff.get("binary", "llmff")),
         llmff_require_inspect=bool(llmff.get("require_inspect", True)),
         llmff_allow_network=bool(llmff.get("allow_network", False)),
+        allowed_manifest_hashes=tuple(str(item) for item in allowed_manifest_hashes),
     )

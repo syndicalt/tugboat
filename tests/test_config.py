@@ -49,5 +49,42 @@ llmff:
     assert policy.auto_apply_max_changed_lines == 12
 
 
+def test_load_policy_yaml_reads_allowed_manifest_hashes(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+allowed_manifest_hashes:
+  - abc123
+  - def456
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.allowed_manifest_hashes == ("abc123", "def456")
+
+
+def test_load_policy_yaml_reads_llmff_allowed_manifest_hashes(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  allowed_manifest_hashes:
+    - abc123
+    - def456
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.allowed_manifest_hashes == ("abc123", "def456")
+
+
 def test_sidecar_dir_is_repo_local(tmp_path: Path):
     assert sidecar_dir(tmp_path) == tmp_path / ".sidecar"

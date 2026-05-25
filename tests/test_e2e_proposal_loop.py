@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from tugboat.cli import main
@@ -30,6 +31,17 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
     assert (run_dir / "trace-input.jsonl").exists()
     assert (run_dir / "instruction-snapshot").is_dir()
     assert (run_dir / "llmff-inspect.json").exists()
+    manifest_dir = repo / ".sidecar" / "manifests"
+    assert sorted(path.name for path in manifest_dir.glob("*.yaml")) == [
+        "acceptance-summary.yaml",
+        "drift-detect.yaml",
+        "episode-audit.yaml",
+        "instruction-index.yaml",
+        "patch-eval.yaml",
+        "patch-propose.yaml",
+    ]
+    inspect = json.loads((run_dir / "llmff-inspect.json").read_text(encoding="utf-8"))
+    assert inspect["manifest_path"].endswith(".sidecar/manifests/episode-audit.yaml")
     assert (run_dir / "audit.json").exists()
     assert (run_dir / "candidate.diff").exists()
     assert (run_dir / "candidate.json").exists()
@@ -46,13 +58,13 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     assert candidate["audit_id"] == audit["audit_id"]
     assert eval_report["candidate_id"] == candidate["candidate_id"]
-    connection = sqlite3.connect(repo / ".sidecar" / "db.sqlite")
-    assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
-    assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
-    assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] >= 1
-    assert connection.execute("SELECT COUNT(*) FROM audits").fetchone()[0] >= 1
-    assert connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] >= 1
-    assert connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0] >= 1
-    assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] >= 1
-    assert connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] >= 5
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] >= 1
+        assert connection.execute("SELECT COUNT(*) FROM audits").fetchone()[0] >= 1
+        assert connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] >= 1
+        assert connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0] >= 1
+        assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] >= 1
+        assert connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] >= 5
     assert codex.read_text(encoding="utf-8") == original
