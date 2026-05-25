@@ -197,6 +197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy, runner=runner)
         bundle = ingest_jsonl_trace(trace)
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
         audit_payload = {
             "edit_warranted": True,
             "evidence_refs": [event.evidence_id for event in bundle.events],
@@ -227,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         manifest_hash=inspect.manifest_hash,
                         status="failed",
                         run_dir=run_dir,
+                        episode_id=episode_id,
                     )
                 write_audit(
                     run_dir,
@@ -255,6 +258,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 manifest_hash=inspect.manifest_hash,
                 status="completed",
                 run_dir=run_dir,
+                episode_id=episode_id,
             )
             audit_id = store.insert_audit(
                 run_id=run_dir.name,

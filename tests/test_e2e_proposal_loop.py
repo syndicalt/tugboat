@@ -66,6 +66,11 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM trace_events").fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT COUNT(*) FROM runs WHERE stage = 'audit' AND episode_id IS NOT NULL"
+        ).fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM audits").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] >= 1
