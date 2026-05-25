@@ -273,4 +273,7 @@ def test_apply_class_c_requires_explicit_human_review(tmp_path: Path):
     )
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
     assert apply_plan["explicit_human_review"] is True
+    assert apply_plan["review_required_reasons"] == [
+        "class_c_explicit_human_review_required"
+    ]
     assert apply_plan["review_actor"] == "alice"

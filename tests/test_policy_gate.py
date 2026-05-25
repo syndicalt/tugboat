@@ -200,3 +200,59 @@ def test_policy_gate_allows_reworded_governance_constraints_when_terms_are_prese
 
     assert decision.allowed is True
     assert "governance_constraint_removed" not in decision.reasons
+
+
+def test_policy_gate_allows_class_a_safe_tiny_candidate_without_auto_apply_authority(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n Keep this instruction.\n+Fix typo.\n",
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ()
+    assert decision.auto_apply_eligible is False
+
+
+def test_policy_gate_allows_class_b_as_review_required_improvement(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(base_hash=CandidatePatch.hash_file(base_file), risk_class="B")
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ("class_b_review_required",)
+
+
+def test_policy_gate_allows_class_c_only_with_explicit_human_review_requirement(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(base_hash=CandidatePatch.hash_file(base_file), risk_class="C")
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+
+
+def test_policy_gate_rejects_class_d_as_prohibited(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(base_hash=CandidatePatch.hash_file(base_file), risk_class="D")
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "prohibited_risk_class" in decision.reasons

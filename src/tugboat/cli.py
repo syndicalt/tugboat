@@ -715,6 +715,7 @@ def _write_apply_plan(
         "pr_metadata": pr_metadata,
         "review_actor": review_actor,
         "explicit_human_review": explicit_human_review,
+        "review_required_reasons": list(decision.review_required_reasons),
         "decision_rationale": "policy gate and eval report passed",
     }
     path = run_dir / "apply-plan.json"

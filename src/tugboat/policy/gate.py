@@ -24,6 +24,8 @@ DENIAL_REASON_ORDER = (
 )
 PROHIBITED_RISK_CLASSES = frozenset(
     {
+        "class_d",
+        "d",
         "direct_instruction_mutation",
         "vcs_apply",
         "external_network",
@@ -100,10 +102,13 @@ class CandidatePatch:
 class PolicyDecision:
     allowed: bool
     reasons: tuple[str, ...]
+    review_required_reasons: tuple[str, ...] = ()
+    auto_apply_eligible: bool = False
 
 
 def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) -> PolicyDecision:
     found_reasons: set[str] = set()
+    review_required_reasons: set[str] = set()
     repo_root = repo.resolve()
     base_path = (repo / candidate.base_file).resolve()
     if not _is_relative_to(base_path, repo_root):
@@ -125,13 +130,35 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("new_external_endpoint")
     if len(candidate.sources) == 1 and not candidate.sources[0].trusted:
         found_reasons.add("single_untrusted_source")
-    if candidate.risk_class in PROHIBITED_RISK_CLASSES:
+    risk_class = _risk_class_key(candidate.risk_class)
+    if risk_class in PROHIBITED_RISK_CLASSES:
         found_reasons.add("prohibited_risk_class")
+    if risk_class in {"b", "class_b"}:
+        review_required_reasons.add("class_b_review_required")
+    if risk_class in {"c", "class_c", "restricted_policy_change"}:
+        review_required_reasons.add("class_c_explicit_human_review_required")
     if policy.auto_apply_enabled:
         found_reasons.add("auto_apply_not_implemented_in_mvp")
 
     reasons = tuple(reason for reason in DENIAL_REASON_ORDER if reason in found_reasons)
-    return PolicyDecision(allowed=not reasons, reasons=reasons)
+    review_reasons = tuple(
+        reason
+        for reason in (
+            "class_b_review_required",
+            "class_c_explicit_human_review_required",
+        )
+        if reason in review_required_reasons
+    )
+    return PolicyDecision(
+        allowed=not reasons,
+        reasons=reasons,
+        review_required_reasons=review_reasons,
+        auto_apply_eligible=False,
+    )
+
+
+def _risk_class_key(risk_class: str) -> str:
+    return risk_class.strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def _has_modal_weakening(diff: str) -> bool:
