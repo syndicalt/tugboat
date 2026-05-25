@@ -68,6 +68,18 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
         assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM trace_events").fetchone()[0] == 2
+        snapshot = connection.execute(
+            """
+            SELECT path, artifact_path, content_hash, audit_event_sequence
+            FROM instruction_snapshots
+            """
+        ).fetchone()
+        graph = connection.execute(
+            """
+            SELECT artifact_path, graph_hash, audit_event_sequence
+            FROM instruction_graphs
+            """
+        ).fetchone()
         assert connection.execute(
             "SELECT COUNT(*) FROM runs WHERE stage = 'audit' AND episode_id IS NOT NULL"
         ).fetchone()[0] == 1
@@ -77,6 +89,18 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
         assert connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] >= 5
+    assert snapshot == (
+        "CODEX.md",
+        str(run_dir / "instruction-snapshot" / "CODEX.md"),
+        snapshot[2],
+        snapshot[3],
+    )
+    assert len(snapshot[2]) == 64
+    assert snapshot[3] is not None
+    assert graph == (str(run_dir / "instruction-graph.json"), graph[1], graph[2])
+    assert len(graph[1]) == 64
+    assert graph[2] is not None
+    assert (run_dir / "instruction-graph.json").exists()
     assert codex.read_text(encoding="utf-8") == original
 
 

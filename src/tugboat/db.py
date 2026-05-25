@@ -409,6 +409,62 @@ class Store:
         self.connection.commit()
         return job_id
 
+    def record_instruction_snapshot(
+        self,
+        *,
+        run_id: str,
+        path: str,
+        artifact_path: Path,
+    ) -> int:
+        content_hash = _file_hash(artifact_path)
+        event = self.append_audit_event(
+            "instruction_snapshot.recorded",
+            {
+                "run_id": run_id,
+                "path": path,
+                "content_hash": content_hash,
+                "artifact_path": str(artifact_path),
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO instruction_snapshots(
+              run_id, path, content_hash, artifact_path, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (run_id, path, content_hash, str(artifact_path), event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def record_instruction_graph(
+        self,
+        *,
+        run_id: str,
+        artifact_path: Path,
+    ) -> int:
+        graph_hash = _file_hash(artifact_path)
+        event = self.append_audit_event(
+            "instruction_graph.recorded",
+            {
+                "run_id": run_id,
+                "graph_hash": graph_hash,
+                "artifact_path": str(artifact_path),
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO instruction_graphs(
+              run_id, graph_hash, artifact_path, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (run_id, graph_hash, str(artifact_path), event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def record_trace_episode(self, *, repo: Path, bundle: TraceBundle) -> int:
         summary_hash = hashlib.sha256(
             json.dumps(

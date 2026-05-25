@@ -578,11 +578,53 @@ def console_main() -> None:
 def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
     snapshot = run_dir / "instruction-snapshot"
     snapshot.mkdir(parents=True, exist_ok=True)
-    for document in index_repo(repo, load_policy(repo)).documents:
+    result = index_repo(repo, load_policy(repo))
+    for document in result.documents:
         source = repo / document.path
         target = snapshot / document.path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+    graph_path = run_dir / "instruction-graph.json"
+    graph_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "documents": [
+                    {
+                        "path": document.path,
+                        "kind": document.kind,
+                        "precedence": document.precedence,
+                        "protected": document.protected,
+                        "hash": document.hash,
+                        "parser_version": document.parser_version,
+                        "chunks": [
+                            {
+                                "heading_path": list(chunk.heading_path),
+                                "anchor": chunk.anchor,
+                                "byte_start": chunk.byte_start,
+                                "byte_end": chunk.byte_end,
+                                "text_hash": chunk.text_hash,
+                            }
+                            for chunk in document.chunks
+                        ],
+                    }
+                    for document in result.documents
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        for document in result.documents:
+            store.record_instruction_snapshot(
+                run_id=run_dir.name,
+                path=document.path,
+                artifact_path=snapshot / document.path,
+            )
+        store.record_instruction_graph(run_id=run_dir.name, artifact_path=graph_path)
 
 
 def _scored_audit_payload(bundle) -> dict[str, object]:
