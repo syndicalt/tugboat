@@ -90,6 +90,36 @@ def test_policy_gate_rejects_base_file_not_in_allowlist(tmp_path: Path):
     assert "base_file_not_allowed" in decision.reasons
 
 
+def test_policy_gate_allows_base_file_matching_instruction_file_glob(tmp_path: Path):
+    skill = tmp_path / ".codex" / "skills" / "python" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_file=".codex/skills/python/SKILL.md",
+        base_hash=CandidatePatch.hash_file(skill),
+        diff=(
+            "--- a/.codex/skills/python/SKILL.md\n"
+            "+++ b/.codex/skills/python/SKILL.md\n"
+            "@@\n"
+            " Keep this instruction.\n"
+            "+Clarify local testing expectations.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(".codex/skills/**/SKILL.md", "skill", 60, False),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is True
+    assert "base_file_not_allowed" not in decision.reasons
+
+
 def test_policy_gate_rejects_lower_priority_instruction_contradicting_higher_priority(
     tmp_path: Path,
 ):

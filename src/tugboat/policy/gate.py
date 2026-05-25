@@ -479,7 +479,11 @@ def _is_allowed_base_file(base_file: str, policy: Policy) -> bool:
         "CLAUDE.md",
         "SKILL.md",
     }
-    return base_file in allowed
+    normalized_base = _repo_relative_posix(base_file)
+    return any(
+        fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
+        for pattern in allowed
+    )
 
 
 def _is_protected_instruction_file(base_file: str, policy: Policy) -> bool:
