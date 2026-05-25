@@ -13,7 +13,7 @@ from tugboat.corpus.indexer import index_repo
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite
-from tugboat.harness.checks import check_harness_legibility
+from tugboat.harness.checks import check_harness_legibility, generate_harness_report
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
@@ -70,6 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     harness_check = harness_subcommands.add_parser("check")
     harness_check.add_argument("--repo", required=True)
     harness_check.add_argument("--max-instruction-lines", type=int, default=100)
+    harness_report = harness_subcommands.add_parser("report")
+    harness_report.add_argument("--repo", required=True)
     return parser
 
 
@@ -400,6 +402,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         for finding in result.findings:
             print(finding)
         return 1
+
+    if args.command == "harness" and args.harness_command == "report":
+        report = generate_harness_report(Path(args.repo))
+        print("# Tugboat Harness Report")
+        print("## Knowledge Map")
+        for source, targets in report.knowledge_map.items():
+            for target in targets:
+                print(f"{source} -> {target}")
+        print("## Missing Docs")
+        for item in report.missing_docs:
+            print(f"- {item}")
+        print("## Stale Docs")
+        for item in report.stale_docs:
+            print(f"- {item}")
+        print("## Orphaned Runbooks")
+        for item in report.orphaned_runbooks:
+            print(f"- {item}")
+        print("## Doc Gardening Tasks")
+        for item in report.doc_gardening_tasks:
+            print(f"- {item}")
+        return 0
 
     parser.error(f"unknown command: {args.command}")
     return 2
