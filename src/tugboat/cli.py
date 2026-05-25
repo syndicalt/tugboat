@@ -26,6 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("doctor")
 
+    status = subcommands.add_parser("status")
+    status.add_argument("--repo", required=True)
+
     index = subcommands.add_parser("index")
     index.add_argument("--repo", required=True)
     index.add_argument("--check", action="store_true")
@@ -64,6 +67,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("tugboat: ok")
         print("mode: proposal_only")
         print("auto_apply: disabled")
+        return 0
+
+    if args.command == "status":
+        repo = Path(args.repo)
+        policy = load_policy(repo)
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            latest = store.connection.execute(
+                "SELECT stage, status FROM runs ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            pending_candidates = int(
+                store.connection.execute(
+                    "SELECT COUNT(*) FROM candidates WHERE state = 'needs_review'"
+                ).fetchone()[0]
+            )
+            indexed_documents = store.count("documents")
+        print(f"mode: {policy.mode}")
+        print(f"auto_apply: {'enabled' if policy.auto_apply_enabled else 'disabled'}")
+        print(f"indexed_documents: {indexed_documents}")
+        print(f"latest_run: {latest[0]} {latest[1]}" if latest else "latest_run: none")
+        print(f"pending_candidates: {pending_candidates}")
         return 0
 
     if args.command == "index":
