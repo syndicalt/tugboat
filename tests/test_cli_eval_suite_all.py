@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from tugboat.cli import main
+
+
+def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 0
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is True
+    assert report["suite_id"] == "all"
+    assert report["metrics"]["trigger_score"] == 1.0
+    assert report["metrics"]["held_out_score"] == 1.0
+    assert report["metrics"]["governance_passed"] is True
+    assert report["metrics"]["recommendation"] == "accept"
+
+
+def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["metrics"]["governance_regressions"] == 1
+    assert report["metrics"]["recommendation"] == "reject"

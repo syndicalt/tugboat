@@ -12,6 +12,7 @@ from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
+from tugboat.evals import run_offline_eval_suite
 from tugboat.harness.checks import check_harness_legibility
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
@@ -284,7 +285,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         passed = True
         metrics = {"governance_regressions": 0}
         policy_decision_payload: dict[str, object] | None = None
-        if (run_dir / "candidate.raw.json").exists():
+        if args.suite == "all" and not (run_dir / "candidate.raw.json").exists():
+            offline_report = run_offline_eval_suite(repo, suite_id=args.suite)
+            passed = offline_report.passed
+            metrics = {
+                **offline_report.metrics,
+                "trigger_score": offline_report.trigger_score,
+                "held_out_score": offline_report.held_out_score,
+                "governance_passed": offline_report.governance_passed,
+                "recommendation": offline_report.recommendation,
+            }
+        elif (run_dir / "candidate.raw.json").exists():
             eval_payload, policy_decision_payload = _run_patch_eval(
                 repo,
                 run_dir,

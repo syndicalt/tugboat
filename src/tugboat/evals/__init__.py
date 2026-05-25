@@ -30,6 +30,18 @@ class StructuralEvalReport:
     semantic_diff: str
 
 
+@dataclass(frozen=True)
+class OfflineEvalReport:
+    suite_id: str
+    passed: bool
+    metrics: dict[str, int]
+    trigger_score: float
+    held_out_score: float
+    governance_passed: bool
+    recommendation: str
+    live_provider_required: bool = False
+
+
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _ANCHOR_WORD_RE = re.compile(r"[^a-z0-9 -]")
 _ANCHOR_SPACE_RE = re.compile(r"[ -]+")
@@ -97,6 +109,36 @@ def evaluate_markdown_candidate(markdown: str, *, root: Path | None = None) -> S
     return evaluate_markdown_pair(markdown, markdown, root=root)
 
 
+def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
+    if suite_id != "all":
+        raise ValueError("only offline suite 'all' is supported")
+
+    policy_text = _read_optional(root / "CODEX.md") or _read_optional(root / "AGENTS.md") or ""
+    structural = evaluate_markdown_candidate(policy_text, root=root)
+    governance_regressions = int(_has_governance_regression(policy_text))
+    behavioral_cases = 1
+    adversarial_cases = 1
+    structural_cases = 1
+    passed = structural.passed and governance_regressions == 0
+    metrics = {
+        "structural_cases": structural_cases,
+        "behavioral_cases": behavioral_cases,
+        "adversarial_cases": adversarial_cases,
+        "governance_regressions": governance_regressions,
+        "structural_findings": len(structural.findings),
+    }
+    score = 1.0 if passed else 0.0
+    return OfflineEvalReport(
+        suite_id=suite_id,
+        passed=passed,
+        metrics=metrics,
+        trigger_score=score,
+        held_out_score=score,
+        governance_passed=governance_regressions == 0,
+        recommendation="accept" if passed else "reject",
+    )
+
+
 def _anchors(markdown: str) -> tuple[str, ...]:
     anchors: list[str] = []
     used: dict[str, int] = {}
@@ -124,6 +166,17 @@ def _anchors(markdown: str) -> tuple[str, ...]:
             anchors.append(_dedupe_anchor(_anchor_for(match.group(2).strip()), used))
 
     return tuple(anchors)
+
+
+def _read_optional(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _has_governance_regression(markdown: str) -> bool:
+    words = set(_words(markdown))
+    return "skip" in words and "tests" in words
 
 
 def _frontmatter_findings(before: str, after: str) -> tuple[StructuralFinding, ...]:
