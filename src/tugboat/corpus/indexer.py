@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tugboat.corpus.markdown import parse_markdown
-from tugboat.models import IndexResult, InstructionFilePolicy, Policy
+from tugboat.models import DocumentRecord, IndexResult, InstructionFilePolicy, Policy
 
 
 _GLOB_CHARS = set("*?[")
@@ -28,6 +28,22 @@ def index_repo(repo: Path, policy: Policy) -> IndexResult:
         )
 
     return IndexResult(documents=tuple(documents))
+
+
+def instruction_chunk_refs(index: IndexResult) -> list[str]:
+    return [
+        _instruction_chunk_ref(document, chunk.anchor, chunk.byte_start, chunk.byte_end)
+        for document in index.documents
+        for chunk in document.chunks
+    ]
+
+
+def _instruction_chunk_ref(
+    document: DocumentRecord, anchor: str, byte_start: int, byte_end: int
+) -> str:
+    if anchor:
+        return f"{document.path}#{anchor}"
+    return f"{document.path}#bytes-{byte_start}-{byte_end}"
 
 
 def _instruction_paths(

@@ -78,3 +78,37 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
         assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] >= 5
     assert codex.read_text(encoding="utf-8") == original
+
+
+def test_mock_audit_records_chunk_granularity_instruction_refs(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\nUse tests.\n\n## Review\n\nCheck the failure first.\n",
+        encoding="utf-8",
+    )
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "tugboat.cli._scored_audit_payload",
+        lambda bundle: {
+            "edit_warranted": True,
+            "evidence_refs": [event.evidence_id for event in bundle.events],
+            "failure_class": "instruction_missing",
+            "severity": "medium",
+            "confidence": 0.75,
+        },
+    )
+
+    assert main(["index", "--repo", str(repo)]) == 0
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace), "--mock-llmff-inspect"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    expected_refs = ["CODEX.md#rules", "CODEX.md#review"]
+    assert audit["instruction_refs"] == expected_refs
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        stored_refs = json.loads(
+            connection.execute("SELECT instruction_refs_json FROM audits").fetchone()[0]
+        )
+    assert stored_refs == expected_refs

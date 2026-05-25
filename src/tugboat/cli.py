@@ -11,7 +11,7 @@ from pathlib import Path
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
-from tugboat.corpus.indexer import index_repo
+from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
 from tugboat.daemon.runner import DaemonLoopConfig, default_trace_dirs, run_daemon_cycle
 from tugboat.daemon.service import (
     DaemonRunConfig,
@@ -32,9 +32,10 @@ from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
 from tugboat.report.service import write_report
+from tugboat.scoring import ScoreOutcome, score_episode
 from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
-from tugboat.traces.ingest import ingest_jsonl_trace
+from tugboat.traces.ingest import canonical_episode_from_bundle, ingest_jsonl_trace
 from tugboat.vcs import VcsAdapter, VcsStateError
 
 
@@ -212,13 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         bundle = ingest_jsonl_trace(trace)
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
-        audit_payload = {
-            "edit_warranted": True,
-            "evidence_refs": [event.evidence_id for event in bundle.events],
-            "failure_class": "instruction_missing",
-            "severity": "medium",
-            "confidence": 0.75,
-        }
+        audit_payload = _scored_audit_payload(bundle)
         if not args.mock_llmff_inspect:
             run = run_manifest(
                 manifest,
@@ -264,6 +259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError("llmff audit_report output must be a JSON object")
             audit_payload.update(raw_audit)
         evidence_refs = [str(ref) for ref in audit_payload.get("evidence_refs", [])]
+        instruction_refs = instruction_chunk_refs(index_repo(repo, policy))
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.insert_run(
                 run_id=run_dir.name,
@@ -279,10 +275,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 severity=str(audit_payload["severity"]),
                 confidence=float(audit_payload["confidence"]),
                 evidence_refs=evidence_refs,
-                instruction_refs=[document.path for document in index_repo(repo, policy).documents],
+                instruction_refs=instruction_refs,
             )
         audit_payload["audit_id"] = audit_id
         audit_payload["evidence_refs"] = evidence_refs
+        audit_payload["instruction_refs"] = instruction_refs
         write_audit(run_dir, audit_payload)
         print(f"audit run: {run_dir.name}")
         return 0
@@ -554,6 +551,57 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
         target = snapshot / document.path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+
+
+def _scored_audit_payload(bundle) -> dict[str, object]:
+    outcomes = score_episode(canonical_episode_from_bundle(bundle))
+    evidence_refs = _score_evidence_refs(outcomes) or [event.evidence_id for event in bundle.events]
+    payload: dict[str, object] = {
+        "edit_warranted": True,
+        "evidence_refs": evidence_refs,
+        "failure_class": "instruction_missing",
+        "severity": "medium",
+        "confidence": 0.75,
+        "scoring": [_score_outcome_json(outcome) for outcome in outcomes],
+    }
+    if any(outcome.label == "failed-tests" for outcome in outcomes):
+        payload.update(
+            {
+                "failure_class": "agent_ignored_instruction",
+                "severity": "high",
+                "confidence": 0.85,
+            }
+        )
+    elif any(outcome.label == "recurring-user-correction" for outcome in outcomes):
+        payload.update(
+            {
+                "failure_class": "user_preference_not_encoded",
+                "severity": "medium",
+                "confidence": 0.80,
+            }
+        )
+    elif any(outcome.label == "policy-violation" for outcome in outcomes):
+        payload.update(
+            {
+                "failure_class": "unsafe_instruction_pressure",
+                "severity": "critical",
+                "confidence": 0.90,
+            }
+        )
+    return payload
+
+
+def _score_evidence_refs(outcomes: tuple[ScoreOutcome, ...]) -> list[str]:
+    return list(dict.fromkeys(ref for outcome in outcomes for ref in outcome.evidence))
+
+
+def _score_outcome_json(outcome: ScoreOutcome) -> dict[str, object]:
+    return {
+        "plugin": outcome.plugin,
+        "label": outcome.label,
+        "metrics": outcome.metrics,
+        "evidence": list(outcome.evidence),
+    }
 
 
 def _default_candidate(repo: Path, audit_id: int) -> CandidatePatch:
