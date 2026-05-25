@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 
 @dataclass(frozen=True)
 class SidecarMigration:
@@ -28,6 +30,7 @@ class MigrationPlan:
     current_version: int
     target_version: int
     steps: tuple[MigrationStep, ...]
+    report_path: Path | None = None
 
 
 DEFAULT_MIGRATIONS: tuple[SidecarMigration, ...] = (
@@ -68,6 +71,12 @@ def current_sidecar_version(repo: Path) -> int:
     if version_text.exists():
         return int(version_text.read_text(encoding="utf-8").strip())
 
+    policy_yaml = sidecar / "policy.yaml"
+    if policy_yaml.exists():
+        payload = yaml.safe_load(policy_yaml.read_text(encoding="utf-8")) or {}
+        if isinstance(payload, dict) and "version" in payload:
+            return int(payload["version"])
+
     return 1
 
 
@@ -106,6 +115,66 @@ def dry_run_migration_plan(
             )
             for migration in pending
         ),
+    )
+
+
+def execute_migration_plan(
+    repo: Path,
+    migrations: tuple[SidecarMigration, ...] = DEFAULT_MIGRATIONS,
+) -> MigrationPlan:
+    plan = dry_run_migration_plan(repo, migrations)
+    if plan.current_version == 0:
+        return plan
+
+    sidecar = repo / ".sidecar"
+    version_json = sidecar / "version.json"
+    version_json.write_text(
+        json.dumps({"schema_version": plan.target_version}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    if any(step.migration_id == "sidecar-v2-to-v3" for step in plan.steps):
+        (sidecar / "ops" / "observability").mkdir(parents=True, exist_ok=True)
+
+    policy_path = sidecar / "policy.yaml"
+    if policy_path.exists():
+        policy_payload = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(policy_payload, dict):
+            raise ValueError(".sidecar/policy.yaml must contain a mapping")
+        policy_payload["version"] = plan.target_version
+        policy_path.write_text(yaml.safe_dump(policy_payload, sort_keys=True), encoding="utf-8")
+
+    migrations_dir = sidecar / "migrations"
+    migrations_dir.mkdir(parents=True, exist_ok=True)
+    report_path = migrations_dir / "migration-report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "artifact_kind": "sidecar_migration_report",
+                "current_version": plan.current_version,
+                "target_version": plan.target_version,
+                "applied_migrations": [
+                    {
+                        "migration_id": step.migration_id,
+                        "from_version": step.from_version,
+                        "to_version": step.to_version,
+                        "description": step.description,
+                        "actions": list(step.actions),
+                    }
+                    for step in plan.steps
+                ],
+                "version_marker": ".sidecar/version.json",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return MigrationPlan(
+        current_version=plan.current_version,
+        target_version=plan.target_version,
+        steps=plan.steps,
+        report_path=report_path,
     )
 
 

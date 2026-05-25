@@ -23,6 +23,7 @@ def write_report(
         [
             "# Tugboat Report",
             "",
+            "- schema_version: 1",
             f"- candidate: {candidate.base_file}",
             f"- risk_class: {candidate.risk_class}",
             f"- policy_allowed: {str(decision.allowed).lower()}",

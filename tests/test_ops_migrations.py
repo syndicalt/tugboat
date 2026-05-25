@@ -3,12 +3,23 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+import yaml
+
 from tugboat.ops.migrations import (
     DEFAULT_MIGRATIONS,
     current_sidecar_version,
     dry_run_migration_plan,
     ordered_migrations_after,
 )
+
+
+def _execute_migration_plan(repo: Path):
+    try:
+        from tugboat.ops.migrations import execute_migration_plan
+    except ImportError:
+        pytest.fail("execute_migration_plan should execute pending migrations")
+    return execute_migration_plan(repo)
 
 
 def test_current_sidecar_version_reads_version_json(tmp_path: Path) -> None:
@@ -28,6 +39,16 @@ def test_current_sidecar_version_treats_existing_unversioned_sidecar_as_v1(
     (tmp_path / ".sidecar").mkdir()
 
     assert current_sidecar_version(tmp_path) == 1
+
+
+def test_current_sidecar_version_reads_policy_yaml_version_without_marker(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: 2\n", encoding="utf-8")
+
+    assert current_sidecar_version(tmp_path) == 2
 
 
 def test_dry_run_migration_plan_for_missing_sidecar_has_no_steps(tmp_path: Path) -> None:
@@ -70,3 +91,76 @@ def test_dry_run_migration_plan_reports_steps_without_mutating_sidecar(
     )
     assert before == after
     assert json.loads(marker.read_text(encoding="utf-8")) == {"schema_version": 2}
+
+
+def test_execute_migration_plan_updates_older_policy_yaml_to_current_version(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    policy = sidecar / "policy.yaml"
+    policy.write_text(
+        "version: 1\n"
+        "mode: proposal_only\n"
+        "retention:\n"
+        "  raw_traces_days: 14\n",
+        encoding="utf-8",
+    )
+
+    result = _execute_migration_plan(tmp_path)
+
+    assert result.current_version == 1
+    assert result.target_version == DEFAULT_MIGRATIONS[-1].to_version
+    assert [step.migration_id for step in result.steps] == [
+        "sidecar-v1-to-v2",
+        "sidecar-v2-to-v3",
+    ]
+    assert current_sidecar_version(tmp_path) == DEFAULT_MIGRATIONS[-1].to_version
+    assert (sidecar / "ops" / "observability").is_dir()
+    assert json.loads((sidecar / "version.json").read_text(encoding="utf-8")) == {
+        "schema_version": DEFAULT_MIGRATIONS[-1].to_version,
+    }
+    assert yaml.safe_load(policy.read_text(encoding="utf-8")) == {
+        "version": DEFAULT_MIGRATIONS[-1].to_version,
+        "mode": "proposal_only",
+        "retention": {"raw_traces_days": 14},
+    }
+
+
+def test_execute_migration_plan_persists_audit_report(tmp_path: Path) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    result = _execute_migration_plan(tmp_path)
+
+    assert result.report_path == sidecar / "migrations" / "migration-report.json"
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert report == {
+        "artifact_kind": "sidecar_migration_report",
+        "current_version": 1,
+        "target_version": DEFAULT_MIGRATIONS[-1].to_version,
+        "applied_migrations": [
+            {
+                "migration_id": "sidecar-v1-to-v2",
+                "from_version": 1,
+                "to_version": 2,
+                "description": "introduce explicit sidecar schema marker",
+                "actions": [
+                    "read legacy policy and artifact layout",
+                    "write schema marker after migration execution",
+                ],
+            },
+            {
+                "migration_id": "sidecar-v2-to-v3",
+                "from_version": 2,
+                "to_version": 3,
+                "description": "prepare operations artifact directories",
+                "actions": [
+                    "prepare ops observability summary artifact directory",
+                    "write schema marker after migration execution",
+                ],
+            },
+        ],
+        "version_marker": ".sidecar/version.json",
+    }

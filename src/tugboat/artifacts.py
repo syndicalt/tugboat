@@ -7,39 +7,93 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 
-JSON_ARTIFACT_SCHEMAS: dict[str, dict[str, type | tuple[type, ...]]] = {
+JSON_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
+
+JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     "audit.json": {
-        "schema_version": int,
-        "audit_id": int,
-        "edit_warranted": bool,
-        "evidence_refs": list,
-        "failure_class": str,
-        "severity": str,
-        "confidence": (int, float),
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "audit_id",
+            "edit_warranted",
+            "evidence_refs",
+            "failure_class",
+            "severity",
+            "confidence",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "audit_id": {"type": "integer"},
+            "edit_warranted": {"type": "boolean"},
+            "evidence_refs": {"type": "array"},
+            "failure_class": {"type": "string"},
+            "severity": {"type": "string"},
+            "confidence": {"type": "number"},
+            "secret_findings": {"type": "array"},
+            "llmff_exit_code": {"type": "integer"},
+            "llmff_failure_kind": {"type": "string"},
+            "llmff_failure_message": {"type": "string"},
+        },
     },
     "candidate.json": {
-        "schema_version": int,
-        "audit_id": int,
-        "base_file": str,
-        "base_hash": str,
-        "diff_hash": str,
-        "risk_class": str,
-        "rationale": str,
-        "sources": list,
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "audit_id",
+            "base_file",
+            "base_hash",
+            "diff_hash",
+            "risk_class",
+            "rationale",
+            "sources",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "audit_id": {"type": "integer"},
+            "candidate_id": {"type": "integer"},
+            "base_file": {"type": "string"},
+            "base_hash": {"type": "string"},
+            "diff_hash": {"type": "string"},
+            "risk_class": {"type": "string"},
+            "rationale": {"type": "string"},
+            "sources": {"type": "array"},
+        },
     },
     "eval-report.json": {
-        "schema_version": int,
-        "candidate_id": int,
-        "metrics": dict,
-        "passed": bool,
-        "suite_id": str,
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "candidate_id", "metrics", "passed", "suite_id"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "candidate_id": {"type": "integer"},
+            "metrics": {"type": "object"},
+            "passed": {"type": "boolean"},
+            "suite_id": {"type": "string"},
+        },
     },
     "decision.json": {
-        "schema_version": int,
-        "candidate_id": int,
-        "decision": str,
-        "policy_allowed": bool,
-        "policy_reasons": list,
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "candidate_id",
+            "decision",
+            "policy_allowed",
+            "policy_reasons",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "candidate_id": {"type": "integer"},
+            "decision": {"type": "string"},
+            "policy_allowed": {"type": "boolean"},
+            "policy_reasons": {"type": "array"},
+        },
     },
 }
 
@@ -49,23 +103,54 @@ class ArtifactValidationError(ValueError):
 
 
 def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
-    schema = JSON_ARTIFACT_SCHEMAS.get(name)
+    schema = JSON_ARTIFACT_JSON_SCHEMAS.get(name)
     if schema is None:
         raise ArtifactValidationError(f"unknown artifact schema: {name}")
-    for field, expected_type in schema.items():
+    if schema.get("type") != "object":
+        raise ArtifactValidationError(f"{name} schema must be an object schema")
+    properties = schema.get("properties", {})
+    if not isinstance(properties, dict):
+        raise ArtifactValidationError(f"{name} schema properties must be an object")
+    for field in schema.get("required", []):
         if field not in payload:
             raise ArtifactValidationError(f"{name} missing required field: {field}")
-        if not isinstance(payload[field], expected_type):
+    if schema.get("additionalProperties") is False:
+        allowed = set(properties)
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise ArtifactValidationError(f"{name} has additional property: {extra[0]}")
+    for field, value in payload.items():
+        field_schema = properties.get(field)
+        if field_schema is None:
+            continue
+        expected_type = field_schema.get("type")
+        if expected_type is not None and not _matches_json_schema_type(value, str(expected_type)):
             raise ArtifactValidationError(f"{name} field has wrong type: {field}")
-    if payload["schema_version"] != SCHEMA_VERSION:
-        raise ArtifactValidationError(f"{name} has unsupported schema_version")
+        if "const" in field_schema and value != field_schema["const"]:
+            raise ArtifactValidationError(f"{name} has unsupported schema_version")
 
 
 def validate_report_markdown(text: str) -> None:
-    required = ("# Tugboat Report", "## Rationale")
+    required = ("# Tugboat Report", "- schema_version: 1", "## Rationale")
     for marker in required:
         if marker not in text:
             raise ArtifactValidationError(f"report.md missing required section: {marker}")
+
+
+def _matches_json_schema_type(value: object, expected_type: str) -> bool:
+    if expected_type == "array":
+        return isinstance(value, list)
+    if expected_type == "boolean":
+        return isinstance(value, bool)
+    if expected_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected_type == "object":
+        return isinstance(value, dict)
+    if expected_type == "string":
+        return isinstance(value, str)
+    raise ArtifactValidationError(f"unsupported JSON Schema type: {expected_type}")
 
 
 def write_json_artifact(path: Path, payload: dict[str, Any]) -> Path:

@@ -74,6 +74,7 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
         [
             "# Tugboat Report",
             "",
+            "- schema_version: 1",
             "- candidate: CODEX.md",
             "- risk_class: instruction_clarification",
             "- policy_allowed: false",
