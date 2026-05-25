@@ -64,6 +64,10 @@ if args[:1] == ["run"]:
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
             "sources": [{"source_id": "ev_fake", "trusted": True}],
+            "reflections": [{
+                "source_ref": "audit:latest",
+                "summary": "Tests were skipped because regression guidance was missing."
+            }],
             "bounded_edit_metadata": [{
                 "operator": "add",
                 "file": "CODEX.md",
@@ -256,6 +260,53 @@ llmff:
     ]
     assert "llmff proposed regression guidance" in diff
     assert (run_dir / "candidate.raw.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        reflection = store.connection.execute(
+            """
+            SELECT source_ref, reflection_hash, artifact_path, audit_event_sequence
+            FROM reflections
+            WHERE run_id = ?
+            """,
+            (run_dir.name,),
+        ).fetchone()
+        edit = store.connection.execute(
+            """
+            SELECT id, operator, target_path, payload_json, audit_event_sequence
+            FROM edit_operations
+            WHERE candidate_id = ?
+            """,
+            (candidate["candidate_id"],),
+        ).fetchone()
+        candidate_edit = store.connection.execute(
+            """
+            SELECT candidate_id, edit_operation_id, target_path, risk_class, audit_event_sequence
+            FROM candidate_edits
+            WHERE candidate_id = ?
+            """,
+            (candidate["candidate_id"],),
+        ).fetchone()
+
+    assert reflection[0] == "audit:latest"
+    assert len(reflection[1]) == 64
+    assert Path(reflection[2]).exists()
+    assert reflection[3] is not None
+    assert edit[1:3] == ("add", "CODEX.md")
+    assert json.loads(edit[3]) == {
+        "changed_lines": 1,
+        "file": "CODEX.md",
+        "normative_changes": 0,
+        "operator": "add",
+        "section": "Testing",
+    }
+    assert edit[4] is not None
+    assert candidate_edit == (
+        candidate["candidate_id"],
+        edit[0],
+        "CODEX.md",
+        "instruction_clarification",
+        candidate_edit[4],
+    )
+    assert candidate_edit[4] is not None
 
 
 def test_propose_passes_persisted_optimizer_memory_to_llmff(tmp_path: Path):

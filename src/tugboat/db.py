@@ -706,6 +706,98 @@ class Store:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def record_reflection(
+        self,
+        *,
+        run_id: str,
+        source_ref: str,
+        artifact_path: Path,
+    ) -> int:
+        reflection_hash = _file_hash(artifact_path)
+        event = self.append_audit_event(
+            "reflection.recorded",
+            {
+                "run_id": run_id,
+                "source_ref": source_ref,
+                "reflection_hash": reflection_hash,
+                "artifact_path": str(artifact_path),
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO reflections(
+              run_id, source_ref, reflection_hash, artifact_path, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (run_id, source_ref, reflection_hash, str(artifact_path), event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def record_edit_operation(
+        self,
+        *,
+        candidate_id: int,
+        operator: str,
+        target_path: str,
+        payload: dict[str, Any],
+    ) -> int:
+        event = self.append_audit_event(
+            "edit_operation.recorded",
+            {
+                "candidate_id": candidate_id,
+                "operator": operator,
+                "target_path": target_path,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO edit_operations(
+              candidate_id, operator, target_path, payload_json, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                candidate_id,
+                operator,
+                target_path,
+                json.dumps(payload, sort_keys=True),
+                event.sequence,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def record_candidate_edit(
+        self,
+        *,
+        candidate_id: int,
+        edit_operation_id: int,
+        target_path: str,
+        risk_class: str,
+    ) -> int:
+        event = self.append_audit_event(
+            "candidate_edit.recorded",
+            {
+                "candidate_id": candidate_id,
+                "edit_operation_id": edit_operation_id,
+                "target_path": target_path,
+                "risk_class": risk_class,
+            },
+        )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO candidate_edits(
+              candidate_id, edit_operation_id, target_path, risk_class, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (candidate_id, edit_operation_id, target_path, risk_class, event.sequence),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def append_audit_event(self, event_type: str, payload: dict[str, Any]) -> AuditEvent:
         previous = self.connection.execute(
             "SELECT event_hash FROM audit_events ORDER BY sequence DESC LIMIT 1"

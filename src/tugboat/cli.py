@@ -318,6 +318,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 diff_path=artifacts.diff_path,
                 state="needs_review" if decision.allowed else "rejected",
             )
+            _record_candidate_provenance(
+                store,
+                run_id=run_dir.name,
+                run_dir=run_dir,
+                candidate_id=candidate_id,
+                candidate=candidate,
+            )
         _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
         (run_dir / "policy-gate.json").write_text(
             json.dumps(
@@ -784,6 +791,53 @@ def _bounded_edit_metadata_from_payload(payload: dict[str, object]) -> tuple[dic
     if not isinstance(raw_metadata, list):
         return ()
     return tuple(dict(item) for item in raw_metadata if isinstance(item, dict))
+
+
+def _record_candidate_provenance(
+    store: Store,
+    *,
+    run_id: str,
+    run_dir: Path,
+    candidate_id: int,
+    candidate: CandidatePatch,
+) -> None:
+    for item in candidate.bounded_edit_metadata:
+        operator = str(item.get("operator", "unknown"))
+        target_path = str(item.get("file", candidate.base_file))
+        edit_operation_id = store.record_edit_operation(
+            candidate_id=candidate_id,
+            operator=operator,
+            target_path=target_path,
+            payload=item,
+        )
+        store.record_candidate_edit(
+            candidate_id=candidate_id,
+            edit_operation_id=edit_operation_id,
+            target_path=target_path,
+            risk_class=candidate.risk_class,
+        )
+    raw_candidate = run_dir / "candidate.raw.json"
+    if not raw_candidate.exists():
+        return
+    payload = json.loads(raw_candidate.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return
+    reflections = payload.get("reflections", [])
+    if not isinstance(reflections, list):
+        return
+    for index, reflection in enumerate(reflections, start=1):
+        if not isinstance(reflection, dict):
+            continue
+        artifact_path = run_dir / f"reflection-{index:03d}.json"
+        artifact_path.write_text(
+            json.dumps(reflection, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        store.record_reflection(
+            run_id=run_id,
+            source_ref=str(reflection.get("source_ref", f"candidate:{candidate_id}")),
+            artifact_path=artifact_path,
+        )
 
 
 def _run_patch_eval(
