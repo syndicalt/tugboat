@@ -265,6 +265,59 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not manifests_are_allowed_by_policy(manifests, policy):
             print("manifest hash is not allowed by policy")
             return 1
+        instruction_index_path = run_dir / "instruction-snapshot"
+        if not args.mock_llmff_inspect:
+            index_manifest = next(
+                record.path for record in manifests if record.name == "instruction-index.yaml"
+            )
+            index_inspect = inspect_manifest(index_manifest, run_dir=run_dir, policy=policy)
+            index_run = run_manifest(
+                index_manifest,
+                run_dir=run_dir,
+                policy=policy,
+                timeout_ms=60_000,
+                retry_attempts=0,
+                retry_backoff_ms=0,
+                checkpoint_path=run_dir / "checkpoint-instruction-index.json",
+                input_paths={
+                    "instruction_snapshot": run_dir / "instruction-snapshot",
+                    "policy": sidecar_dir(repo) / "policy.yaml",
+                },
+                output_paths={
+                    "instruction_index": run_dir / "instruction-index.raw.json"
+                },
+            )
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.record_llmff_run(
+                    run_id=run_dir.name,
+                    manifest_hash=index_inspect.manifest_hash,
+                    result=index_run,
+                )
+            if index_run.exit_code != 0:
+                with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                    store.insert_run(
+                        run_id=run_dir.name,
+                        stage="instruction_index",
+                        manifest_hash=index_inspect.manifest_hash,
+                        status="failed",
+                        run_dir=run_dir,
+                    )
+                write_audit(
+                    run_dir,
+                    {
+                        "edit_warranted": False,
+                        "evidence_refs": [],
+                        "failure_class": "llmff_run_failed",
+                        "severity": "high",
+                        "confidence": 1.0,
+                        "llmff_exit_code": index_run.exit_code,
+                        "llmff_failure_kind": index_run.failure_kind,
+                        "llmff_failure_message": index_run.failure_message,
+                    },
+                )
+                print(f"instruction index run failed: {index_run.exit_code}")
+                return index_run.exit_code
+            instruction_index_path = index_run.output_paths["instruction_index"]
         manifest = next(record.path for record in manifests if record.name == "episode-audit.yaml")
         runner = (
             FixtureLlmffRunner(
@@ -292,7 +345,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 retry_backoff_ms=0,
                 input_paths={
                     "episode_trace": redacted_trace,
-                    "instruction_index": run_dir / "instruction-snapshot",
+                    "instruction_index": instruction_index_path,
                     "policy": sidecar_dir(repo) / "policy.yaml",
                 },
                 output_paths={"audit_report": run_dir / "audit.raw.json"},

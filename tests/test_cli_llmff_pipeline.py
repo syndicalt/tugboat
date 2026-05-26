@@ -107,7 +107,11 @@ if args[:1] == ["run"]:
             }
         }) + "\\n", encoding="utf-8")
         raise SystemExit(7)
-    if manifest == "episode-audit":
+    if manifest == "instruction-index":
+        outputs["instruction_index"].write_text(json.dumps({
+            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "episode-audit":
         outputs["audit_report"].write_text(json.dumps({
             "edit_warranted": True,
             "failure_class": "instruction_conflict",
@@ -198,7 +202,7 @@ llmff:
             """
             SELECT id, manifest_name, status
             FROM llmff_jobs
-            WHERE run_id = ?
+            WHERE run_id = ? AND manifest_name = 'episode-audit.yaml'
             """,
             (run_dir.name,),
         ).fetchone()
@@ -221,6 +225,63 @@ llmff:
     assert output[1] == str(run_dir / "audit.raw.json")
     assert len(output[2]) == 64
     assert output[3] is not None
+
+
+def test_audit_runs_instruction_index_before_episode_audit(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    llmff_inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        output_names = [
+            row[0]
+            for row in store.connection.execute(
+                """
+                SELECT o.output_name
+                FROM llmff_outputs o
+                JOIN llmff_jobs j ON j.id = o.job_id
+                WHERE j.run_id = ?
+                ORDER BY o.id
+                """,
+                (run_dir.name,),
+            )
+        ]
+
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+    ]
+    assert output_names == ["instruction_index", "audit_report"]
+    assert Path(llmff_inputs["instruction_index"]) == run_dir / "instruction-index.raw.json"
+    assert (run_dir / "instruction-index.raw.json").exists()
 
 
 def test_audit_passes_redacted_trace_artifact_to_llmff(tmp_path: Path):
@@ -444,11 +505,17 @@ llmff:
         ]
 
     assert jobs == [
+        ("instruction-index.yaml", "completed"),
         ("episode-audit.yaml", "completed"),
         ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
     ]
-    assert output_names == ["audit_report", "drift_clusters", "candidate_patch"]
+    assert output_names == [
+        "instruction_index",
+        "audit_report",
+        "drift_clusters",
+        "candidate_patch",
+    ]
     assert Path(llmff_inputs["drift_clusters"]) == run_dir / "drift.raw.json"
     assert (run_dir / "drift.raw.json").exists()
 
@@ -867,12 +934,14 @@ llmff:
         ).fetchone()
 
     assert jobs == [
+        ("instruction-index.yaml", "completed"),
         ("episode-audit.yaml", "completed"),
         ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
         ("patch-eval.yaml", "completed"),
     ]
     assert output_names == [
+        "instruction_index",
         "audit_report",
         "drift_clusters",
         "candidate_patch",
@@ -1043,6 +1112,7 @@ llmff:
         ).fetchall()
 
     assert jobs == [
+        ("instruction-index.yaml", "completed"),
         ("episode-audit.yaml", "completed"),
         ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
