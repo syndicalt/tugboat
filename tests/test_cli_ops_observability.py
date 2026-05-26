@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+
+from tugboat.cli import main
+from tugboat.db import Store
+from tugboat.paths import sidecar_dir
+
+
+def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path, capsys):
+    repo = tmp_path
+    sidecar = sidecar_dir(repo)
+    run_dir = sidecar / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    eval_report = run_dir / "eval-report.json"
+    eval_report.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "suite_id": "all",
+                "passed": True,
+                "trigger_score": 0.7,
+                "held_out_score": 0.9,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="eval",
+            manifest_hash="manifest-hash",
+            status="completed",
+            run_dir=run_dir,
+        )
+        store.insert_eval(
+            candidate_id=7,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={"held_out_score": 0.9},
+        )
+        store.insert_decision(
+            candidate_id=7,
+            actor="reviewer",
+            policy="apply_controller",
+            decision="applied",
+            reason="accepted",
+        )
+        store.insert_decision(
+            candidate_id=8,
+            actor="reviewer",
+            policy="apply_controller",
+            decision="rejected",
+            reason="too broad",
+        )
+        store.append_audit_event(
+            "run_failed",
+            {
+                "run_id": "run-2",
+                "failure_kind": "provider_error",
+                "provider": "openai",
+                "backend": "responses",
+                "status": "failed",
+                "duration_seconds": 12,
+            },
+        )
+        store.append_audit_event(
+            "apply.applied",
+            {"candidate_id": 7, "changed_lines": 4},
+        )
+        store.append_audit_event("rollback.applied", {"candidate_id": 9})
+        store.record_harness_finding(
+            repo_path=repo,
+            finding="Duplicate instruction rule appears 2 times: run tests.",
+            severity="duplicate_rule",
+        )
+    with closing(sqlite3.connect(sidecar / "db.sqlite")) as connection:
+        connection.execute(
+            """
+            INSERT INTO trace_events(
+              episode_id, evidence_id, event_type, line_number, payload_json, audit_event_sequence
+            )
+            VALUES (NULL, 'ev-1', 'user_correction', 1, ?, NULL)
+            """,
+            (json.dumps({"content": "Run tests before final."}, sort_keys=True),),
+        )
+        connection.execute(
+            """
+            INSERT INTO documents(repo_path, path, kind, precedence, protected, hash, mtime, parser_version)
+            VALUES (?, 'CODEX.md', 'agent_policy', 70, 1, 'abc', 1, 'test')
+            """,
+            (str(repo),),
+        )
+        connection.commit()
+
+    assert main(["ops", "observability", "--repo", str(repo)]) == 0
+
+    output = capsys.readouterr().out
+    output_path = sidecar / "ops" / "observability" / "summary.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert f"observability summary: {output_path}" in output
+    assert payload["schema_version"] == 1
+    summary = payload["summary"]
+    assert summary["run_duration"]["count"] == 2
+    assert summary["failure_kind_counts"] == {"provider_error": 1}
+    assert summary["edits"] == {"accepted": 1, "rejected": 1, "rolled_back": 1}
+    assert summary["eval_suite_trends"]["all"]["latest_score"] == 0.9
+    assert summary["provider_backend_failure_rate"] == {"failed": 1, "rate": 1, "total": 1}
+    assert summary["corpus_growth"] == {"earliest_count": 1, "latest_count": 1, "delta": 0}
+    assert summary["duplicate_rule_count"] == 1
+    assert summary["user_correction_recurrence"]["correction_count"] == 1

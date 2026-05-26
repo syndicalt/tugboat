@@ -41,6 +41,7 @@ from tugboat.harness.checks import (
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
+from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.optimization import OptimizationMemory
 from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
@@ -158,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
     harness_report.add_argument("--repo", required=True)
     harness_cleanup = harness_subcommands.add_parser("cleanup")
     harness_cleanup.add_argument("--repo", required=True)
+    ops = subcommands.add_parser("ops")
+    ops_subcommands = ops.add_subparsers(dest="ops_command", required=True)
+    ops_observability = ops_subcommands.add_parser("observability")
+    ops_observability.add_argument("--repo", required=True)
+    ops_observability.add_argument("--output")
     return parser
 
 
@@ -708,6 +714,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     severity="cleanup_candidate",
                 )
         print(f"cleanup candidates: {path}")
+        return 0
+
+    if args.command == "ops" and args.ops_command == "observability":
+        repo = Path(args.repo)
+        output_path = (
+            Path(args.output)
+            if args.output
+            else sidecar_dir(repo) / "ops" / "observability" / "summary.json"
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "summary": summarize_sidecar_observability(repo),
+        }
+        output_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"observability summary: {output_path}")
         return 0
 
     parser.error(f"unknown command: {args.command}")

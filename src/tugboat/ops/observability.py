@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
+import json
+import sqlite3
+from pathlib import Path
 from typing import Any, Iterable
 
 
@@ -29,6 +32,146 @@ def summarize_observability(
         "duplicate_rule_count": _duplicate_rule_count(harness_findings),
         "user_correction_recurrence": _user_correction_recurrence(trace_events),
     }
+
+
+def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
+    db_path = repo / ".sidecar" / "db.sqlite"
+    if not db_path.exists():
+        return summarize_observability()
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        runs = _sidecar_runs(connection)
+        audit_events = _audit_events(connection)
+        evals = _sidecar_evals(connection)
+        decisions = _sidecar_decisions(connection)
+        harness_findings = [
+            str(row["finding"])
+            for row in connection.execute("SELECT finding FROM harness_findings ORDER BY id")
+        ]
+        trace_events = _sidecar_trace_events(connection)
+        corpus_snapshots = [
+            {
+                "captured_at": _latest_document_mtime(connection),
+                "document_count": int(
+                    connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+                ),
+            }
+        ]
+    jobs = [*decisions, *_audit_event_jobs(audit_events)]
+    return summarize_observability(
+        runs=[*runs, *_audit_event_runs(audit_events)],
+        jobs=jobs,
+        evals=evals,
+        corpus_snapshots=corpus_snapshots,
+        harness_findings=harness_findings,
+        trace_events=trace_events,
+    )
+
+
+def _sidecar_runs(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {
+            "run_id": row["id"],
+            "status": row["status"],
+            "started_at": row["created_at"],
+            "finished_at": row["updated_at"],
+        }
+        for row in connection.execute(
+            "SELECT id, status, created_at, updated_at FROM runs ORDER BY created_at"
+        )
+    ]
+
+
+def _audit_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for row in connection.execute(
+        "SELECT event_type, payload_json FROM audit_events ORDER BY sequence"
+    ):
+        payload = json.loads(str(row["payload_json"]))
+        if isinstance(payload, dict):
+            payload = {"event_type": row["event_type"], **payload}
+            events.append(payload)
+    return events
+
+
+def _sidecar_evals(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    evals: list[dict[str, Any]] = []
+    for row in connection.execute(
+        """
+        SELECT suite_id, status, report_path, audit_event_sequence
+        FROM eval_runs
+        ORDER BY id
+        """
+    ):
+        item: dict[str, Any] = {
+            "suite_id": row["suite_id"],
+            "passed": str(row["status"]) == "passed",
+            "completed_at": str(row["audit_event_sequence"] or ""),
+        }
+        report_path = Path(str(row["report_path"]))
+        if report_path.exists():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if isinstance(report, dict):
+                item["score"] = report.get("held_out_score", report.get("trigger_score"))
+        evals.append(item)
+    return evals
+
+
+def _sidecar_decisions(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {
+            "state": row["decision"],
+        }
+        for row in connection.execute("SELECT decision FROM decisions ORDER BY id")
+    ]
+
+
+def _audit_event_jobs(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    for event in events:
+        event_type = str(event.get("event_type", ""))
+        if event_type == "rollback.applied":
+            jobs.append({"state": "rolled_back"})
+        elif event_type == "apply.applied":
+            job = {"state": "observed"}
+            if event.get("changed_lines") is not None:
+                job["changed_lines"] = event["changed_lines"]
+            jobs.append(job)
+    return jobs
+
+
+def _audit_event_runs(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    for event in events:
+        if event.get("failure_kind") is None:
+            continue
+        runs.append(
+            {
+                "run_id": event.get("run_id", ""),
+                "failure_kind": event.get("failure_kind"),
+                "provider": event.get("provider"),
+                "backend": event.get("backend"),
+                "status": event.get("status", "failed"),
+                "duration_seconds": event.get("duration_seconds", 0),
+            }
+        )
+    return runs
+
+
+def _sidecar_trace_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for row in connection.execute(
+        "SELECT event_type, payload_json FROM trace_events ORDER BY id"
+    ):
+        payload = json.loads(str(row["payload_json"]))
+        if isinstance(payload, dict):
+            events.append({"type": row["event_type"], **payload})
+    return events
+
+
+def _latest_document_mtime(connection: sqlite3.Connection) -> str:
+    value = connection.execute("SELECT MAX(mtime) FROM documents").fetchone()[0]
+    return str(value or "")
 
 
 def _run_duration_summary(runs: list[dict[str, Any]]) -> dict[str, int | float]:
