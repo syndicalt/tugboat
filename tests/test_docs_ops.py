@@ -33,11 +33,16 @@ DOC_CONTRACTS = {
             "## Artifacts",
         ],
         "required_text": [
+            'python -m pip install -e ".[dev]"',
             "tugboat doctor",
+            "tugboat ci --repo .",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
             "python -m pytest -q",
             "actions/upload-artifact",
+            ".sidecar/ci/ci-report.json",
+            ".sidecar/ci/**",
+            "if: always()",
         ],
     },
     "docs/ops/security-review.md": {
@@ -201,10 +206,15 @@ DOC_CONTRACTS = {
     "docs/ci/github-actions-template.yml": {
         "sections": [],
         "required_text": [
+            'python -m pip install -e ".[dev]"',
             "tugboat doctor",
+            "tugboat ci --repo .",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
             "python -m pytest --cov -q",
+            "actions/upload-artifact",
+            ".sidecar/ci/**",
+            "if: always()",
         ],
     },
 }
