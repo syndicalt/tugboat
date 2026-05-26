@@ -130,8 +130,10 @@ DOC_CONTRACTS = {
         "required_text": [
             "tugboat doctor",
             "tugboat index --repo .",
+            "tugboat optimize --repo . --trace traces/example.jsonl --suite all",
             "tugboat audit --repo . --trace",
             "tugboat propose --repo . --audit latest",
+            "optimization-summary.json",
             "under 15 minutes",
         ],
     },

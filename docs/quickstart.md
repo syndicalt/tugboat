@@ -26,7 +26,15 @@ tugboat index --repo . --check
 
 ## Proposal Loop
 
-Run the first local proposal loop against a saved trace bundle:
+Run the governed local optimization loop against a saved trace bundle:
+
+```bash
+tugboat optimize --repo . --trace traces/example.jsonl --suite all
+```
+
+This runs audit, proposal, held-out evaluation, and the final acceptance gate. It writes `optimization-summary.json` next to the candidate and eval artifacts.
+
+For debugging or CI decomposition, the same loop can be run step by step:
 
 ```bash
 tugboat audit --repo . --trace traces/example.jsonl --mock-llmff-inspect
@@ -54,4 +62,4 @@ tugboat harness check --repo .
 python -m pytest -q
 ```
 
-Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, and `report.md`.
+Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
