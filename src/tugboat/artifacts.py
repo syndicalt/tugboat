@@ -201,6 +201,17 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "preview_hash": {"type": "string"},
         },
     },
+    "policy-gate.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "allowed", "reasons"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "allowed": {"type": "boolean"},
+            "reasons": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "optimization-summary.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

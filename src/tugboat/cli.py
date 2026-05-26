@@ -456,15 +456,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 candidate=candidate,
             )
         _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
-        (run_dir / "policy-gate.json").write_text(
-            json.dumps(
-                {"allowed": decision_allowed, "reasons": decision_reasons},
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        _write_policy_gate(run_dir, allowed=decision_allowed, reasons=decision_reasons)
         (run_dir / "decision.json").write_text(
             _decision_json(
                 candidate_id=candidate_id,
@@ -583,17 +575,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             live_provider_required=live_provider_required,
         )
         if policy_decision_payload is not None:
-            (run_dir / "policy-gate.json").write_text(
-                json.dumps(
-                    {
-                        "allowed": bool(policy_decision_payload["allowed"]),
-                        "reasons": list(policy_decision_payload.get("reasons", [])),
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="utf-8",
+            _write_policy_gate(
+                run_dir,
+                allowed=bool(policy_decision_payload["allowed"]),
+                reasons=list(policy_decision_payload.get("reasons", [])),
             )
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.insert_eval(
@@ -1061,6 +1046,21 @@ def _candidate_preview_root(repo: Path, run_dir: Path) -> Path:
     if not preview_path.exists():
         raise ValueError("candidate preview file is missing")
     return preview_root
+
+
+def _write_policy_gate(run_dir: Path, *, allowed: bool, reasons: Sequence[object]) -> Path:
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "allowed": allowed,
+        "reasons": [str(reason) for reason in reasons],
+    }
+    validate_json_artifact("policy-gate.json", payload)
+    path = run_dir / "policy-gate.json"
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> CandidatePatch:

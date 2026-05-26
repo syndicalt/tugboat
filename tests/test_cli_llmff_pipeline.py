@@ -755,6 +755,7 @@ llmff:
 
     assert candidate["bounded_edit_metadata"][0]["section"] == "Testing"
     assert policy_gate == {
+        "schema_version": 1,
         "allowed": False,
         "reasons": ["suppressed_by_rejected_edit_memory"],
     }
@@ -812,7 +813,11 @@ llmff:
             (candidate["candidate_id"],),
         ).fetchone()[0]
 
-    assert policy_gate == {"allowed": False, "reasons": ["max_changed_lines_exceeded"]}
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": False,
+        "reasons": ["max_changed_lines_exceeded"],
+    }
     assert decision["decision"] == "rejected"
     assert stored_state == "rejected"
 
@@ -902,7 +907,11 @@ llmff:
     assert eval_report["metrics"] == {"governance_regressions": 1, "held_out_cases": 3}
     assert eval_report["governance_passed"] is False
     assert eval_report["recommendation"] == "reject"
-    assert policy_decision == {"allowed": False, "reasons": ["held_out_regression"]}
+    assert policy_decision == {
+        "schema_version": 1,
+        "allowed": False,
+        "reasons": ["held_out_regression"],
+    }
     assert (run_dir / "eval-report.raw.json").exists()
     assert (run_dir / "policy-decision.raw.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

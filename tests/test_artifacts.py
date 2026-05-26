@@ -77,6 +77,17 @@ def test_validate_eval_report_artifact_accepts_current_schema():
     )
 
 
+def test_validate_policy_gate_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "policy-gate.json",
+        {
+            "schema_version": 1,
+            "allowed": False,
+            "reasons": ["held_out_regression"],
+        },
+    )
+
+
 def test_validate_optimization_summary_artifact_requires_schema_version():
     with pytest.raises(ArtifactValidationError, match="schema_version"):
         validate_json_artifact(

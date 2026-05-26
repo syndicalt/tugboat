@@ -141,6 +141,7 @@ llmff:
     assert (run_dir / "decision.json").exists()
     assert (run_dir / "report.md").exists()
     assert json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8")) == {
+        "schema_version": 1,
         "allowed": True,
         "reasons": [],
     }
