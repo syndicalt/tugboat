@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
+import os
 import sqlite3
+import time
 from contextlib import closing
 
 from tugboat.cli import main
@@ -92,6 +94,53 @@ def test_harness_legibility_flags_missing_ownership_and_verification_metadata(tm
     assert result.findings == [
         "docs/runbook.md is missing ownership metadata.",
         "docs/runbook.md is missing verification-status metadata.",
+    ]
+
+
+def test_harness_legibility_flags_docs_older_than_declared_source_files(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    source = repo / "src"
+    docs.mkdir()
+    source.mkdir()
+    source_file = source / "service.py"
+    doc = docs / "service.md"
+    source_file.write_text("def run():\n    return 'old'\n", encoding="utf-8")
+    doc.write_text(
+        "---\n"
+        "owner: platform\n"
+        "verification_status: verified\n"
+        "source_files: src/service.py\n"
+        "---\n"
+        "# Service\n",
+        encoding="utf-8",
+    )
+    old_time = time.time() - 20
+    new_time = time.time()
+    os.utime(doc, (old_time, old_time))
+    os.utime(source_file, (new_time, new_time))
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [service](docs/service.md).\n",
+        encoding="utf-8",
+    )
+
+    result = check_harness_legibility(repo)
+    report = generate_harness_report(repo)
+
+    expected = "docs/service.md is older than source file src/service.py."
+    assert result.passed is False
+    assert result.findings == [expected]
+    assert report.stale_docs == [expected]
+    assert report.doc_gardening_tasks == ["Refresh docs/service.md from src/service.py."]
+    assert [candidate.to_json_dict() for candidate in generate_cleanup_candidates(repo)] == [
+        {
+            "candidate_id": "harness-cleanup-1",
+            "risk_class": "review_required",
+            "auto_apply": False,
+            "task": "Refresh docs/service.md from src/service.py.",
+            "source_findings": [expected],
+            "required_eval_suites": ["structural"],
+        }
     ]
 
 

@@ -141,6 +141,10 @@ def generate_harness_report(repo: Path) -> HarnessReport:
                     doc_gardening_tasks.append(f"Add ownership metadata to {ref}.")
                 if "verification-status metadata" in finding:
                     doc_gardening_tasks.append(f"Add verification-status metadata to {ref}.")
+                freshness_match = re.match(r"(.+) is older than source file (.+)\.", finding)
+                if freshness_match:
+                    doc_path, source_ref = freshness_match.groups()
+                    doc_gardening_tasks.append(f"Refresh {doc_path} from {source_ref}.")
 
     orphaned_runbooks = [
         path.relative_to(repo).as_posix()
@@ -215,6 +219,13 @@ def _metadata_findings(repo: Path, path: Path) -> list[str]:
         findings.append(f"{relative_path} is missing ownership metadata.")
     if "verification_status" not in frontmatter and "verification-status" not in frontmatter:
         findings.append(f"{relative_path} is missing verification-status metadata.")
+    for source_ref in _source_file_refs(frontmatter):
+        source_path = (repo / source_ref).resolve()
+        if not _is_relative_to(source_path, repo.resolve()) or not source_path.is_file():
+            findings.append(f"{relative_path} references missing source file {source_ref}.")
+            continue
+        if path.stat().st_mtime < source_path.stat().st_mtime:
+            findings.append(f"{relative_path} is older than source file {source_ref}.")
     return findings
 
 
@@ -230,6 +241,11 @@ def _frontmatter(text: str) -> dict[str, str]:
         if separator:
             metadata[key.strip()] = value.strip()
     return {}
+
+
+def _source_file_refs(frontmatter: dict[str, str]) -> list[str]:
+    raw = frontmatter.get("source_files") or frontmatter.get("source-files") or ""
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 def _must_count(text: str) -> int:
@@ -308,6 +324,10 @@ def _finding_by_cleanup_task(report: HarnessReport) -> dict[str, list[str]]:
             mapping[f"Add ownership metadata to {path}."] = [finding]
         if "verification-status metadata" in finding:
             mapping[f"Add verification-status metadata to {path}."] = [finding]
+        freshness_match = re.match(r"(.+) is older than source file (.+)\.", finding)
+        if freshness_match:
+            doc_path, source_ref = freshness_match.groups()
+            mapping[f"Refresh {doc_path} from {source_ref}."] = [finding]
     for orphan in report.orphaned_runbooks:
         task = f"Either reference {orphan} from an instruction map or remove/archive it."
         mapping[task] = [f"{orphan} is not referenced by any instruction map."]
