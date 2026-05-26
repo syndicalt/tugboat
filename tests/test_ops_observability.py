@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import gc
 import json
+import warnings
+from pathlib import Path
 
-from tugboat.ops.observability import summarize_observability
+from tugboat.db import Store
+from tugboat.ops.observability import summarize_observability, summarize_sidecar_observability
 
 
 def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
@@ -129,3 +133,19 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "rate": 0.666667,
         "unique_incident_class_count": 2,
     }
+
+
+def test_summarize_sidecar_observability_closes_sqlite_connection(tmp_path: Path):
+    with Store.open(tmp_path / ".sidecar" / "db.sqlite"):
+        pass
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+        summarize_sidecar_observability(tmp_path)
+        gc.collect()
+
+    assert [
+        warning
+        for warning in caught
+        if issubclass(warning.category, ResourceWarning)
+    ] == []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextlib import closing
 from datetime import datetime
 import json
 import sqlite3
@@ -40,7 +41,7 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
     db_path = repo / ".sidecar" / "db.sqlite"
     if not db_path.exists():
         return summarize_observability()
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         connection.row_factory = sqlite3.Row
         runs = _sidecar_runs(connection)
         audit_events = _audit_events(connection)
