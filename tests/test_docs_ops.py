@@ -294,6 +294,9 @@ def test_dated_security_review_matches_release_evidence_commit() -> None:
     assert expected_coverage in release_notes
     assert expected_coverage in security_review
     combined = f"{release_notes}\n{security_review}"
+    assert "1b979e3" not in combined
+    assert "728 tests" not in combined
+    assert "90.00% coverage" not in combined
     assert "e58d673" not in combined
     assert "725 tests" not in combined
     assert "90.11% coverage" not in combined
