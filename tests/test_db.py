@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from tugboat.db import Store
+from tugboat.llmff.contracts import RunResult
 from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
@@ -47,6 +48,44 @@ def test_store_initializes_roadmap_extension_tables(tmp_path: Path):
             "doc_gardening_runs",
             "optimizer_memory",
         }.issubset(tables)
+
+
+def test_record_llmff_run_persists_exit_code(tmp_path: Path):
+    manifest = tmp_path / "patch-eval.yaml"
+    manifest.write_text("name: patch-eval\n", encoding="utf-8")
+    events = tmp_path / "llmff-events.jsonl"
+    events.write_text(
+        '{"event":"run_failed","run_failed":{"failure_kind":"provider_error","failure_message":"backend unavailable"}}\n',
+        encoding="utf-8",
+    )
+    trace = tmp_path / "llmff-trace.jsonl"
+    trace.write_text('{"event":"step"}\n', encoding="utf-8")
+    checkpoint = tmp_path / "checkpoint.json"
+    checkpoint.write_text('{"manifest_hash":"abc"}\n', encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id="run-1",
+            manifest_hash="abc",
+            result=RunResult(
+                manifest_path=manifest,
+                exit_code=7,
+                trace_path=trace,
+                events_path=events,
+                checkpoint_path=checkpoint,
+                output_paths={},
+                failure_kind="provider_error",
+                failure_message="backend unavailable",
+            ),
+        )
+        row = store.connection.execute(
+            """
+            SELECT manifest_name, status, exit_code
+            FROM llmff_jobs
+            """
+        ).fetchone()
+
+    assert row == ("patch-eval.yaml", "failed", 7)
 
 
 def test_audit_events_are_hash_chained(tmp_path: Path):

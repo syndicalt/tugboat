@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 
 from tugboat.cli import main
@@ -18,6 +19,7 @@ def test_status_reports_empty_sidecar_state(tmp_path: Path, capsys):
         "indexed_documents: 0",
         "latest_run: none",
         "latest_llmff_job: none",
+        "latest_llmff_exit_code: none",
         "latest_llmff_failure_kind: none",
         "pending_candidates: 0",
         "retention_candidates: 0",
@@ -89,6 +91,7 @@ def test_status_reports_failed_llmff_job_and_retention_candidates(tmp_path: Path
     lines = capsys.readouterr().out.splitlines()
     assert "latest_run: propose failed" in lines
     assert "latest_llmff_job: patch-propose.yaml failed" in lines
+    assert "latest_llmff_exit_code: 1" in lines
     assert "latest_llmff_failure_kind: provider_error" in lines
     assert "retention_candidates: 1" in lines
 
@@ -147,4 +150,59 @@ def test_status_reports_llmff_job_for_latest_run_only(tmp_path: Path, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert "latest_run: audit completed" in lines
     assert "latest_llmff_job: none" in lines
+    assert "latest_llmff_exit_code: none" in lines
     assert "latest_llmff_failure_kind: none" in lines
+
+
+def test_status_reports_unknown_exit_code_for_legacy_llmff_jobs(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    db_path = sidecar_dir(repo) / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE runs (
+              id TEXT PRIMARY KEY,
+              episode_id INTEGER,
+              stage TEXT NOT NULL,
+              manifest_hash TEXT NOT NULL,
+              status TEXT NOT NULL,
+              run_dir TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE llmff_jobs (
+              id INTEGER PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              manifest_name TEXT NOT NULL,
+              manifest_hash TEXT NOT NULL,
+              status TEXT NOT NULL,
+              audit_event_sequence INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO runs(id, episode_id, stage, manifest_hash, status, run_dir, created_at, updated_at)
+            VALUES ('run-1', NULL, 'propose', 'abc', 'failed', '.sidecar/runs/run-1', 'run-1', 'run-1')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO llmff_jobs(run_id, manifest_name, manifest_hash, status, audit_event_sequence)
+            VALUES ('run-1', 'patch-propose.yaml', 'abc', 'failed', NULL)
+            """
+        )
+
+    assert main(["status", "--repo", str(repo)]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert "latest_llmff_job: patch-propose.yaml failed" in lines
+    assert "latest_llmff_exit_code: none" in lines

@@ -189,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if latest is not None:
                 latest_llmff = store.connection.execute(
                     """
-                    SELECT id, manifest_name, status
+                    SELECT id, manifest_name, status, exit_code
                     FROM llmff_jobs
                     WHERE run_id = ?
                     ORDER BY id DESC
@@ -217,8 +217,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"latest_run: {latest[1]} {latest[2]}" if latest else "latest_run: none")
         if latest_llmff is None:
             print("latest_llmff_job: none")
+            print("latest_llmff_exit_code: none")
         else:
             print(f"latest_llmff_job: {latest_llmff[1]} {latest_llmff[2]}")
+            print(f"latest_llmff_exit_code: {latest_llmff[3] if latest_llmff[3] is not None else 'none'}")
         print(f"latest_llmff_failure_kind: {latest_failure_kind or 'none'}")
         print(f"pending_candidates: {pending_candidates}")
         print(f"retention_candidates: {len(retention.candidates)}")

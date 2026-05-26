@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS llmff_jobs (
   manifest_name TEXT NOT NULL,
   manifest_hash TEXT NOT NULL,
   status TEXT NOT NULL,
+  exit_code INTEGER,
   audit_event_sequence INTEGER
 );
 CREATE TABLE IF NOT EXISTS llmff_events (
@@ -276,6 +277,7 @@ class Store:
         _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "llmff_jobs", "exit_code", "INTEGER")
         connection.commit()
         return cls(connection)
 
@@ -373,14 +375,22 @@ class Store:
         )
         cursor = self.connection.execute(
             """
-            INSERT INTO llmff_jobs(run_id, manifest_name, manifest_hash, status, audit_event_sequence)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO llmff_jobs(
+              run_id,
+              manifest_name,
+              manifest_hash,
+              status,
+              exit_code,
+              audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
                 result.manifest_path.name,
                 manifest_hash,
                 status,
+                result.exit_code,
                 job_event.sequence,
             ),
         )
