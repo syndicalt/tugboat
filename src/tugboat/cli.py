@@ -461,31 +461,38 @@ def main(argv: Sequence[str] | None = None) -> int:
             recommendation = offline_report.recommendation
             live_provider_required = offline_report.live_provider_required
         elif (run_dir / "candidate.raw.json").exists():
-            eval_payload, policy_decision_payload = _run_patch_eval(
-                repo,
-                run_dir,
-                policy,
-                suite_id=args.suite,
-            )
-            passed = bool(eval_payload["passed"])
-            raw_metrics = eval_payload.get("metrics", {})
-            if not isinstance(raw_metrics, dict):
-                raise ValueError("llmff eval_report metrics must be a JSON object")
-            metrics = raw_metrics
-            trigger_score = _float_eval_field(eval_payload, metrics, "trigger_score", passed)
-            held_out_score = _float_eval_field(eval_payload, metrics, "held_out_score", passed)
-            governance_passed = _bool_eval_field(
-                eval_payload,
-                metrics,
-                "governance_passed",
-                bool(policy_decision_payload and policy_decision_payload["allowed"]),
-            )
-            recommendation = _str_eval_field(
-                eval_payload,
-                metrics,
-                "recommendation",
-                "accept" if passed and governance_passed else "reject",
-            )
+            try:
+                eval_payload, raw_policy_decision_payload = _run_patch_eval(
+                    repo,
+                    run_dir,
+                    policy,
+                    suite_id=args.suite,
+                )
+                policy_decision_payload = _policy_decision_from_payload(
+                    raw_policy_decision_payload
+                )
+                passed = _required_eval_bool(eval_payload, "passed", "llmff eval_report")
+                raw_metrics = eval_payload.get("metrics", {})
+                if not isinstance(raw_metrics, dict):
+                    raise ValueError("llmff eval_report.metrics must be a JSON object")
+                metrics = raw_metrics
+                trigger_score = _float_eval_field(eval_payload, metrics, "trigger_score", passed)
+                held_out_score = _float_eval_field(eval_payload, metrics, "held_out_score", passed)
+                governance_passed = _bool_eval_field(
+                    eval_payload,
+                    metrics,
+                    "governance_passed",
+                    bool(policy_decision_payload["allowed"]),
+                )
+                recommendation = _str_eval_field(
+                    eval_payload,
+                    metrics,
+                    "recommendation",
+                    "accept" if passed and governance_passed else "reject",
+                )
+            except ValueError as error:
+                print(f"eval rejected: {error}")
+                return 1
         else:
             print(f"unsupported offline eval suite: {args.suite}")
             return 1
@@ -1801,6 +1808,8 @@ def _float_eval_field(
     value = payload.get(field, metrics.get(field))
     if value is None:
         return 1.0 if passed else 0.0
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"llmff eval_report.{field} must be a number")
     return float(value)
 
 
@@ -1813,7 +1822,9 @@ def _bool_eval_field(
     value = payload.get(field, metrics.get(field))
     if value is None:
         return default
-    return bool(value)
+    if not isinstance(value, bool):
+        raise ValueError(f"llmff eval_report.{field} must be a boolean")
+    return value
 
 
 def _str_eval_field(
@@ -1825,7 +1836,28 @@ def _str_eval_field(
     value = payload.get(field, metrics.get(field))
     if value is None:
         return default
-    return str(value)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"llmff eval_report.{field} must be a non-empty string")
+    return value
+
+
+def _required_eval_bool(payload: dict[str, object], field: str, prefix: str) -> bool:
+    value = payload.get(field)
+    if not isinstance(value, bool):
+        raise ValueError(f"{prefix}.{field} must be a boolean")
+    return value
+
+
+def _policy_decision_from_payload(payload: dict[str, object]) -> dict[str, object]:
+    allowed = payload.get("allowed")
+    if not isinstance(allowed, bool):
+        raise ValueError("llmff policy_decision.allowed must be a boolean")
+    raw_reasons = payload.get("reasons", [])
+    if not isinstance(raw_reasons, list) or not all(
+        isinstance(reason, str) for reason in raw_reasons
+    ):
+        raise ValueError("llmff policy_decision.reasons must be a JSON list of strings")
+    return {"allowed": allowed, "reasons": list(raw_reasons)}
 
 
 def _assert_eval_acceptance(eval_report: dict[str, object]) -> None:

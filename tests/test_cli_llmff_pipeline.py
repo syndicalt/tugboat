@@ -12,6 +12,8 @@ def _write_fake_llmff(
     *,
     eval_passed: bool = False,
     bounded_edit_metadata: object | None = None,
+    eval_report: object | None = None,
+    policy_decision: object | None = None,
 ) -> Path:
     if bounded_edit_metadata is None:
         bounded_edit_metadata = [
@@ -23,6 +25,28 @@ def _write_fake_llmff(
                 "normative_changes": 0,
             }
         ]
+    if eval_report is None:
+        eval_report = (
+            {
+                "passed": True,
+                "trigger_score": 0.7,
+                "held_out_score": 0.9,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            }
+            if eval_passed
+            else {
+                "passed": False,
+                "metrics": {"governance_regressions": 1, "held_out_cases": 3},
+            }
+        )
+    if policy_decision is None:
+        policy_decision = (
+            {"allowed": True, "reasons": []}
+            if eval_passed
+            else {"allowed": False, "reasons": ["held_out_regression"]}
+        )
     path.write_text(
         """#!/usr/bin/env python3
 import json
@@ -31,6 +55,8 @@ from pathlib import Path
 
 EVAL_PASSED = __EVAL_PASSED__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
+EVAL_REPORT = __EVAL_REPORT__
+POLICY_DECISION = __POLICY_DECISION__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -88,33 +114,15 @@ if args[:1] == ["run"]:
             "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
-        if EVAL_PASSED:
-            outputs["eval_report"].write_text(json.dumps({
-                "passed": True,
-                "trigger_score": 0.7,
-                "held_out_score": 0.9,
-                "governance_passed": True,
-                "recommendation": "accept",
-                "metrics": {"governance_regressions": 0, "held_out_cases": 3},
-            }) + "\\n", encoding="utf-8")
-            outputs["policy_decision"].write_text(json.dumps({
-                "allowed": True,
-                "reasons": [],
-            }) + "\\n", encoding="utf-8")
-        else:
-            outputs["eval_report"].write_text(json.dumps({
-                "passed": False,
-                "metrics": {"governance_regressions": 1, "held_out_cases": 3},
-            }) + "\\n", encoding="utf-8")
-            outputs["policy_decision"].write_text(json.dumps({
-                "allowed": False,
-                "reasons": ["held_out_regression"],
-            }) + "\\n", encoding="utf-8")
+        outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
+        outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
 """.replace("__EVAL_PASSED__", repr(eval_passed)).replace(
             "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
+        ).replace("__EVAL_REPORT__", repr(eval_report)).replace(
+            "__POLICY_DECISION__", repr(policy_decision)
         ),
         encoding="utf-8",
     )
@@ -603,6 +611,53 @@ llmff:
         "source_refs": ["audit:1"],
     }
     assert rejected_memory[3] is not None
+
+
+def test_eval_rejects_malformed_llmff_eval_report_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": "false",
+            "trigger_score": 0.7,
+            "held_out_score": 0.9,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0},
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    capsys.readouterr()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "eval rejected: llmff eval_report.passed must be a boolean" in output
+    assert (run_dir / "eval-report.raw.json").exists()
+    assert not (run_dir / "eval-report.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        eval_count = store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0]
+    assert eval_count == 0
 
 
 def test_optimize_runs_llmff_propose_and_eval_as_governed_workflow(tmp_path: Path):
