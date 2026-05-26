@@ -356,6 +356,180 @@ def test_apply_commit_mode_records_apply_decision_row(tmp_path: Path):
     assert event_type == "decision.recorded"
 
 
+def test_auto_apply_commit_blocks_without_enabled_policy_or_confirmation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--burn-in-days",
+                "30",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_audit(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(
+        f"""
+version: 9
+auto_apply:
+  enabled: true
+  allowed_repositories:
+    - {repo}
+  minimum_burn_in_days: 30
+  maximum_rejection_rate: 0.05
+  maximum_rollback_rate: 0.01
+""",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 0
+    )
+
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    approval = json.loads((run_dir / "auto-apply-approval.json").read_text(encoding="utf-8"))
+    assert apply_plan["mode"] == "commit"
+    assert apply_plan["auto_apply"] is True
+    assert apply_plan["applied_commit"] == _git(repo, "rev-parse", "HEAD")
+    assert approval == {
+        "actor": "operator@example.com",
+        "candidate_id": "7",
+        "change_class": "A",
+        "policy_version": 9,
+        "repository": str(repo.resolve()),
+        "rollback_command": [
+            "tugboat",
+            "rollback",
+            "--repo",
+            str(repo.resolve()),
+            "--decision",
+            run_dir.name,
+            "--execute",
+        ],
+        "vcs": {
+            "branch_name": apply_plan["branch_name"],
+            "commit_sha": apply_plan["applied_commit"],
+            "mode": "commit",
+        },
+    }
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.applied'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        decision = connection.execute(
+            """
+            SELECT actor, policy, decision, applied_commit, rollback_ref
+            FROM decisions
+            WHERE candidate_id = 7 AND policy = 'auto_apply_controller'
+            """
+        ).fetchone()
+
+    assert event is not None
+    event_payload = json.loads(event[0])
+    assert event_payload["approval_bundle"] == approval
+    assert event_payload["reasons"] == []
+    assert decision == (
+        "operator@example.com",
+        "auto_apply_controller",
+        "applied",
+        apply_plan["applied_commit"],
+        json.dumps(approval["rollback_command"], sort_keys=True),
+    )
+
+
+def test_auto_apply_confirmation_requires_matching_policy_version(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    (repo / ".sidecar" / "policy.yaml").write_text(
+        f"""
+version: 9
+auto_apply:
+  enabled: true
+  allowed_repositories:
+    - {repo}
+""",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--review-actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

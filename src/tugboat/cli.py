@@ -11,6 +11,14 @@ from pathlib import Path
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
+from tugboat.auto_apply import (
+    AutoApplyCandidate,
+    AutoApplyConfirmation,
+    AutoApplyPolicy,
+    AutoApplyReadiness,
+    VcsProof,
+    evaluate_auto_apply,
+)
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
 from tugboat.daemon.runner import DaemonLoopConfig, default_trace_dirs, run_daemon_cycle
@@ -84,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--mode", choices=("proposal", "branch", "commit", "pr"), default="proposal")
     apply.add_argument("--review-actor", default="tugboat")
     apply.add_argument("--human-review", action="store_true")
+    apply.add_argument("--auto-apply", action="store_true")
+    apply.add_argument("--confirm-auto-apply", action="store_true")
+    apply.add_argument("--auto-apply-policy-version", type=int)
+    apply.add_argument("--burn-in-days", type=int, default=0)
+    apply.add_argument("--rejection-rate", type=float, default=1.0)
+    apply.add_argument("--rollback-rate", type=float, default=1.0)
 
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("--repo", required=True)
@@ -481,6 +495,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 mode=args.mode,
                 review_actor=args.review_actor,
                 human_review=args.human_review,
+                auto_apply=args.auto_apply,
+                confirm_auto_apply=args.confirm_auto_apply,
+                auto_apply_policy_version=args.auto_apply_policy_version,
+                burn_in_days=args.burn_in_days,
+                rejection_rate=args.rejection_rate,
+                rollback_rate=args.rollback_rate,
             )
         except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
             print(f"apply blocked: {error}")
@@ -1061,6 +1081,12 @@ def _write_apply_plan(
     mode: str,
     review_actor: str,
     human_review: bool,
+    auto_apply: bool = False,
+    confirm_auto_apply: bool = False,
+    auto_apply_policy_version: int | None = None,
+    burn_in_days: int = 0,
+    rejection_rate: float = 1.0,
+    rollback_rate: float = 1.0,
 ) -> Path:
     candidate = _candidate_from_artifacts(run_dir)
     candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
@@ -1080,8 +1106,12 @@ def _write_apply_plan(
     explicit_human_review = _requires_explicit_human_review(candidate.risk_class)
     if explicit_human_review and (not human_review or review_actor == "tugboat"):
         raise ValueError("Class C candidates require explicit human review")
+    if auto_apply and mode != "commit":
+        raise ValueError("auto-apply requires commit mode")
 
     adapter = VcsAdapter(repo)
+    if auto_apply:
+        _assert_auto_apply_user_worktree_clean(adapter)
     adapter.assert_target_files_clean(target_files)
     adapter.assert_base_hashes({candidate.base_file: candidate.base_hash})
     base_branch = adapter.current_branch()
@@ -1100,7 +1130,24 @@ def _write_apply_plan(
     post_hashes: dict[str, str] = {}
     applied_commit = ""
     rollback_command: list[list[str]] = []
+    auto_apply_approval: dict[str, object] | None = None
     pr_metadata: dict[str, object] = {}
+
+    if auto_apply:
+        _assert_auto_apply_precheck(
+            repo,
+            run_dir,
+            candidate_id=candidate_id,
+            candidate=candidate,
+            mode=mode,
+            branch_name=branch_name,
+            review_actor=review_actor,
+            confirmed=confirm_auto_apply,
+            policy_version=auto_apply_policy_version,
+            burn_in_days=burn_in_days,
+            rejection_rate=rejection_rate,
+            rollback_rate=rollback_rate,
+        )
 
     if mode == "branch":
         adapter.create_branch(branch_name)
@@ -1120,6 +1167,22 @@ def _write_apply_plan(
                 reason=f"rollback candidate {candidate_id}",
             ).commands
         ]
+        if auto_apply:
+            auto_apply_approval = _assert_auto_apply_final(
+                repo,
+                run_dir,
+                candidate_id=candidate_id,
+                candidate=candidate,
+                mode=mode,
+                branch_name=branch_name,
+                applied_commit=applied_commit,
+                review_actor=review_actor,
+                confirmed=confirm_auto_apply,
+                policy_version=auto_apply_policy_version,
+                burn_in_days=burn_in_days,
+                rejection_rate=rejection_rate,
+                rollback_rate=rollback_rate,
+            )
     elif mode == "pr":
         adapter.create_branch(branch_name)
         adapter.apply_diff(run_dir / "candidate.diff")
@@ -1147,6 +1210,7 @@ def _write_apply_plan(
         "rollback_command": rollback_command,
         "pr_metadata": pr_metadata,
         "review_actor": review_actor,
+        "auto_apply": auto_apply,
         "explicit_human_review": explicit_human_review,
         "review_required_reasons": list(decision.review_required_reasons),
         "decision_rationale": "policy gate and eval report passed",
@@ -1162,6 +1226,7 @@ def _write_apply_plan(
                 "run_id": run_dir.name,
                 "target_files": list(target_files),
                 "applied_commit": applied_commit,
+                "auto_apply": auto_apply,
             },
         )
         store.insert_decision(
@@ -1188,6 +1253,30 @@ def _write_apply_plan(
                     rollback_command=rollback_command,
                 ),
             )
+        if auto_apply and auto_apply_approval is not None:
+            approval_path = run_dir / "auto-apply-approval.json"
+            approval_path.write_text(
+                json.dumps(auto_apply_approval, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            store.append_audit_event(
+                "auto_apply.applied",
+                {
+                    "candidate_id": candidate_id,
+                    "run_id": run_dir.name,
+                    "approval_bundle": auto_apply_approval,
+                    "reasons": [],
+                },
+            )
+            store.insert_decision(
+                candidate_id=candidate_id,
+                actor=review_actor,
+                policy="auto_apply_controller",
+                decision="applied",
+                reason="auto-apply policy and CLI confirmation passed",
+                applied_commit=applied_commit,
+                rollback_ref=json.dumps(auto_apply_approval["rollback_command"], sort_keys=True),
+            )
         if explicit_human_review and human_review:
             store.record_review_action(
                 candidate_id=candidate_id,
@@ -1196,6 +1285,167 @@ def _write_apply_plan(
                 reason=",".join(decision.review_required_reasons),
             )
     return path
+
+
+def _assert_auto_apply_precheck(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    candidate: CandidatePatch,
+    mode: str,
+    branch_name: str,
+    review_actor: str,
+    confirmed: bool,
+    policy_version: int | None,
+    burn_in_days: int,
+    rejection_rate: float,
+    rollback_rate: float,
+) -> None:
+    rollback_command = _auto_apply_rollback_command(repo, run_dir)
+    decision = evaluate_auto_apply(
+        candidate=AutoApplyCandidate(
+            candidate_id=str(candidate_id),
+            repository=str(repo.resolve()),
+            change_class=candidate.risk_class,
+            categories=(candidate.risk_class,),
+            held_out_eval_passed=True,
+            governance_regression_passed=True,
+            rejection_rate=rejection_rate,
+            rollback_rate=rollback_rate,
+            vcs_proof=VcsProof(
+                mode=mode,
+                commit_sha="pending",
+                branch_name=branch_name,
+                rollback_commands=(rollback_command,),
+            ),
+        ),
+        readiness=_auto_apply_readiness(
+            repo,
+            review_actor=review_actor,
+            confirmed=confirmed,
+            policy_version=policy_version,
+            burn_in_days=burn_in_days,
+        ),
+    )
+    _record_auto_apply_decision(repo, candidate_id, run_dir.name, decision.reasons, review_actor)
+    if not decision.eligible:
+        raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
+
+
+def _assert_auto_apply_user_worktree_clean(adapter: VcsAdapter) -> None:
+    dirty_paths = tuple(
+        path for path in adapter.check_clean_worktree().dirty_paths if not path.startswith(".sidecar/")
+    )
+    if dirty_paths:
+        raise VcsStateError(f"worktree is dirty: {', '.join(dirty_paths)}")
+
+
+def _assert_auto_apply_final(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    candidate: CandidatePatch,
+    mode: str,
+    branch_name: str,
+    applied_commit: str,
+    review_actor: str,
+    confirmed: bool,
+    policy_version: int | None,
+    burn_in_days: int,
+    rejection_rate: float,
+    rollback_rate: float,
+) -> dict[str, object]:
+    rollback_command = _auto_apply_rollback_command(repo, run_dir)
+    decision = evaluate_auto_apply(
+        candidate=AutoApplyCandidate(
+            candidate_id=str(candidate_id),
+            repository=str(repo.resolve()),
+            change_class=candidate.risk_class,
+            categories=(candidate.risk_class,),
+            held_out_eval_passed=True,
+            governance_regression_passed=True,
+            rejection_rate=rejection_rate,
+            rollback_rate=rollback_rate,
+            vcs_proof=VcsProof(
+                mode=mode,
+                commit_sha=applied_commit,
+                branch_name=branch_name,
+                rollback_commands=(rollback_command,),
+            ),
+        ),
+        readiness=_auto_apply_readiness(
+            repo,
+            review_actor=review_actor,
+            confirmed=confirmed,
+            policy_version=policy_version,
+            burn_in_days=burn_in_days,
+        ),
+    )
+    _record_auto_apply_decision(repo, candidate_id, run_dir.name, decision.reasons, review_actor)
+    if not decision.eligible or decision.approval_bundle is None:
+        raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
+    return decision.approval_bundle.to_json_dict()
+
+
+def _auto_apply_readiness(
+    repo: Path,
+    *,
+    review_actor: str,
+    confirmed: bool,
+    policy_version: int | None,
+    burn_in_days: int,
+) -> AutoApplyReadiness:
+    policy = load_policy(repo)
+    return AutoApplyReadiness(
+        burn_in_days=burn_in_days,
+        policy=AutoApplyPolicy(
+            enabled=policy.auto_apply_enabled,
+            version=policy.version,
+            allowed_repositories=policy.auto_apply_allowed_repositories,
+            minimum_burn_in_days=policy.auto_apply_minimum_burn_in_days,
+            maximum_rejection_rate=policy.auto_apply_maximum_rejection_rate,
+            maximum_rollback_rate=policy.auto_apply_maximum_rollback_rate,
+        ),
+        confirmation=AutoApplyConfirmation(
+            confirmed=confirmed,
+            actor=review_actor if confirmed else "",
+            policy_version=policy_version if confirmed else None,
+        ),
+    )
+
+
+def _auto_apply_rollback_command(repo: Path, run_dir: Path) -> tuple[str, ...]:
+    return (
+        "tugboat",
+        "rollback",
+        "--repo",
+        str(repo.resolve()),
+        "--decision",
+        run_dir.name,
+        "--execute",
+    )
+
+
+def _record_auto_apply_decision(
+    repo: Path,
+    candidate_id: int,
+    run_id: str,
+    reasons: tuple[str, ...],
+    actor: str,
+) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": candidate_id,
+                "run_id": run_id,
+                "actor": actor,
+                "eligible": not reasons,
+                "reasons": list(reasons),
+            },
+        )
 
 
 def _apply_applied_event_payload(

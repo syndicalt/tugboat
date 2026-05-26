@@ -5,6 +5,7 @@ import socket
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -90,7 +91,7 @@ def test_run_daemon_once_executes_trace_audit_job_through_storage_layer(tmp_path
     audit = json.loads((run_dirs[0] / "audit.json").read_text(encoding="utf-8"))
     assert audit["failure_class"] == "daemon_trace_audit"
     assert audit["evidence_refs"]
-    with sqlite3.connect(repo / ".sidecar" / "db.sqlite") as connection:
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM trace_events").fetchone()[0] == 2
         assert connection.execute("SELECT COUNT(*) FROM runs WHERE stage = 'audit'").fetchone()[0] == 1

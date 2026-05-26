@@ -56,6 +56,29 @@ def load_policy(repo: Path) -> Policy:
         instruction_files=entries or DEFAULT_INSTRUCTION_FILES,
         auto_apply_enabled=bool(auto_apply.get("enabled", False)),
         auto_apply_max_changed_lines=int(auto_apply.get("max_changed_lines", 20)),
+        auto_apply_allowed_repositories=tuple(
+            str(Path(item).expanduser().resolve())
+            for item in auto_apply.get("allowed_repositories", [])
+        ),
+        auto_apply_minimum_burn_in_days=_as_non_negative_days(
+            auto_apply.get(
+                "minimum_burn_in_days",
+                Policy().auto_apply_minimum_burn_in_days,
+            ),
+            "auto_apply.minimum_burn_in_days",
+        ),
+        auto_apply_maximum_rejection_rate=float(
+            auto_apply.get(
+                "maximum_rejection_rate",
+                Policy().auto_apply_maximum_rejection_rate,
+            )
+        ),
+        auto_apply_maximum_rollback_rate=float(
+            auto_apply.get(
+                "maximum_rollback_rate",
+                Policy().auto_apply_maximum_rollback_rate,
+            )
+        ),
         forbidden_terms=tuple(auto_apply.get("forbidden_terms", Policy().forbidden_terms)),
         llmff_binary=str(llmff.get("binary", "llmff")),
         llmff_require_inspect=bool(llmff.get("require_inspect", True)),

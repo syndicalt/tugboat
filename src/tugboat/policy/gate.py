@@ -25,7 +25,6 @@ DENIAL_REASON_ORDER = (
     "new_external_endpoint",
     "single_untrusted_source",
     "prohibited_risk_class",
-    "auto_apply_not_implemented_in_mvp",
 )
 PROHIBITED_RISK_CLASSES = frozenset(
     {
@@ -175,9 +174,6 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         review_required_reasons.add("class_b_review_required")
     if risk_class in {"c", "class_c", "restricted_policy_change"}:
         review_required_reasons.add("class_c_explicit_human_review_required")
-    if policy.auto_apply_enabled:
-        found_reasons.add("auto_apply_not_implemented_in_mvp")
-
     reasons = tuple(reason for reason in DENIAL_REASON_ORDER if reason in found_reasons)
     review_reasons = tuple(
         reason
@@ -191,7 +187,7 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         allowed=not reasons,
         reasons=reasons,
         review_required_reasons=review_reasons,
-        auto_apply_eligible=False,
+        auto_apply_eligible=not reasons and policy.auto_apply_enabled and risk_class in {"a", "class_a"},
     )
 
 

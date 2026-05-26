@@ -59,7 +59,6 @@ def test_policy_gate_reports_all_machine_readable_denial_reasons(tmp_path: Path)
         "new_external_endpoint",
         "single_untrusted_source",
         "prohibited_risk_class",
-        "auto_apply_not_implemented_in_mvp",
     )
 
 
