@@ -45,6 +45,7 @@ from tugboat.harness.checks import (
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
+from tugboat.ops.backup import build_sidecar_backup_bundle, build_sidecar_restore_bundle
 from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy
@@ -177,12 +178,20 @@ def build_parser() -> argparse.ArgumentParser:
     harness_cleanup.add_argument("--repo", required=True)
     ops = subcommands.add_parser("ops")
     ops_subcommands = ops.add_subparsers(dest="ops_command", required=True)
+    ops_backup = ops_subcommands.add_parser("backup")
+    ops_backup.add_argument("--repo", required=True)
+    ops_backup.add_argument("--archive", required=True)
     ops_migrate = ops_subcommands.add_parser("migrate")
     ops_migrate.add_argument("--repo", required=True)
     ops_migrate.add_argument("--apply", action="store_true")
     ops_observability = ops_subcommands.add_parser("observability")
     ops_observability.add_argument("--repo", required=True)
     ops_observability.add_argument("--output")
+    ops_restore = ops_subcommands.add_parser("restore")
+    ops_restore.add_argument("--repo", required=True)
+    ops_restore.add_argument("--archive", required=True)
+    ops_restore.add_argument("--staging", required=True)
+    ops_restore.add_argument("--pre-restore", required=True)
     return parser
 
 
@@ -597,8 +606,38 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"migration_report: {plan.report_path}")
         return 0
 
+    if args.command == "ops" and args.ops_command == "backup":
+        repo = Path(args.repo)
+        bundle = build_sidecar_backup_bundle(repo=repo, archive_path=Path(args.archive))
+        path = sidecar_dir(repo) / "ops" / "backup-plan.json"
+        _write_ops_command_bundle(path, bundle.to_dict())
+        print(f"backup plan: {path}")
+        return 0
+
+    if args.command == "ops" and args.ops_command == "restore":
+        repo = Path(args.repo)
+        bundle = build_sidecar_restore_bundle(
+            repo=repo,
+            archive_path=Path(args.archive),
+            staging_path=Path(args.staging),
+            pre_restore_path=Path(args.pre_restore),
+        )
+        path = sidecar_dir(repo) / "ops" / "restore-plan.json"
+        _write_ops_command_bundle(path, bundle.to_dict())
+        print(f"restore plan: {path}")
+        return 0
+
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+def _write_ops_command_bundle(path: Path, bundle: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "bundle": bundle,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def console_main() -> None:
