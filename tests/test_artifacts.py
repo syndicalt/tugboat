@@ -395,6 +395,7 @@ def test_validate_optimization_summary_artifact_accepts_current_schema():
             "recommendation": "accept",
             "suite_id": "held-out",
             "trigger_score": 0.7,
+            "validation_baseline_score": None,
         },
     )
 

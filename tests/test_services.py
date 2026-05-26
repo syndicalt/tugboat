@@ -202,6 +202,7 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
                 "recommendation": "accept",
                 "suite_id": "provider-smoke",
                 "trigger_score": 0.84,
+                "validation_baseline_score": None,
             }
         )
         + "\n",

@@ -295,7 +295,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
                 policy_gate = _read_optional_json_object(run_dir / "policy-gate.json")
-                _assert_eval_acceptance(eval_report, policy_gate)
+                _assert_eval_acceptance(
+                    eval_report,
+                    policy_gate,
+                    validation_baseline_score=_load_validation_baseline_score(
+                        repo,
+                        suite_id=args.suite,
+                    ),
+                )
             except ValueError:
                 pass
             else:
@@ -1221,6 +1228,8 @@ def _read_optional_json_object(path: Path) -> dict[str, object] | None:
 def _assert_eval_acceptance(
     eval_report: dict[str, object],
     policy_gate: dict[str, object] | None = None,
+    *,
+    validation_baseline_score: float | None = None,
 ) -> None:
     recommendation = eval_report.get("recommendation")
     if recommendation is not None and str(recommendation) != "accept":
@@ -1241,6 +1250,65 @@ def _assert_eval_acceptance(
             raise ValueError("eval report is missing trigger and held-out validation scores")
     if float(held_out_score) <= float(trigger_score):
         raise ValueError("held-out eval score did not improve")
+    if validation_baseline_score is not None and float(held_out_score) <= validation_baseline_score:
+        raise ValueError("held-out eval score did not improve over baseline")
+
+
+def _validation_baseline_key(suite_id: str) -> str:
+    return f"validation_baseline:{suite_id}"
+
+
+def _repo_memory_path(repo: Path) -> str:
+    return str(repo.resolve())
+
+
+def _load_validation_baseline_score(repo: Path, *, suite_id: str) -> float | None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        return _read_validation_baseline_score(store, repo=repo, suite_id=suite_id)
+
+
+def _read_validation_baseline_score(store: Store, *, repo: Path, suite_id: str) -> float | None:
+    row = store.connection.execute(
+        """
+        SELECT payload_json
+        FROM optimizer_memory
+        WHERE repo_path = ?
+          AND memory_type = 'validation_baseline'
+          AND key = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (_repo_memory_path(repo), _validation_baseline_key(suite_id)),
+    ).fetchone()
+    if row is None:
+        return None
+    payload = json.loads(str(row[0]))
+    if not isinstance(payload, dict):
+        raise ValueError("validation baseline memory payload must be an object")
+    score = payload.get("held_out_score")
+    if score is None:
+        raise ValueError("validation baseline memory is missing held_out_score")
+    return float(score)
+
+
+def _record_validation_baseline_score(
+    store: Store,
+    *,
+    repo: Path,
+    suite_id: str,
+    candidate_id: int,
+    held_out_score: float,
+) -> None:
+    store.record_optimizer_memory(
+        repo_path=_repo_memory_path(repo),
+        memory_type="validation_baseline",
+        key=_validation_baseline_key(suite_id),
+        payload={
+            "candidate_id": candidate_id,
+            "held_out_score": held_out_score,
+            "suite_id": suite_id,
+        },
+    )
 
 
 def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> int:
@@ -1252,8 +1320,10 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
     reason = "proposal rejected"
     trigger_score: float | None = None
     held_out_score: float | None = None
+    validation_baseline_score: float | None = None
     governance_passed = False
     recommendation = "reject"
+    validation_baseline_score = _load_validation_baseline_score(repo, suite_id=suite_id)
     if eval_report_path.exists():
         eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
         trigger_score = _score_from_eval_report(eval_report, "trigger_score")
@@ -1261,7 +1331,11 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         governance_passed = bool(eval_report.get("governance_passed", False))
         recommendation = str(eval_report.get("recommendation", "reject"))
         try:
-            _assert_eval_acceptance(eval_report, _read_optional_json_object(policy_gate_path))
+            _assert_eval_acceptance(
+                eval_report,
+                _read_optional_json_object(policy_gate_path),
+                validation_baseline_score=validation_baseline_score,
+            )
         except ValueError as error:
             reason = str(error)
         else:
@@ -1297,6 +1371,14 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
             category="successful" if decision == "needs_review" else "rejected",
             reason=reason,
         )
+        if decision == "needs_review" and held_out_score is not None:
+            _record_validation_baseline_score(
+                store,
+                repo=repo,
+                suite_id=suite_id,
+                candidate_id=candidate_id,
+                held_out_score=held_out_score,
+            )
 
     summary = {
         "schema_version": SCHEMA_VERSION,
@@ -1308,6 +1390,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         "recommendation": recommendation,
         "suite_id": suite_id,
         "trigger_score": trigger_score,
+        "validation_baseline_score": validation_baseline_score,
     }
     validate_json_artifact("optimization-summary.json", summary)
     (run_dir / "optimization-summary.json").write_text(

@@ -1931,6 +1931,7 @@ llmff:
         "recommendation": "accept",
         "suite_id": "held-out",
         "trigger_score": 0.7,
+        "validation_baseline_score": None,
     }
     assert decision["decision"] == "needs_review"
     assert candidate_state == "needs_review"
@@ -2114,6 +2115,179 @@ llmff:
         "rejected: eval report recommendation was reject for candidate "
         f"{decision['candidate_id']} in suite held-out"
     ]
+
+
+def test_optimize_rejects_candidate_when_held_out_does_not_beat_validation_baseline(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.2,
+            "held_out_score": 0.3,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="validation_baseline",
+            key="validation_baseline:held-out",
+            payload={"suite_id": "held-out", "held_out_score": 0.4},
+        )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_state = store.connection.execute("SELECT state FROM candidates").fetchone()[0]
+        gate_decision = store.connection.execute(
+            """
+            SELECT policy, decision, reason
+            FROM decisions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        baseline_payload = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'validation_baseline'
+              AND key = 'validation_baseline:held-out'
+            """
+        ).fetchone()[0]
+
+    assert summary["decision"] == "rejected"
+    assert summary["validation_baseline_score"] == 0.4
+    assert decision["decision"] == "rejected"
+    assert decision["policy_reasons"] == ["held-out eval score did not improve over baseline"]
+    assert candidate_state == "rejected"
+    assert gate_decision == (
+        "optimization_acceptance_gate",
+        "rejected",
+        "held-out eval score did not improve over baseline",
+    )
+    assert json.loads(baseline_payload)["held_out_score"] == 0.4
+
+
+def test_optimize_records_baseline_rejection_before_acceptance_summary_runs(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        fail_manifest="acceptance-summary",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.2,
+            "held_out_score": 0.3,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="validation_baseline",
+            key="validation_baseline:held-out",
+            payload={"suite_id": "held-out", "held_out_score": 0.4},
+        )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    assert summary["decision"] == "rejected"
+    assert decision["policy_reasons"] == ["held-out eval score did not improve over baseline"]
+
+
+def test_optimize_records_validation_baseline_after_accepted_held_out_improvement(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        baseline_payload = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'validation_baseline'
+              AND key = 'validation_baseline:held-out'
+            """
+        ).fetchone()[0]
+
+    assert summary["decision"] == "needs_review"
+    assert summary["validation_baseline_score"] is None
+    assert json.loads(baseline_payload) == {
+        "candidate_id": summary["candidate_id"],
+        "held_out_score": 0.9,
+        "suite_id": "held-out",
+    }
 
 
 def test_optimize_rejects_candidate_when_governance_gate_fails_despite_accept_recommendation(

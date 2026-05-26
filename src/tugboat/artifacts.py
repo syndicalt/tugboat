@@ -597,6 +597,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "recommendation": {"type": "string"},
             "suite_id": {"type": "string"},
             "trigger_score": {"type": "number"},
+            "validation_baseline_score": {"type": ["number", "null"]},
         },
     },
     "observability-summary.json": {
