@@ -85,6 +85,7 @@ DOC_CONTRACTS = {
             "rg -n",
             "OPENAI_API_KEY",
             "redacted",
+            "optimization-summary.json",
         ],
     },
     "docs/ops/operating-runbook.md": {

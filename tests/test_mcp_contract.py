@@ -147,6 +147,8 @@ def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
             run_dir = runs_dir(repo) / run_id
             run_dir.mkdir(parents=True)
             (run_dir / "audit.json").write_text("{}\n", encoding="utf-8")
+            if run_id == "run-3":
+                (run_dir / "optimization-summary.json").write_text("{}\n", encoding="utf-8")
             store.insert_run(
                 run_id=run_id,
                 stage="audit",
@@ -158,7 +160,10 @@ def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
     result = tugboat_latest_runs(repo, limit=2)
 
     assert [run["run_id"] for run in result["runs"]] == ["run-3", "run-2"]
-    assert result["runs"][0]["artifacts"] == [{"kind": "audit", "path": ".sidecar/runs/run-3/audit.json"}]
+    assert result["runs"][0]["artifacts"] == [
+        {"kind": "audit", "path": ".sidecar/runs/run-3/audit.json"},
+        {"kind": "optimization_summary", "path": ".sidecar/runs/run-3/optimization-summary.json"},
+    ]
 
 
 def test_run_report_summarizes_known_artifacts_without_raw_payloads(tmp_path: Path):
@@ -207,6 +212,41 @@ def test_run_report_summarizes_known_artifacts_without_raw_payloads(tmp_path: Pa
     assert "trace-input" not in serialized
     assert "audit.raw" not in serialized
     assert "sk-thissecret" not in serialized
+
+
+def test_run_report_exposes_optimization_summary_artifact_ref(tmp_path: Path):
+    repo = tmp_path
+    run_dir = runs_dir(repo) / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "optimization-summary.json").write_text(
+        json.dumps(
+            {
+                "audit_run": "run-1",
+                "candidate_id": 1,
+                "decision": "needs_review",
+                "held_out_score": 0.9,
+                "recommendation": "accept",
+                "suite_id": "all",
+                "trigger_score": 0.5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="optimize",
+            manifest_hash="hash",
+            status="completed",
+            run_dir=run_dir,
+        )
+
+    result = tugboat_run_report(repo, "run-1")
+
+    assert result["artifacts"] == [
+        {"kind": "optimization_summary", "path": ".sidecar/runs/run-1/optimization-summary.json"}
+    ]
 
 
 def test_candidate_returns_summary_and_diff_ref_without_raw_diff(tmp_path: Path):

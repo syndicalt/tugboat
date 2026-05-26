@@ -578,6 +578,7 @@ llmff:
     assert eval_report["trigger_score"] == 0.7
     assert eval_report["held_out_score"] == 0.9
     assert summary == {
+        "schema_version": 1,
         "audit_run": run_dir.name,
         "candidate_id": decision["candidate_id"],
         "decision": "needs_review",

@@ -77,6 +77,38 @@ def test_validate_eval_report_artifact_accepts_current_schema():
     )
 
 
+def test_validate_optimization_summary_artifact_requires_schema_version():
+    with pytest.raises(ArtifactValidationError, match="schema_version"):
+        validate_json_artifact(
+            "optimization-summary.json",
+            {
+                "audit_run": "run-1",
+                "candidate_id": 1,
+                "decision": "needs_review",
+                "held_out_score": 0.9,
+                "recommendation": "accept",
+                "suite_id": "held-out",
+                "trigger_score": 0.7,
+            },
+        )
+
+
+def test_validate_optimization_summary_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "optimization-summary.json",
+        {
+            "schema_version": 1,
+            "audit_run": "run-1",
+            "candidate_id": 1,
+            "decision": "needs_review",
+            "held_out_score": 0.9,
+            "recommendation": "accept",
+            "suite_id": "held-out",
+            "trigger_score": 0.7,
+        },
+    )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 

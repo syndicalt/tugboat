@@ -12,7 +12,7 @@ Default retention targets:
 | --- | --- | --- |
 | Raw trace inputs | `trace-input.jsonl`, transcript exports | 14 days |
 | Lifecycle artifacts | inspect reports, events, checkpoints | 30 days |
-| Review artifacts | `audit.json`, `candidate.diff`, `eval-report.json`, `report.md` | 180 days |
+| Review artifacts | `audit.json`, `candidate.diff`, `eval-report.json`, `optimization-summary.json`, `report.md` | 180 days |
 | Decisions | accepted, rejected, rollback, release evidence | 1 year |
 
 Extend retention only for an active incident, audit, or legal hold.
@@ -48,7 +48,7 @@ find .sidecar/runs -type f -name "trace-input.jsonl" -mtime +14 -delete
 find .sidecar/runs -type f \( -name "events.jsonl" -o -name "checkpoint*" \) -mtime +30 -delete
 ```
 
-Never delete `audit.json`, `candidate.diff`, `eval-report.json`, `decision.json`, or `report.md` while a proposal, release, rollback, or incident review is open.
+Never delete `audit.json`, `candidate.diff`, `eval-report.json`, `optimization-summary.json`, `decision.json`, or `report.md` while a proposal, release, rollback, or incident review is open.
 
 ## Audit Evidence
 

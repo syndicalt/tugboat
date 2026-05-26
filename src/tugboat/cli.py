@@ -1837,6 +1837,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         )
 
     summary = {
+        "schema_version": SCHEMA_VERSION,
         "audit_run": run_dir.name,
         "candidate_id": candidate_id,
         "decision": decision,
@@ -1845,6 +1846,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         "suite_id": suite_id,
         "trigger_score": trigger_score,
     }
+    validate_json_artifact("optimization-summary.json", summary)
     (run_dir / "optimization-summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

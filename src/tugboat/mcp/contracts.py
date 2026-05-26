@@ -25,6 +25,7 @@ RUN_ARTIFACTS: tuple[tuple[str, str], ...] = (
     ("candidate", "candidate.json"),
     ("candidate_diff", "candidate.diff"),
     ("eval_report", "eval-report.json"),
+    ("optimization_summary", "optimization-summary.json"),
     ("policy_gate", "policy-gate.json"),
     ("report", "report.md"),
 )
