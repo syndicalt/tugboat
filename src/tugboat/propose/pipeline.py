@@ -198,7 +198,24 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         )
         validate_json_artifact("proposal-rationale.raw.json", rationale_payload)
     _validate_reflections_from_payload(payload)
-    return _candidate_from_payload(payload, audit_id=audit_id)
+    candidate = _candidate_from_payload(payload, audit_id=audit_id)
+    _validate_candidate_sources_declared_by_audit(run_dir, candidate)
+    return candidate
+
+
+def _validate_candidate_sources_declared_by_audit(run_dir: Path, candidate: CandidatePatch) -> None:
+    audit_payload = load_json_object_artifact(run_dir / "audit.json", "audit.json")
+    audit_evidence_refs = audit_payload.get("evidence_refs", [])
+    if not isinstance(audit_evidence_refs, list):
+        raise ValueError("audit.evidence_refs must be a JSON list")
+    declared = {str(ref) for ref in audit_evidence_refs}
+    missing = sorted(
+        source.source_id for source in candidate.sources if source.source_id not in declared
+    )
+    if missing:
+        raise ValueError(
+            "candidate source refs not declared by audit evidence: " + ", ".join(missing)
+        )
 
 
 def _run_drift_detect(

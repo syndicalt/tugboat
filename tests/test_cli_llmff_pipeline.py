@@ -1130,6 +1130,44 @@ llmff:
     assert candidate_edit[4] is not None
 
 
+def test_propose_rejects_candidate_source_not_in_audit_evidence(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        sources=[{"source_id": "ev_hallucinated", "trusted": True}],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "candidate source refs not declared by audit evidence" in output
+    assert (run_dir / "candidate.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        assert store.connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] == 0
+
+
 def test_propose_preserves_llmff_pending_eval_definition_paths(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -2390,10 +2428,7 @@ def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
     fake_llmff = _write_fake_llmff(
         tmp_path / "fake-llmff",
-        sources=[
-            {"source_id": "trace:episode-7", "trusted": True},
-            {"source_id": "drift:cluster-1", "trusted": True},
-        ],
+        sources=[{"source_id": "ev_fake", "trusted": True}],
     )
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
@@ -2479,7 +2514,7 @@ llmff:
         "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
         "rejection_reason": "reject",
         "semantic_fingerprint": rejected_memory[1],
-        "source_refs": ["trace:episode-7", "drift:cluster-1"],
+        "source_refs": ["ev_fake"],
     }
     assert rejected_memory[3] is not None
 

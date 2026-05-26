@@ -65,20 +65,24 @@ if args[:1] == ["run"]:
             "evidence_ids": [evidence_id],
         }) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
+        audit = json.loads(inputs["audit_reports"].read_text(encoding="utf-8"))
+        evidence_refs = audit["evidence_refs"]
         outputs["drift_clusters"].write_text(json.dumps({
-            "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_e2e"]}]
+            "clusters": [{"cluster_id": "drift-1", "evidence_refs": evidence_refs}]
         }) + "\\n", encoding="utf-8")
         if "optimizer_notes" in outputs:
             outputs["optimizer_notes"].write_text(json.dumps({
-                "notes": [{"summary": "Use drift evidence for the proposal.", "evidence_refs": ["ev_e2e"]}]
+                "notes": [{"summary": "Use drift evidence for the proposal.", "evidence_refs": evidence_refs}]
             }) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
+        drift = json.loads(inputs["drift_clusters"].read_text(encoding="utf-8"))
+        evidence_refs = drift["clusters"][0]["evidence_refs"]
         if "proposal_rationale" in outputs:
             outputs["proposal_rationale"].write_text(json.dumps({
                 "rationale": "Patch proposal is grounded in e2e drift evidence.",
-                "evidence_refs": ["ev_e2e"],
+                "evidence_refs": evidence_refs,
                 "style_constraints": ["Preserve concise instruction style."],
             }) + "\\n", encoding="utf-8")
         outputs["candidate_patch"].write_text(json.dumps({
@@ -90,7 +94,7 @@ if args[:1] == ["run"]:
             "expected_behavior_change": "Agents add regression-test guidance before closing fixes.",
             "evals_required": ["governance-regression"],
             "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
-            "sources": [{"source_id": "ev_e2e", "trusted": True}],
+            "sources": [{"source_id": evidence_refs[0], "trusted": True}],
             "bounded_edit_metadata": [{
                 "operator": "add",
                 "file": "CODEX.md",

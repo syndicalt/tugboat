@@ -20,6 +20,7 @@ DENIAL_REASON_ORDER = (
     "approval_policy_self_apply",
     "audit_history_edit",
     "higher_priority_contradiction",
+    "diff_target_mismatch",
     "max_changed_lines_exceeded",
     "risk_class_changed_lines_exceeded",
     "markdown_parse_invalid",
@@ -205,6 +206,9 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("audit_history_edit")
     if _has_higher_priority_contradiction(repo, policy, candidate):
         found_reasons.add("higher_priority_contradiction")
+    touched_paths = _diff_touched_paths(candidate.diff)
+    if touched_paths and touched_paths != {candidate.base_file}:
+        found_reasons.add("diff_target_mismatch")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
         found_reasons.add("base_hash_mismatch")
     changed_line_count = _changed_line_count(candidate.diff)
@@ -266,6 +270,32 @@ def _risk_class_changed_line_budget(policy: Policy, risk_class: str) -> int | No
         if _risk_class_key(configured_class) == risk_class:
             return budget
     return None
+
+
+def _diff_touched_paths(diff: str) -> set[str]:
+    touched: set[str] = set()
+    pending_old_path: str | None = None
+    for line in diff.splitlines():
+        if line.startswith("--- "):
+            pending_old_path = _normalize_diff_path(line[4:].strip())
+            continue
+        if line.startswith("+++ "):
+            new_path = _normalize_diff_path(line[4:].strip())
+            if new_path is not None:
+                touched.add(new_path)
+            elif pending_old_path is not None:
+                touched.add(pending_old_path)
+            pending_old_path = None
+    return touched
+
+
+def _normalize_diff_path(value: str) -> str | None:
+    path = value.split("\t", 1)[0].split(" ", 1)[0]
+    if path == "/dev/null":
+        return None
+    if path.startswith("a/") or path.startswith("b/"):
+        return path[2:]
+    return path
 
 
 def _has_modal_weakening(diff: str) -> bool:

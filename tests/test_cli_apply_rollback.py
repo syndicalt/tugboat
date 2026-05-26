@@ -248,6 +248,40 @@ def test_apply_rejects_unrelated_dirty_worktree_before_creating_branch(tmp_path:
     assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
 
 
+def test_apply_rejects_diff_that_touches_file_outside_candidate_base_file(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "README.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "add readme")
+    original_codex = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_readme = (repo / "README.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+    mismatched_diff = (
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1,3 +1,4 @@\n"
+        " # Rules\n"
+        " \n"
+        " Use tests.\n"
+        "+Unauthorized readme edit.\n"
+    )
+    (run_dir / "candidate.diff").write_text(mismatched_diff, encoding="utf-8")
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    candidate["diff_hash"] = hashlib.sha256(mismatched_diff.encode("utf-8")).hexdigest()
+    (run_dir / "candidate.json").write_text(
+        json.dumps(candidate, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original_codex
+    assert (repo / "README.md").read_text(encoding="utf-8") == original_readme
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_rejects_stale_base_hash_before_writing_plan(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

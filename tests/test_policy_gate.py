@@ -31,6 +31,87 @@ def test_policy_gate_allows_low_risk_candidate_with_matching_base_hash(tmp_path:
     assert decision.reasons == ()
 
 
+def test_policy_gate_rejects_diff_target_that_does_not_match_candidate_base_file(
+    tmp_path: Path,
+):
+    codex = tmp_path / "CODEX.md"
+    codex.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    readme = tmp_path / "README.md"
+    readme.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(codex),
+        diff=(
+            "--- a/README.md\n"
+            "+++ b/README.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Rules\n"
+            " \n"
+            " Use tests.\n"
+            "+Unauthorized readme edit.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "diff_target_mismatch" in decision.reasons
+
+
+def test_policy_gate_allows_create_diff_when_new_path_matches_candidate_base_file(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- /dev/null\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            "+# Rules\n"
+            "+\n"
+            "+Use tests.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert "diff_target_mismatch" not in decision.reasons
+
+
+def test_policy_gate_allows_delete_diff_when_old_path_matches_candidate_base_file(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ /dev/null\n"
+            "@@\n"
+            "-Keep this instruction.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert "diff_target_mismatch" not in decision.reasons
+
+
+def test_policy_gate_normalizes_unprefixed_diff_paths(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff="--- CODEX.md\told\n+++ CODEX.md\tnew\n@@\n Keep this instruction.\n",
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert "diff_target_mismatch" not in decision.reasons
+
+
 def test_policy_gate_reports_all_machine_readable_denial_reasons(tmp_path: Path):
     (tmp_path / "CODEX.md").write_text("Agents must avoid network calls.\n", encoding="utf-8")
     candidate = _candidate(
