@@ -166,6 +166,37 @@ def test_write_candidate_cleans_published_artifacts_when_preview_validation_fail
     assert not (run_dir / "candidate-preview").exists()
 
 
+def test_write_candidate_rejects_secret_in_candidate_metadata(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="CODEX.md",
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " # Rules\n"
+            " \n"
+            " Use tests.\n"
+            "+Clarify regression expectations.\n"
+        ),
+        risk_class="instruction_clarification",
+        rationale="Candidate rationale leaked ghp_abcdefghijklmnopqrstuvwx",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        write_candidate(tmp_path, "run-1", candidate)
+
+    assert not (run_dir / "candidate.diff").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate-preview.json").exists()
+    assert not (run_dir / "candidate-preview").exists()
+
+
 def test_write_eval_report_writes_json_report(tmp_path: Path):
     report_path = write_eval_report(
         tmp_path,

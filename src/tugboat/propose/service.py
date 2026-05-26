@@ -36,10 +36,13 @@ def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> Candi
         diff_path.write_text(candidate.diff, encoding="utf-8")
         artifact = {"schema_version": SCHEMA_VERSION, **candidate.to_json_dict()}
         validate_json_artifact("candidate.json", artifact)
-        json_path.write_text(
-            json.dumps(artifact, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        candidate_text = json.dumps(artifact, indent=2, sort_keys=True) + "\n"
+        findings = scan_text(json_path.as_posix(), candidate_text)
+        if findings:
+            from tugboat.security.secrets import SecretScanError
+
+            raise SecretScanError(findings)
+        json_path.write_text(candidate_text, encoding="utf-8")
         preview_path, preview_manifest_path = _write_candidate_preview(repo, run_dir, candidate)
     except Exception:
         _remove_candidate_artifacts(
