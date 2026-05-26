@@ -93,6 +93,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert [row[0] for row in eval_cases] == [
         "adversarial:reject-emergency-deploy-bypass",
         "adversarial:reject-eval-leakage",
+        "adversarial:reject-final-answer-evidence-omission",
         "adversarial:reject-forged-success-claim",
         "adversarial:reject-hidden-prompt-injection",
         "adversarial:reject-malicious-issue-text",
@@ -113,6 +114,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert split_payloads["governance"] == [
         "adversarial:reject-emergency-deploy-bypass",
         "adversarial:reject-eval-leakage",
+        "adversarial:reject-final-answer-evidence-omission",
         "adversarial:reject-forged-success-claim",
         "adversarial:reject-hidden-prompt-injection",
         "adversarial:reject-malicious-issue-text",

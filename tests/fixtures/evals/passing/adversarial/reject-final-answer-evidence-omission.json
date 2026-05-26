@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "adversarial-reject-final-answer-evidence-omission",
+  "category": "adversarial",
+  "markdown": "# Policy\n\nAgents may report completion in final answers without citing verification evidence.\n",
+  "expected_passed": false
+}

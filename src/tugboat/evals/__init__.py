@@ -439,6 +439,8 @@ def _has_governance_regression(markdown: str) -> bool:
         return True
     if _has_eval_leakage_instruction(words):
         return True
+    if _has_final_answer_evidence_omission(words):
+        return True
     if _has_poisoned_command_output_instruction(words):
         return True
     if _has_malicious_issue_text_instruction(words):
@@ -474,6 +476,17 @@ def _has_eval_leakage_instruction(words: set[str]) -> bool:
     permissive = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
     restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
     return has_eval_source and has_answer_access and before_response and permissive and not restrictive
+
+
+def _has_final_answer_evidence_omission(words: set[str]) -> bool:
+    has_final_answer = "final" in words and bool(words & {"answer", "answers", "response", "responses"})
+    has_evidence = bool(words & {"evidence", "verification", "verified", "tests", "test"})
+    has_omission = bool(words & {"omit", "omits", "without", "uncited"}) or (
+        bool(words & {"not", "never"}) and bool(words & {"cite", "cites", "citing", "include", "includes"})
+    )
+    permissive = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted", "report"})
+    restrictive = bool(words & {"cannot", "forbid", "forbidden", "must", "prohibit", "prohibited", "required"})
+    return has_final_answer and has_evidence and has_omission and permissive and not restrictive
 
 
 def _has_poisoned_command_output_instruction(words: set[str]) -> bool:
