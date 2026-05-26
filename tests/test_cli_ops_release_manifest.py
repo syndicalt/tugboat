@@ -17,7 +17,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
     wheel.parent.mkdir()
     wheel.write_bytes(b"wheel-bytes")
-    pytest_log = repo / ".sidecar" / "ci" / "pytest.log"
+    pytest_log = repo / ".sidecar" / "ci" / "pytest-coverage.log"
     harness_output = repo / ".sidecar" / "ci" / "harness.txt"
     pytest_log.parent.mkdir(parents=True)
     pytest_log.write_text("633 passed\n", encoding="utf-8")
@@ -78,7 +78,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             "tugboat doctor",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
-            "python -m pytest -q",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
         ],
         "retained_evidence": [
             {
@@ -109,6 +109,93 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         "decision": "approved_proposal_only",
         "critical_high_findings": 0,
     }
+
+
+def test_ops_release_manifest_requires_retained_evidence_without_writing(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "ops",
+                "release-manifest",
+                "--repo",
+                str(repo),
+                "--wheel",
+                str(wheel),
+                "--commit",
+                "abc1234",
+                "--ci-url",
+                "https://ci.example/runs/1",
+                "--approver",
+                "release-owner",
+                "--security-review-decision",
+                "approved_proposal_only",
+                "--security-review-critical-high-findings",
+                "0",
+            ]
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: retained evidence is required" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_requires_coverage_evidence_without_writing(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    harness_output = repo / ".sidecar" / "ci" / "harness.txt"
+    harness_output.parent.mkdir(parents=True)
+    harness_output.write_text("harness: ok\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "ops",
+                "release-manifest",
+                "--repo",
+                str(repo),
+                "--wheel",
+                str(wheel),
+                "--commit",
+                "abc1234",
+                "--ci-url",
+                "https://ci.example/runs/1",
+                "--approver",
+                "release-owner",
+                "--security-review-decision",
+                "approved_proposal_only",
+                "--security-review-critical-high-findings",
+                "0",
+                "--evidence",
+                str(harness_output),
+            ]
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: pytest coverage evidence is required" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 
 def test_ops_release_manifest_blocks_open_critical_or_high_security_findings(

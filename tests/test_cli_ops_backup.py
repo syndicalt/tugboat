@@ -32,6 +32,32 @@ def test_ops_backup_writes_non_executing_sidecar_backup_plan(
     assert not archive.exists()
 
 
+def test_ops_backup_blocks_archive_inside_sidecar_without_writing_plan(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+
+    assert (
+        main(
+            [
+                "ops",
+                "backup",
+                "--repo",
+                str(repo),
+                "--archive",
+                str(sidecar / "sidecar-backup.tgz"),
+            ]
+        )
+        == 1
+    )
+
+    assert "backup plan blocked: archive must resolve outside .sidecar" in capsys.readouterr().out
+    assert not (sidecar / "ops" / "backup-plan.json").exists()
+
+
 def test_ops_restore_writes_non_executing_sidecar_restore_plan(
     tmp_path: Path,
     capsys,
@@ -78,6 +104,56 @@ def test_ops_restore_writes_non_executing_sidecar_restore_plan(
         str(repo.resolve()),
     ]
     assert not staging.exists()
+
+
+def test_ops_restore_blocks_staging_and_pre_restore_inside_sidecar_without_writing_plan(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+    archive = repo / "sidecar-backup.tgz"
+
+    assert (
+        main(
+            [
+                "ops",
+                "restore",
+                "--repo",
+                str(repo),
+                "--archive",
+                str(archive),
+                "--staging",
+                str(sidecar / "restore-check"),
+                "--pre-restore",
+                str(repo / ".sidecar.pre-restore"),
+            ]
+        )
+        == 1
+    )
+    assert "restore plan blocked: staging must resolve outside .sidecar" in capsys.readouterr().out
+    assert not (sidecar / "ops" / "restore-plan.json").exists()
+
+    assert (
+        main(
+            [
+                "ops",
+                "restore",
+                "--repo",
+                str(repo),
+                "--archive",
+                str(archive),
+                "--staging",
+                str(repo / "restore-check"),
+                "--pre-restore",
+                str(sidecar / "pre-restore"),
+            ]
+        )
+        == 1
+    )
+    assert "restore plan blocked: pre-restore path must resolve outside .sidecar" in capsys.readouterr().out
+    assert not (sidecar / "ops" / "restore-plan.json").exists()
 
 
 def test_write_ops_command_bundle_validates_payload_before_writing(tmp_path: Path) -> None:

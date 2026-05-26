@@ -24,7 +24,7 @@ Run these commands from the repository root:
 tugboat doctor
 tugboat index --repo . --check
 tugboat harness check --repo .
-python -m pytest -q
+python -m pytest --cov=src --cov-report=term-missing -q
 tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0
 ```
 
@@ -57,6 +57,6 @@ Retain these release records for at least one year:
 - CI run URL and logs.
 - `tugboat doctor` output.
 - `tugboat harness check --repo .` output.
-- `python -m pytest -q` output.
+- `python -m pytest --cov=src --cov-report=term-missing -q` output.
 - Security review approval.
 - Artifact retention/redaction confirmation.

@@ -32,6 +32,7 @@ class OpsCommandBundle:
 def build_sidecar_backup_bundle(*, repo: Path, archive_path: Path) -> OpsCommandBundle:
     repo = repo.resolve()
     archive_path = archive_path.resolve()
+    _require_outside_sidecar(repo, archive_path, "archive")
     checksum_path = Path(f"{archive_path}.sha256")
     sidecar_db = repo / ".sidecar" / "db.sqlite"
 
@@ -74,6 +75,9 @@ def build_sidecar_restore_bundle(
     archive_path = archive_path.resolve()
     staging_path = staging_path.resolve()
     pre_restore_path = pre_restore_path.resolve()
+    _require_outside_sidecar(repo, archive_path, "archive")
+    _require_outside_sidecar(repo, staging_path, "staging")
+    _require_outside_sidecar(repo, pre_restore_path, "pre-restore path")
 
     staged_sidecar = staging_path / ".sidecar"
 
@@ -110,3 +114,9 @@ def build_sidecar_restore_bundle(
             ),
         ),
     )
+
+
+def _require_outside_sidecar(repo: Path, path: Path, label: str) -> None:
+    sidecar = (repo / ".sidecar").resolve()
+    if path == sidecar or path.is_relative_to(sidecar):
+        raise ValueError(f"{label} must resolve outside .sidecar")

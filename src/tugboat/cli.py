@@ -780,7 +780,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ops" and args.ops_command == "backup":
         repo = Path(args.repo)
-        bundle = build_sidecar_backup_bundle(repo=repo, archive_path=Path(args.archive))
+        try:
+            bundle = build_sidecar_backup_bundle(repo=repo, archive_path=Path(args.archive))
+        except ValueError as error:
+            print(f"backup plan blocked: {error}")
+            return 1
         path = sidecar_dir(repo) / "ops" / "backup-plan.json"
         _write_ops_command_bundle(path, bundle.to_dict())
         print(f"backup plan: {path}")
@@ -788,12 +792,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ops" and args.ops_command == "restore":
         repo = Path(args.repo)
-        bundle = build_sidecar_restore_bundle(
-            repo=repo,
-            archive_path=Path(args.archive),
-            staging_path=Path(args.staging),
-            pre_restore_path=Path(args.pre_restore),
-        )
+        try:
+            bundle = build_sidecar_restore_bundle(
+                repo=repo,
+                archive_path=Path(args.archive),
+                staging_path=Path(args.staging),
+                pre_restore_path=Path(args.pre_restore),
+            )
+        except ValueError as error:
+            print(f"restore plan blocked: {error}")
+            return 1
         path = sidecar_dir(repo) / "ops" / "restore-plan.json"
         _write_ops_command_bundle(path, bundle.to_dict())
         print(f"restore plan: {path}")
@@ -905,6 +913,8 @@ def _write_release_artifact_manifest(
         raise ValueError("security review has open critical/high findings")
     if security_review_decision not in {"approved_proposal_only", "approved_provider_backed"}:
         raise ValueError("security review decision is not approved")
+    if not evidence_paths:
+        raise ValueError("retained evidence is required")
     retained_evidence = []
     for evidence_path in evidence_paths:
         resolved_evidence = evidence_path.resolve()
@@ -921,6 +931,8 @@ def _write_release_artifact_manifest(
             )
             raise ValueError(f"retained evidence contains secret: {findings}") from error
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
+    if not any("pytest-coverage" in Path(entry["path"]).name for entry in retained_evidence):
+        raise ValueError("pytest coverage evidence is required")
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -938,7 +950,7 @@ def _write_release_artifact_manifest(
             "tugboat doctor",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
-            "python -m pytest -q",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
         ],
         "retained_evidence": retained_evidence,
     }

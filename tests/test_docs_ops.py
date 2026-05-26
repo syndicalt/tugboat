@@ -21,7 +21,7 @@ DOC_CONTRACTS = {
             "tugboat doctor",
             "tugboat harness check --repo .",
             "tugboat ops release-manifest --repo .",
-            "python -m pytest -q",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
             "proposal_only",
             "auto_apply: disabled",
             ".sidecar/ops/release-artifact-manifest.json",
