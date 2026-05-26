@@ -36,6 +36,9 @@ def test_run_offline_eval_suite_all_reports_structural_behavioral_and_adversaria
     assert report.held_out_score == 1.0
     assert report.governance_passed is True
     assert report.recommendation == "accept"
+    assert [case.case_id for case in report.eval_cases[:1]] == [
+        "structural:current-policy:CODEX.md"
+    ]
 
 
 def test_run_offline_eval_suite_all_rejects_governance_regressions(tmp_path: Path):
@@ -73,6 +76,106 @@ def test_run_offline_eval_suite_all_evaluates_candidate_preview_instead_of_curre
     assert report.metrics["governance_regressions"] == 1
     assert [case.case_id for case in report.eval_cases[:1]] == [
         "structural:candidate-preview:CODEX.md"
+    ]
+
+
+def test_run_offline_eval_suite_all_evaluates_full_instruction_preview_corpus(
+    tmp_path: Path,
+):
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    (preview_root / "SKILL.md").write_text(
+        "# Skill\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.metrics["structural_cases"] == 2
+    assert report.metrics["candidate_preview_files"] == 2
+    assert report.metrics["governance_regressions"] == 1
+    assert [case.case_id for case in report.eval_cases[:2]] == [
+        "structural:candidate-preview:CODEX.md",
+        "structural:candidate-preview:SKILL.md",
+    ]
+
+
+def test_run_offline_eval_suite_all_overlays_partial_preview_on_repo_corpus(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text(
+        "# Agent Policy\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.metrics["structural_cases"] == 2
+    assert report.metrics["candidate_preview_files"] == 1
+    assert report.metrics["governance_regressions"] == 1
+    assert [case.case_id for case in report.eval_cases[:2]] == [
+        "structural:candidate-preview:CODEX.md",
+        "structural:candidate-preview:AGENTS.md",
+    ]
+
+
+def test_run_offline_eval_suite_all_resolves_preview_only_links_against_preview_corpus(
+    tmp_path: Path,
+):
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nSee [skill](SKILL.md).\n",
+        encoding="utf-8",
+    )
+    (preview_root / "SKILL.md").write_text(
+        "# Skill\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is True
+    assert report.metrics["structural_cases"] == 2
+    assert report.metrics["candidate_preview_files"] == 2
+    assert report.metrics["structural_findings"] == 0
+
+
+def test_run_offline_eval_suite_all_emits_per_file_current_policy_cases(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "SKILL.md").write_text(
+        "# Skill\n\nYou must inspect evidence before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.metrics["structural_cases"] == 2
+    assert [case.case_id for case in report.eval_cases[:2]] == [
+        "structural:current-policy:CODEX.md",
+        "structural:current-policy:SKILL.md",
     ]
 
 

@@ -71,6 +71,7 @@ _PATH_SUFFIXES = (
     ".py",
     ".sh",
 )
+_INSTRUCTION_FILENAMES = ("CODEX.md", "AGENTS.md", "CLAUDE.md", "SKILL.md")
 
 
 def evaluate_markdown_pair(
@@ -78,6 +79,7 @@ def evaluate_markdown_pair(
     after: str,
     *,
     root: Path | None = None,
+    overlay_root: Path | None = None,
 ) -> StructuralEvalReport:
     findings: list[StructuralFinding] = []
     anchors_before = _anchors(before)
@@ -95,7 +97,7 @@ def evaluate_markdown_pair(
     findings.extend(_frontmatter_findings(before, after))
     findings.extend(_fence_findings(before, after))
     if root is not None:
-        findings.extend(_local_path_findings(after, root))
+        findings.extend(_local_path_findings(after, root, overlay_root=overlay_root))
 
     semantic_diff = _classify_semantic_diff(before, after)
     if semantic_diff == "normative_change":
@@ -116,8 +118,13 @@ def evaluate_markdown_pair(
     )
 
 
-def evaluate_markdown_candidate(markdown: str, *, root: Path | None = None) -> StructuralEvalReport:
-    return evaluate_markdown_pair(markdown, markdown, root=root)
+def evaluate_markdown_candidate(
+    markdown: str,
+    *,
+    root: Path | None = None,
+    overlay_root: Path | None = None,
+) -> StructuralEvalReport:
+    return evaluate_markdown_pair(markdown, markdown, root=root, overlay_root=overlay_root)
 
 
 def run_offline_eval_suite(
@@ -129,31 +136,31 @@ def run_offline_eval_suite(
     if suite_id != "all":
         raise ValueError("only offline suite 'all' is supported")
 
-    policy_root = preview_root or root
-    policy_file = _first_policy_file(policy_root)
-    policy_text = _read_optional(policy_file) if policy_file is not None else ""
-    structural = evaluate_markdown_candidate(policy_text, root=root)
-    governance_regressions = int(_has_governance_regression(policy_text))
+    policy_files = _instruction_files(root, preview_root=preview_root)
+    policy_texts = tuple(
+        _read_optional(_preview_overlay_path(path, root=root, preview_root=preview_root)) or ""
+        for path in policy_files
+    )
+    if not policy_texts:
+        policy_texts = ("",)
+    structural_reports = tuple(
+        evaluate_markdown_candidate(policy_text, root=root, overlay_root=preview_root)
+        for policy_text in policy_texts
+    )
+    governance_regressions = sum(
+        1 for policy_text in policy_texts if _has_governance_regression(policy_text)
+    )
     fixture_metrics, fixture_cases = _run_fixture_cases(root)
-    structural_case_id = "structural:current-policy"
     candidate_preview_files = 0
     if preview_root is not None:
-        candidate_preview_files = sum(
-            1
-            for path in (preview_root / "CODEX.md", preview_root / "AGENTS.md")
-            if path.exists()
-        )
-        structural_case_id = (
-            f"structural:candidate-preview:{policy_file.relative_to(preview_root).as_posix()}"
-            if policy_file is not None
-            else "structural:candidate-preview"
-        )
-    structural_case = EvalCaseRecord(
-        case_id=structural_case_id,
-        case_hash=_text_hash(policy_text),
-        split_name="trigger",
+        candidate_preview_files = len(_instruction_files(preview_root))
+    structural_cases = _structural_eval_cases(
+        policy_files,
+        policy_texts,
+        policy_root=root,
+        preview_root=preview_root,
     )
-    eval_cases = (structural_case, *fixture_cases)
+    eval_cases = (*structural_cases, *fixture_cases)
     validation_splits = _validation_splits(eval_cases)
     behavioral_cases = max(
         1,
@@ -162,22 +169,21 @@ def run_offline_eval_suite(
         + fixture_metrics["cross_agent_cases"],
     )
     adversarial_cases = max(1, fixture_metrics["adversarial_cases"])
-    structural_cases = 1
     passed = (
-        structural.passed
+        all(report.passed for report in structural_reports)
         and governance_regressions == 0
         and fixture_metrics["fixture_case_failures"] == 0
     )
     metrics = {
         **fixture_metrics,
-        "structural_cases": structural_cases,
+        "structural_cases": len(structural_reports),
         "behavioral_cases": behavioral_cases,
         "adversarial_cases": adversarial_cases,
         "candidate_preview_files": candidate_preview_files,
         "governance_regressions": governance_regressions,
-        "structural_findings": len(structural.findings),
+        "structural_findings": sum(len(report.findings) for report in structural_reports),
     }
-    trigger_score = 1.0 if structural.passed and governance_regressions == 0 else 0.0
+    trigger_score = 1.0 if all(report.passed for report in structural_reports) and governance_regressions == 0 else 0.0
     held_out_score = _category_score(
         passed_cases=fixture_metrics["held_out_passed"],
         total_cases=fixture_metrics["held_out_cases"],
@@ -196,12 +202,50 @@ def run_offline_eval_suite(
     )
 
 
-def _first_policy_file(root: Path) -> Path | None:
-    for filename in ("CODEX.md", "AGENTS.md"):
-        path = root / filename
-        if path.exists():
-            return path
-    return None
+def _instruction_files(root: Path, *, preview_root: Path | None = None) -> tuple[Path, ...]:
+    return tuple(
+        path
+        for filename in _INSTRUCTION_FILENAMES
+        if (path := root / filename).exists()
+        or (preview_root is not None and (preview_root / filename).exists())
+    )
+
+
+def _preview_overlay_path(path: Path, *, root: Path, preview_root: Path | None) -> Path:
+    if preview_root is None:
+        return path
+    relative_path = path.relative_to(root)
+    preview_path = preview_root / relative_path
+    if preview_path.exists():
+        return preview_path
+    return path
+
+
+def _structural_eval_cases(
+    policy_files: tuple[Path, ...],
+    policy_texts: tuple[str, ...],
+    *,
+    policy_root: Path,
+    preview_root: Path | None,
+) -> tuple[EvalCaseRecord, ...]:
+    if not policy_files:
+        return (
+            EvalCaseRecord(
+                case_id="structural:candidate-preview" if preview_root is not None else "structural:current-policy",
+                case_hash=_text_hash(policy_texts[0]),
+                split_name="trigger",
+            ),
+        )
+    prefix = "structural:candidate-preview" if preview_root is not None else "structural:current-policy"
+    case_ids = tuple(f"{prefix}:{path.relative_to(policy_root).as_posix()}" for path in policy_files)
+    return tuple(
+        EvalCaseRecord(
+            case_id=case_id,
+            case_hash=_text_hash(policy_text),
+            split_name="trigger",
+        )
+        for case_id, policy_text in zip(case_ids, policy_texts, strict=True)
+    )
 
 
 def run_provider_smoke_suite(*, opted_in: bool, provider: str | None = None) -> OfflineEvalReport:
@@ -467,7 +511,12 @@ def _fenced_blocks(markdown: str) -> tuple[tuple[str, ...], bool]:
     return tuple(blocks), in_fence
 
 
-def _local_path_findings(markdown: str, root: Path) -> tuple[StructuralFinding, ...]:
+def _local_path_findings(
+    markdown: str,
+    root: Path,
+    *,
+    overlay_root: Path | None = None,
+) -> tuple[StructuralFinding, ...]:
     findings: list[StructuralFinding] = []
     seen: set[str] = set()
 
@@ -476,7 +525,7 @@ def _local_path_findings(markdown: str, root: Path) -> tuple[StructuralFinding, 
         if normalized is None or normalized in seen:
             continue
         seen.add(normalized)
-        if not (root / normalized).exists():
+        if not _local_path_exists(normalized, root=root, overlay_root=overlay_root):
             findings.append(
                 StructuralFinding(
                     code="link.local_missing",
@@ -487,6 +536,12 @@ def _local_path_findings(markdown: str, root: Path) -> tuple[StructuralFinding, 
             )
 
     return tuple(findings)
+
+
+def _local_path_exists(normalized: str, *, root: Path, overlay_root: Path | None) -> bool:
+    if (root / normalized).exists():
+        return True
+    return overlay_root is not None and (overlay_root / normalized).exists()
 
 
 def _markdown_link_targets(markdown: str) -> tuple[str, ...]:
