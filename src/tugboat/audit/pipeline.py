@@ -202,7 +202,13 @@ def run_audit_pipeline(
             raise ValueError("llmff audit_report output must be a JSON object")
         audit_payload.update(raw_audit)
     evidence_refs = [str(ref) for ref in audit_payload.get("evidence_refs", [])]
-    instruction_refs = instruction_chunk_refs(index_repo(repo, policy))
+    raw_instruction_refs = audit_payload.get("instruction_refs")
+    if raw_instruction_refs is None:
+        instruction_refs = instruction_chunk_refs(index_repo(repo, policy))
+    elif isinstance(raw_instruction_refs, list):
+        instruction_refs = [str(ref) for ref in raw_instruction_refs]
+    else:
+        raise ValueError("llmff audit_report instruction_refs must be a JSON array")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.insert_run(
             run_id=run_dir.name,

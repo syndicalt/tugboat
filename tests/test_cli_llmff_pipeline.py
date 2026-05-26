@@ -15,6 +15,7 @@ def _write_fake_llmff(
     sources: object | None = None,
     bounded_edit_metadata: object | None = None,
     candidate_overrides: dict[str, object] | None = None,
+    audit_report: object | None = None,
     eval_report: object | None = None,
     policy_decision: object | None = None,
     acceptance_summary: object | None = None,
@@ -55,6 +56,14 @@ def _write_fake_llmff(
         )
     if candidate_overrides is None:
         candidate_overrides = {}
+    if audit_report is None:
+        audit_report = {
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+        }
     if acceptance_summary is None:
         acceptance_summary = {
             "decision_recommendation": "needs_review",
@@ -74,6 +83,7 @@ FAIL_MANIFEST = __FAIL_MANIFEST__
 SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
+AUDIT_REPORT = __AUDIT_REPORT__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
 ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
@@ -122,13 +132,7 @@ if args[:1] == ["run"]:
             "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
         }) + "\\n", encoding="utf-8")
     elif manifest == "episode-audit":
-        outputs["audit_report"].write_text(json.dumps({
-            "edit_warranted": True,
-            "failure_class": "instruction_conflict",
-            "severity": "high",
-            "confidence": 0.91,
-            "evidence_refs": ["ev_fake"],
-        }) + "\\n", encoding="utf-8")
+        outputs["audit_report"].write_text(json.dumps(AUDIT_REPORT) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
         outputs["drift_clusters"].write_text(json.dumps({
             "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_fake"]}]
@@ -168,7 +172,9 @@ raise SystemExit(64)
             "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
         ).replace(
             "__CANDIDATE_OVERRIDES__", repr(candidate_overrides)
-        ).replace("__EVAL_REPORT__", repr(eval_report)).replace(
+        ).replace("__AUDIT_REPORT__", repr(audit_report)).replace(
+            "__EVAL_REPORT__", repr(eval_report)
+        ).replace(
             "__POLICY_DECISION__", repr(policy_decision)
         ).replace(
             "__ACCEPTANCE_SUMMARY__", repr(acceptance_summary)
@@ -239,6 +245,54 @@ llmff:
     assert output[1] == str(run_dir / "audit.raw.json")
     assert len(output[2]) == 64
     assert output[3] is not None
+
+
+def test_audit_preserves_llmff_reported_instruction_refs(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\nUse tests.\n\n## Review\n\nCheck the failure first.\n",
+        encoding="utf-8",
+    )
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#rules"],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["instruction_refs"] == ["CODEX.md#rules"]
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        stored_refs = json.loads(
+            store.connection.execute(
+                "SELECT instruction_refs_json FROM audits WHERE run_id = ?",
+                (run_dir.name,),
+            ).fetchone()[0]
+        )
+    assert stored_refs == ["CODEX.md#rules"]
 
 
 def test_audit_runs_instruction_index_before_episode_audit(tmp_path: Path):
