@@ -54,6 +54,20 @@ def _as_operator_risk_limits(raw: Any) -> dict[str, int]:
     }
 
 
+def _as_risk_class_changed_line_budgets(raw: Any) -> dict[str, int]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("policy.risk_class_changed_line_budgets must be a mapping")
+    return {
+        str(risk_class): _as_non_negative_int(
+            limit,
+            f"policy.risk_class_changed_line_budgets.{risk_class}",
+        )
+        for risk_class, limit in raw.items()
+    }
+
+
 def load_policy(repo: Path) -> Policy:
     path = repo / ".sidecar" / "policy.yaml"
     if not path.exists():
@@ -113,6 +127,9 @@ def load_policy(repo: Path) -> Policy:
         ),
         roadmap_learning_rate_operator_risk_limits=_as_operator_risk_limits(
             learning_rate_budget.get("operator_risk_limits", {})
+        ),
+        risk_class_changed_line_budgets=_as_risk_class_changed_line_budgets(
+            raw.get("risk_class_changed_line_budgets", {})
         ),
         auto_apply_minimum_burn_in_days=_as_non_negative_days(
             auto_apply.get(

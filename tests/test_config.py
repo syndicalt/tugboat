@@ -16,6 +16,7 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.roadmap_learning_rate_max_changed_lines == 20
     assert policy.roadmap_learning_rate_max_normative_changes == 2
     assert policy.roadmap_learning_rate_operator_risk_limits == {}
+    assert policy.risk_class_changed_line_budgets == {}
     assert policy.llmff_allow_network is False
     assert policy.raw_traces_retention_days == 14
     assert policy.checkpoints_retention_days == 7
@@ -101,6 +102,25 @@ roadmap:
     assert policy.roadmap_learning_rate_max_changed_lines == 4
     assert policy.roadmap_learning_rate_max_normative_changes == 1
     assert policy.roadmap_learning_rate_operator_risk_limits == {"delete": 0}
+
+
+def test_load_policy_yaml_reads_risk_class_changed_line_budgets(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+risk_class_changed_line_budgets:
+  A: 1
+  B: 3
+  class_c: 5
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.risk_class_changed_line_budgets == {"A": 1, "B": 3, "class_c": 5}
 
 
 def test_load_policy_yaml_reads_llmff_allowed_manifest_hashes(tmp_path: Path):

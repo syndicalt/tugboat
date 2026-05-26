@@ -182,6 +182,27 @@ def test_policy_gate_rejects_diff_over_configured_line_budget(tmp_path: Path):
     assert "max_changed_lines_exceeded" in decision.reasons
 
 
+def test_policy_gate_rejects_class_b_over_risk_specific_changed_line_budget(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="B",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+one\n+two\n+three\n",
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(risk_class_changed_line_budgets={"B": 2}),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert "risk_class_changed_lines_exceeded" in decision.reasons
+
+
 def test_policy_gate_rejects_markdown_candidates_with_invalid_control_chars(
     tmp_path: Path,
 ):

@@ -18,6 +18,7 @@ DENIAL_REASON_ORDER = (
     "pending_eval_definition_edit",
     "higher_priority_contradiction",
     "max_changed_lines_exceeded",
+    "risk_class_changed_lines_exceeded",
     "markdown_parse_invalid",
     "unbalanced_markdown_fence",
     "frontmatter_removed",
@@ -177,7 +178,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("higher_priority_contradiction")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
         found_reasons.add("base_hash_mismatch")
-    if _changed_line_count(candidate.diff) > policy.auto_apply_max_changed_lines:
+    changed_line_count = _changed_line_count(candidate.diff)
+    if changed_line_count > policy.auto_apply_max_changed_lines:
         found_reasons.add("max_changed_lines_exceeded")
     if _is_markdown_file(candidate.base_file) and _is_relative_to(base_path, repo_root):
         found_reasons.update(_markdown_validation_reasons(base_path, candidate.diff))
@@ -193,6 +195,9 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
     if len(candidate.sources) == 1 and not candidate.sources[0].trusted:
         found_reasons.add("single_untrusted_source")
     risk_class = _risk_class_key(candidate.risk_class)
+    risk_class_budget = _risk_class_changed_line_budget(policy, risk_class)
+    if risk_class_budget is not None and changed_line_count > risk_class_budget:
+        found_reasons.add("risk_class_changed_lines_exceeded")
     if risk_class in PROHIBITED_RISK_CLASSES:
         found_reasons.add("prohibited_risk_class")
     if risk_class in {"b", "class_b"}:
@@ -218,6 +223,13 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
 
 def _risk_class_key(risk_class: str) -> str:
     return risk_class.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _risk_class_changed_line_budget(policy: Policy, risk_class: str) -> int | None:
+    for configured_class, budget in policy.risk_class_changed_line_budgets.items():
+        if _risk_class_key(configured_class) == risk_class:
+            return budget
+    return None
 
 
 def _has_modal_weakening(diff: str) -> bool:
