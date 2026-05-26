@@ -441,14 +441,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         eval_exit = main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", args.suite])
         if eval_exit == 0:
             try:
-                _run_acceptance_summary(
-                    repo,
-                    run_dir,
-                    load_policy(repo),
-                )
-            except (RuntimeError, ValueError) as error:
-                print(str(error))
-                return 1
+                eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+                policy_gate = _read_optional_json_object(run_dir / "policy-gate.json")
+                _assert_eval_acceptance(eval_report, policy_gate)
+            except ValueError:
+                pass
+            else:
+                try:
+                    _run_acceptance_summary(repo, run_dir, load_policy(repo))
+                except (RuntimeError, ValueError) as error:
+                    print(str(error))
+                    return 1
         return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
 
     if args.command == "apply":
@@ -1246,7 +1249,7 @@ def _write_apply_plan(
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     if not bool(eval_report["passed"]):
         raise ValueError("eval report did not pass")
-    _assert_eval_acceptance(eval_report)
+    _assert_eval_acceptance(eval_report, policy_gate)
     explicit_human_review = _requires_explicit_human_review(candidate.risk_class)
     if explicit_human_review and (not human_review or review_actor == "tugboat"):
         raise ValueError("Class C candidates require explicit human review")
@@ -1783,10 +1786,26 @@ def _policy_decision_from_payload(payload: dict[str, object]) -> dict[str, objec
     return {"allowed": allowed, "reasons": list(raw_reasons)}
 
 
-def _assert_eval_acceptance(eval_report: dict[str, object]) -> None:
+def _read_optional_json_object(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path.name} must be a JSON object")
+    return payload
+
+
+def _assert_eval_acceptance(
+    eval_report: dict[str, object],
+    policy_gate: dict[str, object] | None = None,
+) -> None:
     recommendation = eval_report.get("recommendation")
     if recommendation is not None and str(recommendation) != "accept":
         raise ValueError(f"eval report recommendation was {recommendation}")
+    if not bool(eval_report.get("governance_passed", False)):
+        raise ValueError("eval governance did not pass")
+    if policy_gate is not None and not bool(policy_gate.get("allowed", False)):
+        raise ValueError("eval policy gate rejected candidate")
     trigger_score = eval_report.get("trigger_score")
     held_out_score = eval_report.get("held_out_score")
     if trigger_score is None or held_out_score is None:
@@ -1805,6 +1824,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     candidate_id = int(candidate["candidate_id"])
     eval_report_path = run_dir / "eval-report.json"
+    policy_gate_path = run_dir / "policy-gate.json"
     decision = "rejected"
     reason = "proposal rejected"
     trigger_score: float | None = None
@@ -1816,7 +1836,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         held_out_score = _score_from_eval_report(eval_report, "held_out_score")
         recommendation = str(eval_report.get("recommendation", "reject"))
         try:
-            _assert_eval_acceptance(eval_report)
+            _assert_eval_acceptance(eval_report, _read_optional_json_object(policy_gate_path))
         except ValueError as error:
             reason = str(error)
         else:
