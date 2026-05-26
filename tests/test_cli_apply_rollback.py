@@ -50,34 +50,40 @@ def _candidate_run(
     *,
     risk_class: str = "instruction_clarification",
     bounded_section: str | None = None,
+    base_file: str = "CODEX.md",
+    diff: str | None = None,
+    pending_eval_definition_paths: tuple[str, ...] = (),
 ) -> Path:
     run_dir = repo / ".sidecar" / "runs" / "20260525T000000000000Z"
     run_dir.mkdir(parents=True)
-    diff = (
-        "--- a/CODEX.md\n"
-        "+++ b/CODEX.md\n"
-        "@@ -1,3 +1,4 @@\n"
-        " # Rules\n"
-        " \n"
-        " Use tests.\n"
-        "+Record rollback notes.\n"
-    )
+    if diff is None:
+        diff = (
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Rules\n"
+            " \n"
+            " Use tests.\n"
+            "+Record rollback notes.\n"
+        )
     candidate = {
         "schema_version": 1,
         "audit_id": 1,
         "candidate_id": 7,
-        "base_file": "CODEX.md",
-        "base_hash": _hash(repo / "CODEX.md"),
+        "base_file": base_file,
+        "base_hash": _hash(repo / base_file),
         "diff_hash": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
         "risk_class": risk_class,
         "rationale": "Keep rollback provenance visible.",
         "sources": [{"source_id": "audit:1", "trusted": True}],
     }
+    if pending_eval_definition_paths:
+        candidate["pending_audit_eval_definition_paths"] = list(pending_eval_definition_paths)
     if bounded_section is not None:
         candidate["bounded_edit_metadata"] = [
             {
                 "operator": "add",
-                "file": "CODEX.md",
+                "file": base_file,
                 "section": bounded_section,
                 "changed_lines": 1,
                 "normative_changes": 0,
@@ -1391,3 +1397,44 @@ def test_apply_class_c_requires_explicit_human_review(tmp_path: Path, risk_class
     )
     assert review_action[4] is not None
     assert event_type == "review_action.recorded"
+
+
+def test_apply_rejects_candidate_editing_pending_eval_definition_after_artifact_reload(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    eval_file = repo / "tests" / "fixtures" / "evals" / "regression.json"
+    eval_file.parent.mkdir(parents=True)
+    eval_file.write_text('{"suite": "regression"}\n', encoding="utf-8")
+    _git(repo, "add", "tests/fixtures/evals/regression.json")
+    _git(repo, "commit", "-m", "add eval fixture")
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(
+        """
+version: 1
+instruction_files:
+  - path: tests/fixtures/evals/regression.json
+    kind: eval_definition
+    precedence: 100
+    protected: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = _candidate_run(
+        repo,
+        base_file="tests/fixtures/evals/regression.json",
+        diff=(
+            "--- a/tests/fixtures/evals/regression.json\n"
+            "+++ b/tests/fixtures/evals/regression.json\n"
+            "@@\n"
+            '-{"suite": "regression"}\n'
+            '+{"suite": "easier-regression"}\n'
+        ),
+        pending_eval_definition_paths=("tests/fixtures/evals/*.json",),
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+    assert eval_file.read_text(encoding="utf-8") == '{"suite": "regression"}\n'

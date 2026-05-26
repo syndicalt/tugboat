@@ -450,6 +450,9 @@ def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
             SourceRef(str(source["source_id"]), trusted=bool(source["trusted"]))
             for source in metadata.get("sources", [])
         ),
+        pending_audit_eval_definition_paths=tuple(
+            str(path) for path in metadata.get("pending_audit_eval_definition_paths", [])
+        ),
         bounded_edit_metadata=tuple(
             dict(item) for item in metadata.get("bounded_edit_metadata", []) if isinstance(item, dict)
         ),

@@ -2580,6 +2580,81 @@ llmff:
     assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 
+def test_eval_preserves_pending_eval_definition_paths_when_regating_candidate(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    eval_file = repo / "tests" / "fixtures" / "evals" / "regression.json"
+    eval_file.parent.mkdir(parents=True)
+    eval_file.write_text('{"suite": "regression"}\n', encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        policy_decision={"allowed": True, "reasons": []},
+        bounded_edit_metadata=[
+            {
+                "operator": "replace",
+                "file": "tests/fixtures/evals/regression.json",
+                "section": "Eval Definition",
+                "changed_lines": 2,
+                "normative_changes": 0,
+            }
+        ],
+        candidate_overrides={
+            "base_file": "tests/fixtures/evals/regression.json",
+            "base_hash": hashlib.sha256(eval_file.read_bytes()).hexdigest(),
+            "diff": (
+                "--- a/tests/fixtures/evals/regression.json\n"
+                "+++ b/tests/fixtures/evals/regression.json\n"
+                "@@\n"
+                '-{\"suite\": \"regression\"}\n'
+                '+{\"suite\": \"easier-regression\"}\n'
+            ),
+            "pending_audit_eval_definition_paths": ["tests/fixtures/evals/*.json"],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+instruction_files:
+  - path: tests/fixtures/evals/regression.json
+    kind: eval_definition
+    precedence: 100
+    protected: false
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    raw_policy_decision = json.loads((run_dir / "policy-decision.raw.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+
+    assert raw_policy_decision == {"allowed": True, "reasons": []}
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": False,
+        "reasons": ["pending_eval_definition_edit"],
+    }
+    assert eval_report["passed"] is False
+    assert eval_report["governance_passed"] is False
+    assert eval_report["recommendation"] == "reject"
+
+
 def test_eval_does_not_copy_llmff_policy_denial_when_deterministic_gate_allows(
     tmp_path: Path,
 ):
