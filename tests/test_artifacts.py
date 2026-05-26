@@ -397,3 +397,52 @@ def test_validate_report_markdown_requires_schema_version_marker():
             "## Rationale\n\n"
             "Because.\n"
         )
+
+
+@pytest.mark.parametrize(
+    "text,match",
+    [
+        (
+            "# Tugboat Report\n\n"
+            "- schema_version: 1\n"
+            "- schema_version: 1\n"
+            "- candidate: CODEX.md\n"
+            "- risk_class: instruction_clarification\n"
+            "- policy_allowed: true\n"
+            "- policy_reasons: \n"
+            "- eval_report: .sidecar/runs/run-1/eval-report.json\n"
+            "\n"
+            "## Rationale\n\n"
+            "Because.\n",
+            "duplicate metadata field",
+        ),
+        (
+            "# Tugboat Report\n\n"
+            "- schema_version: 1\n"
+            "- candidate: CODEX.md\n"
+            "- risk_class: instruction_clarification\n"
+            "- policy_allowed: true\n"
+            "- policy_reasons: \n"
+            "\n"
+            "## Rationale\n\n"
+            "Because.\n",
+            "eval_report",
+        ),
+        (
+            "# Tugboat Report\n\n"
+            "- schema_version 1\n"
+            "- candidate: CODEX.md\n"
+            "- risk_class: instruction_clarification\n"
+            "- policy_allowed: true\n"
+            "- policy_reasons: \n"
+            "- eval_report: .sidecar/runs/run-1/eval-report.json\n"
+            "\n"
+            "## Rationale\n\n"
+            "Because.\n",
+            "metadata entry",
+        ),
+    ],
+)
+def test_validate_report_markdown_rejects_malformed_metadata(text: str, match: str):
+    with pytest.raises(ArtifactValidationError, match=match):
+        validate_report_markdown(text)

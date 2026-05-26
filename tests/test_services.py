@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tugboat.artifacts import ArtifactValidationError
 from tugboat.eval.service import write_eval_report
 from tugboat.policy.gate import CandidatePatch, PolicyDecision, SourceRef
 from tugboat.propose.service import write_candidate
@@ -237,6 +238,36 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "",
         ]
     )
+
+
+def test_write_report_rejects_malformed_eval_report(tmp_path: Path):
+    eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    eval_report_path.parent.mkdir(parents=True)
+    eval_report_path.write_text(
+        json.dumps(
+            {
+                "candidate_id": 5,
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "metrics": {},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "provider-smoke",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ArtifactValidationError, match="schema_version"):
+        write_report(
+            tmp_path,
+            "run-1",
+            candidate=_candidate(),
+            decision=PolicyDecision(True, ()),
+            eval_report_path=eval_report_path,
+        )
 
 
 def test_write_candidate_rejects_secret_in_diff(tmp_path: Path):

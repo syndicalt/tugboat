@@ -56,6 +56,7 @@ def _eval_summary_lines(eval_report_path: Path) -> list[str]:
     payload: Any = json.loads(eval_report_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("eval report must be a JSON object")
+    validate_json_artifact("eval-report.json", payload)
     fields = (
         "trigger_score",
         "held_out_score",

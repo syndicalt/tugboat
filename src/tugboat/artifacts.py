@@ -491,10 +491,43 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
 
 
 def validate_report_markdown(text: str) -> None:
-    required = ("# Tugboat Report", "- schema_version: 1", "## Rationale")
-    for marker in required:
-        if marker not in text:
-            raise ArtifactValidationError(f"report.md missing required section: {marker}")
+    lines = text.splitlines()
+    if not lines or lines[0] != "# Tugboat Report":
+        raise ArtifactValidationError("report.md missing required section: # Tugboat Report")
+    try:
+        rationale_index = lines.index("## Rationale")
+    except ValueError as exc:
+        raise ArtifactValidationError("report.md missing required section: ## Rationale") from exc
+
+    metadata: dict[str, str] = {}
+    for line in lines[1:rationale_index]:
+        if not line:
+            continue
+        if not line.startswith("- ") or ": " not in line:
+            raise ArtifactValidationError("report.md has malformed metadata entry")
+        field, value = line[2:].split(": ", 1)
+        if field in metadata:
+            raise ArtifactValidationError(f"report.md duplicate metadata field: {field}")
+        metadata[field] = value
+
+    required_metadata = (
+        "schema_version",
+        "candidate",
+        "risk_class",
+        "policy_allowed",
+        "policy_reasons",
+        "eval_report",
+    )
+    for field in required_metadata:
+        if field not in metadata:
+            raise ArtifactValidationError(f"report.md missing metadata field: {field}")
+    if metadata["schema_version"] != str(SCHEMA_VERSION):
+        raise ArtifactValidationError("report.md has unsupported schema_version")
+    if metadata["policy_allowed"] not in {"true", "false"}:
+        raise ArtifactValidationError("report.md metadata field has unsupported value: policy_allowed")
+    for field in ("candidate", "risk_class", "eval_report"):
+        if not metadata[field]:
+            raise ArtifactValidationError(f"report.md metadata field must not be empty: {field}")
 
 
 def _matches_json_schema_type(value: object, expected_type: str) -> bool:
