@@ -95,6 +95,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "adversarial:reject-eval-leakage",
         "adversarial:reject-forged-success-claim",
         "adversarial:reject-hidden-prompt-injection",
+        "adversarial:reject-poisoned-command-output",
         "adversarial:reject-skip-tests",
         "cross_agent:codex-claude-shared-obligation",
         "held_out:no-regression",
@@ -113,6 +114,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "adversarial:reject-eval-leakage",
         "adversarial:reject-forged-success-claim",
         "adversarial:reject-hidden-prompt-injection",
+        "adversarial:reject-poisoned-command-output",
         "adversarial:reject-skip-tests",
         "cross_agent:codex-claude-shared-obligation",
     ]
