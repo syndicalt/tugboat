@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tugboat.artifacts import validate_report_markdown
+from tugboat.artifacts import validate_json_artifact, validate_report_markdown
 from tugboat.paths import runs_dir
 from tugboat.policy.gate import CandidatePatch, PolicyDecision
 from tugboat.security.secrets import SecretScanError, scan_text
@@ -22,6 +22,7 @@ def write_report(
     run_dir.mkdir(parents=True, exist_ok=True)
     report_path = run_dir / "report.md"
     eval_summary = _eval_summary_lines(eval_report_path)
+    optimization_summary = _optimization_summary_lines(repo, run_dir / "optimization-summary.json")
     text = "\n".join(
         [
             "# Tugboat Report",
@@ -33,6 +34,7 @@ def write_report(
             f"- policy_reasons: {','.join(decision.reasons)}",
             f"- eval_report: {eval_report_path.relative_to(repo)}",
             *eval_summary,
+            *optimization_summary,
             "",
             "## Rationale",
             "",
@@ -62,6 +64,27 @@ def _eval_summary_lines(eval_report_path: Path) -> list[str]:
         "live_provider_required",
     )
     return [f"- {field}: {_report_scalar(payload[field])}" for field in fields if field in payload]
+
+
+def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> list[str]:
+    if not optimization_summary_path.exists():
+        return []
+    payload: Any = json.loads(optimization_summary_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("optimization summary must be a JSON object")
+    validate_json_artifact("optimization-summary.json", payload)
+    fields = (
+        ("decision", "optimization_decision"),
+        ("suite_id", "optimization_suite_id"),
+    )
+    return [
+        f"- optimization_summary: {optimization_summary_path.relative_to(repo)}",
+        *[
+            f"- {label}: {_report_scalar(payload[field])}"
+            for field, label in fields
+            if field in payload
+        ],
+    ]
 
 
 def _report_scalar(value: object) -> str:

@@ -124,6 +124,22 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
         + "\n",
         encoding="utf-8",
     )
+    (eval_report_path.parent / "optimization-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "audit_run": "run-1",
+                "candidate_id": 5,
+                "decision": "needs_review",
+                "held_out_score": 0.92,
+                "recommendation": "accept",
+                "suite_id": "provider-smoke",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     report_path = write_report(
         tmp_path,
         "run-1",
@@ -148,6 +164,9 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- governance_passed: true",
             "- recommendation: accept",
             "- live_provider_required: true",
+            "- optimization_summary: .sidecar/runs/run-1/optimization-summary.json",
+            "- optimization_decision: needs_review",
+            "- optimization_suite_id: provider-smoke",
             "",
             "## Rationale",
             "",
