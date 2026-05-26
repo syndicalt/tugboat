@@ -171,6 +171,10 @@ class VcsAdapter:
     def delete_branch(self, branch_name: str) -> None:
         self._git("branch", "-D", branch_name)
 
+    def discard_worktree_changes(self) -> None:
+        self._git("reset", "--hard", "HEAD")
+        self._git("clean", "-fd")
+
     def apply_diff(self, diff_path: Path) -> None:
         try:
             self._git("apply", str(diff_path))
@@ -180,8 +184,13 @@ class VcsAdapter:
             raise VcsStateError(f"git apply failed{detail}") from error
 
     def commit_files(self, files: tuple[str, ...], message: str) -> str:
-        self._git("add", "--", *files)
-        self._git("commit", "-m", message)
+        try:
+            self._git("add", "--", *files)
+            self._git("commit", "-m", message)
+        except subprocess.CalledProcessError as error:
+            message = (error.stderr or error.stdout or "").strip()
+            detail = f": {message}" if message else ""
+            raise VcsStateError(f"git commit failed{detail}") from error
         return self._git("rev-parse", "HEAD")
 
     def revert_commit(self, *, branch_name: str, commit_sha: str) -> str:

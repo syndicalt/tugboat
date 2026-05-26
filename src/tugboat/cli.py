@@ -999,6 +999,16 @@ def _write_apply_plan(
             branch_created = True
             adapter.apply_diff(run_dir / "candidate.diff")
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            applied_commit = adapter.commit_files(target_files, commit_message)
+            rollback_command = [
+                list(command)
+                for command in adapter.rollback_metadata(
+                    commit_sha=applied_commit,
+                    branch_name=branch_name,
+                    files=target_files,
+                    reason=f"rollback candidate {candidate_id}",
+                ).commands
+            ]
             pr_metadata = adapter.pull_request_metadata(
                 candidate_id=candidate_id,
                 base_file=candidate.base_file,
@@ -1008,6 +1018,7 @@ def _write_apply_plan(
             ).to_json_dict()
     except VcsStateError:
         if branch_created and not applied_commit:
+            adapter.discard_worktree_changes()
             adapter.switch_branch(base_branch)
             adapter.delete_branch(branch_name)
         raise

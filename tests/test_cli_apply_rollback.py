@@ -798,6 +798,12 @@ def test_apply_pr_mode_writes_pr_metadata_bundle(tmp_path: Path):
 
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
     assert apply_plan["mode"] == "pr"
+    assert _git(repo, "branch", "--show-current") == apply_plan["branch_name"]
+    assert apply_plan["applied_commit"] == _git(repo, "rev-parse", "HEAD")
+    assert apply_plan["rollback_command"] == [
+        ["git", "switch", apply_plan["branch_name"]],
+        ["git", "revert", "--no-edit", apply_plan["applied_commit"]],
+    ]
     assert apply_plan["pr_metadata"] == {
         "base_branch": "main",
         "body": apply_plan["pr_metadata"]["body"],
@@ -806,6 +812,28 @@ def test_apply_pr_mode_writes_pr_metadata_bundle(tmp_path: Path):
         "title": "tugboat: apply candidate 7 for CODEX.md",
     }
     assert "Candidate: 7" in apply_plan["pr_metadata"]["body"]
+
+
+def test_apply_pr_mode_cleans_generated_branch_when_commit_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    original_branch = _git(repo, "branch", "--show-current")
+    original_text = (repo / "CODEX.md").read_text(encoding="utf-8")
+
+    def fail_commit(self, files: tuple[str, ...], message: str) -> str:
+        raise VcsStateError("git commit failed: simulated hook rejection")
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "commit_files", fail_commit)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original_text
+    assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
+    assert not (run_dir / "apply-plan.json").exists()
 
 
 def test_apply_class_c_requires_explicit_human_review(tmp_path: Path):
