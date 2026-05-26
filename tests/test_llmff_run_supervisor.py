@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from tugboat.llmff.runner import CheckpointMismatchError, OutputPathError, run_manifest
+from tugboat.llmff.runner import (
+    CheckpointMismatchError,
+    MissingOutputError,
+    OutputPathError,
+    run_manifest,
+)
 from tugboat.models import Policy
 from tugboat.security.secrets import SecretScanError
 
@@ -67,6 +72,8 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
 
     def fake_run(*args, **kwargs):
         calls.append((args, kwargs))
+        output_path = Path(args[0][args[0].index("--output") + 2])
+        output_path.write_text("{}\n", encoding="utf-8")
         return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -249,6 +256,31 @@ def test_run_manifest_rejects_outputs_outside_run_dir(tmp_path: Path):
             retry_attempts=2,
             retry_backoff_ms=250,
             output_paths={"audit_report": tmp_path / "outside.json"},
+        )
+
+
+def test_run_manifest_rejects_successful_run_missing_declared_output(
+    monkeypatch, tmp_path: Path
+):
+    def fake_run(*args, **kwargs):
+        events_path = Path(args[0][args[0].index("--events") + 1])
+        events_path.write_text('{"event":"run_completed"}\n', encoding="utf-8")
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(MissingOutputError, match="audit_report"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            output_paths={"audit_report": run_dir / "audit.raw.json"},
         )
 
 

@@ -20,6 +20,10 @@ class OutputPathError(ValueError):
     pass
 
 
+class MissingOutputError(RuntimeError):
+    pass
+
+
 class FixtureLlmffRunner:
     def __init__(self, inspect_payload: dict[str, Any]):
         self.inspect_payload = inspect_payload
@@ -105,6 +109,8 @@ class LlmffRunSupervisor:
             capture_output=True,
             text=True,
         )
+        if completed.returncode == 0:
+            _validate_declared_outputs_exist(outputs)
         for path in (trace_path, events_path, actual_checkpoint_path, *outputs.values()):
             if path.exists():
                 scan_path(path)
@@ -173,6 +179,12 @@ def _validate_output_paths(run_dir: Path, output_paths: dict[str, Path]) -> None
             path.resolve().relative_to(run_root)
         except ValueError as exc:
             raise OutputPathError("llmff output path is outside run directory") from exc
+
+
+def _validate_declared_outputs_exist(output_paths: dict[str, Path]) -> None:
+    missing = sorted(name for name, path in output_paths.items() if not path.exists())
+    if missing:
+        raise MissingOutputError(f"llmff run succeeded without declared output: {missing[0]}")
 
 
 def run_manifest(
