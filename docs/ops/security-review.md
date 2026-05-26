@@ -28,6 +28,8 @@ tugboat audit --repo . --trace traces/example.jsonl
 Review outputs for:
 
 - No provider credential value in committed files, logs, traces, or retained artifacts.
+- Provider-backed approval requires reviewed manifest hashes and explicit `llmff.allowed_providers`.
+- No environment-only approval path is accepted for provider-backed runs or provider smoke checks.
 - `auto-apply` remains disabled unless a separate production approval explicitly enables it.
 - The redaction pipeline runs before any cloud provider call or artifact upload.
 - Candidate diffs do not modify secrets, sandboxing, network, approval, deployment, memory, or provider-routing policy without explicit human review.

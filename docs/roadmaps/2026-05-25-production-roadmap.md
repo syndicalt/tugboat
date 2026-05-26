@@ -57,22 +57,26 @@ The committed MVP provides:
 - `tugboat propose --repo PATH --audit RUN`
 - `tugboat eval --repo PATH --candidate RUN --suite SUITE`
 - `tugboat report --repo PATH --run RUN`
+- `tugboat optimize --repo PATH --trace TRACE --suite SUITE`
 - `tugboat harness check --repo PATH`
+- review-gated apply and rollback plan commands
+- read-first MCP tooling
+- local daemon status, queue, and bounded run-once/cycle commands
 - Markdown instruction discovery and heading-aware chunking
 - SQLite metadata tables and hash-chained audit events
 - JSONL trace ingestion with evidence IDs
-- `llmff inspect` artifact capture
+- `llmff inspect` and file-backed `llmff run` artifact capture
 - Deterministic policy gate
-- Proposal/eval/report artifacts
-- No daemon, no auto-apply, no direct instruction mutation
+- Proposal/eval/report/optimization summary artifacts
+- rejected-edit memory and validation baseline memory
+- Auto-apply remains disabled by default, provider-backed runs require explicit policy, and direct instruction mutation is still outside the default proposal loop.
 
 The MVP is intentionally not yet the full vision:
 
-- `audit` does not run a real `llmff` episode-audit pipeline.
-- `propose` emits a canned candidate patch.
-- `eval` emits a deterministic passing report.
-- There is no held-out validation suite.
-- There is no optimizer memory, drift clustering, apply/rollback path, MCP server, daemon, or auto-apply lane.
+- bundled `llmff` manifests and provider-backed pipelines are still policy-gated and fixture-backed by default;
+- apply and rollback are review-oriented VCS workflows, not autonomous instruction mutation;
+- MCP and daemon support are local, bounded integration surfaces, not a public dashboard or remote service;
+- auto-apply exists only as a narrow, explicitly confirmed lane with burn-in and rollback controls, not as the release default.
 
 ## Product Shape
 

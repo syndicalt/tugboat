@@ -23,11 +23,13 @@ llmff:
   binary: llmff
   require_inspect: true
   allow_network: false
+  allowed_providers:
+    - openai
   allowed_manifest_hashes:
     - replace-with-reviewed-manifest-hash
 ```
 
-Provider-backed runs require explicit policy and reviewed manifest hashes.
+Provider-backed runs require explicit provider policy and reviewed manifest hashes. Omit `allowed_providers` for credential-free local and fixture-backed runs.
 
 ## MCP Allowlist
 

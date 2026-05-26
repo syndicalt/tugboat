@@ -291,12 +291,51 @@ def test_eval_provider_smoke_requires_explicit_opt_in(tmp_path: Path, monkeypatc
     }
 
 
-def test_eval_provider_smoke_opt_in_reports_missing_provider_credentials(tmp_path: Path, monkeypatch):
+def test_eval_provider_smoke_env_flag_without_repo_policy_still_skips(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE", "1")
-    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", raising=False)
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", "openai")
     repo = tmp_path / "repo"
     repo.mkdir()
     run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["suite_id"] == "provider-smoke"
+    assert report["live_provider_required"] is True
+    assert report["recommendation"] == "skip"
+    assert report["metrics"] == {
+        "provider_smoke_cases": 0,
+        "provider_smoke_failures": 0,
+        "provider_smoke_skipped": 1,
+        "provider_smoke_opted_in": 0,
+    }
+
+
+def test_eval_provider_smoke_policy_opt_in_reports_missing_provider_credentials(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE", raising=False)
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+provider_smoke:
+  enabled: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "candidate.json").write_text(
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
@@ -320,7 +359,7 @@ def test_eval_provider_smoke_opt_in_reports_missing_provider_credentials(tmp_pat
     }
 
 
-def test_eval_provider_smoke_opt_in_runs_configured_smoke_command_and_passes(
+def test_eval_provider_smoke_policy_opt_in_runs_env_configured_smoke_command_and_passes(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -331,7 +370,17 @@ def test_eval_provider_smoke_opt_in_runs_configured_smoke_command_and_passes(
     monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_COMMAND", f"{sys.executable} {smoke}")
     repo = tmp_path / "repo"
     repo.mkdir()
-    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+provider_smoke:
+  enabled: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "candidate.json").write_text(
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
@@ -415,7 +464,17 @@ def test_eval_provider_smoke_failure_records_sanitized_metrics_without_raw_provi
     monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_COMMAND", f"{sys.executable} {smoke}")
     repo = tmp_path / "repo"
     repo.mkdir()
-    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+provider_smoke:
+  enabled: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "candidate.json").write_text(
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",

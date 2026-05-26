@@ -58,6 +58,8 @@ DOC_CONTRACTS = {
             "rg -n",
             "tugboat audit --repo . --trace",
             "provider credential",
+            "allowed_providers",
+            "No environment-only approval path",
             "auto-apply",
             "redaction",
         ],
@@ -133,6 +135,7 @@ DOC_CONTRACTS = {
         "required_text": [
             "without credentials",
             "proposal_only",
+            "allow_network: false",
             "tugboat doctor",
             "tugboat index --repo .",
             "tugboat audit --repo . --trace traces/example.jsonl",
@@ -154,6 +157,7 @@ DOC_CONTRACTS = {
             "tugboat propose --repo . --audit latest",
             "optimization-summary.json",
             "under 15 minutes",
+            "allowed_providers",
         ],
     },
     "docs/architecture.md": {
@@ -196,6 +200,7 @@ DOC_CONTRACTS = {
         "required_text": [
             ".sidecar/policy.yaml",
             "instruction_files",
+            "allowed_providers",
             "allowed_repositories",
             "tool_policy",
             "auto_apply",

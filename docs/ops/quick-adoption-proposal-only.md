@@ -35,6 +35,13 @@ printf '{"event":"user_correction","message":"The runbook missed the rollback co
 
 Run the proposal loop without credentials, using a local or fixture-backed `llmff` configuration:
 
+```yaml
+llmff:
+  binary: llmff
+  require_inspect: true
+  allow_network: false
+```
+
 ```bash
 tugboat audit --repo . --trace traces/example.jsonl
 tugboat propose --repo . --audit latest

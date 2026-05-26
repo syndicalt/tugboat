@@ -59,13 +59,19 @@ tugboat eval --repo . --candidate latest --suite provider-smoke
 To enable the smoke preflight for a repo, add explicit policy and provide the local smoke command:
 
 ```yaml
+llmff:
+  allowed_providers:
+    - openai
+
 provider_smoke:
   enabled: true
   provider: openai
   command: "python scripts/provider_smoke.py"
 ```
 
-For one-off local checks, `TUGBOAT_PROVIDER_SMOKE=1`, `TUGBOAT_PROVIDER_SMOKE_PROVIDER`, and `TUGBOAT_PROVIDER_SMOKE_COMMAND` can override policy.
+`llmff.allowed_providers` is required for provider-backed manifests; keep it empty or omitted for credential-free local and fixture-backed runs.
+
+For one-off local checks, `TUGBOAT_PROVIDER_SMOKE_PROVIDER` and `TUGBOAT_PROVIDER_SMOKE_COMMAND` can fill in local values after repo policy enables provider smoke. Environment variables do not authorize provider-backed runs by themselves.
 
 ## Next Checks
 
