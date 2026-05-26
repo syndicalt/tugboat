@@ -1182,6 +1182,7 @@ def _write_apply_plan(
     rollback_command: list[list[str]] = []
     auto_apply_approval: dict[str, object] | None = None
     pr_metadata: dict[str, object] = {}
+    branch_created = False
 
     if auto_apply:
         _assert_auto_apply_precheck(
@@ -1199,51 +1200,60 @@ def _write_apply_plan(
             rollback_rate=rollback_rate,
         )
 
-    if mode == "branch":
-        adapter.create_branch(branch_name)
-        adapter.apply_diff(run_dir / "candidate.diff")
-        post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
-    elif mode == "commit":
-        adapter.create_branch(branch_name)
-        adapter.apply_diff(run_dir / "candidate.diff")
-        post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
-        applied_commit = adapter.commit_files(target_files, commit_message)
-        rollback_command = [
-            list(command)
-            for command in adapter.rollback_metadata(
-                commit_sha=applied_commit,
-                branch_name=branch_name,
-                files=target_files,
-                reason=f"rollback candidate {candidate_id}",
-            ).commands
-        ]
-        if auto_apply:
-            auto_apply_approval = _assert_auto_apply_final(
-                repo,
-                run_dir,
+    try:
+        if mode == "branch":
+            adapter.create_branch(branch_name)
+            branch_created = True
+            adapter.apply_diff(run_dir / "candidate.diff")
+            post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+        elif mode == "commit":
+            adapter.create_branch(branch_name)
+            branch_created = True
+            adapter.apply_diff(run_dir / "candidate.diff")
+            post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            applied_commit = adapter.commit_files(target_files, commit_message)
+            rollback_command = [
+                list(command)
+                for command in adapter.rollback_metadata(
+                    commit_sha=applied_commit,
+                    branch_name=branch_name,
+                    files=target_files,
+                    reason=f"rollback candidate {candidate_id}",
+                ).commands
+            ]
+            if auto_apply:
+                auto_apply_approval = _assert_auto_apply_final(
+                    repo,
+                    run_dir,
+                    candidate_id=candidate_id,
+                    candidate=candidate,
+                    mode=mode,
+                    branch_name=branch_name,
+                    applied_commit=applied_commit,
+                    review_actor=review_actor,
+                    confirmed=confirm_auto_apply,
+                    policy_version=auto_apply_policy_version,
+                    burn_in_days=burn_in_days,
+                    rejection_rate=rejection_rate,
+                    rollback_rate=rollback_rate,
+                )
+        elif mode == "pr":
+            adapter.create_branch(branch_name)
+            branch_created = True
+            adapter.apply_diff(run_dir / "candidate.diff")
+            post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            pr_metadata = adapter.pull_request_metadata(
                 candidate_id=candidate_id,
-                candidate=candidate,
-                mode=mode,
+                base_file=candidate.base_file,
                 branch_name=branch_name,
-                applied_commit=applied_commit,
-                review_actor=review_actor,
-                confirmed=confirm_auto_apply,
-                policy_version=auto_apply_policy_version,
-                burn_in_days=burn_in_days,
-                rejection_rate=rejection_rate,
-                rollback_rate=rollback_rate,
-            )
-    elif mode == "pr":
-        adapter.create_branch(branch_name)
-        adapter.apply_diff(run_dir / "candidate.diff")
-        post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
-        pr_metadata = adapter.pull_request_metadata(
-            candidate_id=candidate_id,
-            base_file=candidate.base_file,
-            branch_name=branch_name,
-            base_branch=base_branch,
-            rationale=candidate.rationale,
-        ).to_json_dict()
+                base_branch=base_branch,
+                rationale=candidate.rationale,
+            ).to_json_dict()
+    except VcsStateError:
+        if branch_created and not applied_commit:
+            adapter.switch_branch(base_branch)
+            adapter.delete_branch(branch_name)
+        raise
 
     payload = {
         "schema_version": SCHEMA_VERSION,

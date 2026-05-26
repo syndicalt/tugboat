@@ -134,3 +134,23 @@ def test_rollback_metadata_contains_revert_commands_without_mutating_repo(tmp_pa
         "strategy": "git_revert",
     }
     assert _git(repo, "rev-parse", "HEAD") == head
+
+
+def test_apply_diff_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    diff_path = tmp_path / "conflicting.diff"
+    diff_path.write_text(
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -1,3 +1,4 @@\n"
+        " # Codex\n"
+        " \n"
+        " Different existing text.\n"
+        "+Record rollback notes.\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VcsStateError, match="git apply failed"):
+        VcsAdapter(repo).apply_diff(diff_path)
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == "# Codex\n\nKeep tests green.\n"

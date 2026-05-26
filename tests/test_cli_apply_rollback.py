@@ -8,9 +8,11 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import tugboat.cli as cli_module
 from tugboat.cli import main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.vcs import VcsAdapter, VcsStateError
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -203,6 +205,67 @@ def test_apply_rejects_stale_base_hash_before_writing_plan(tmp_path: Path):
 
     assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
 
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_rejects_policy_invalid_patch_without_mutation_or_branch_change(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+    conflicting_diff = (
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -1,3 +1,4 @@\n"
+        " # Rules\n"
+        " \n"
+        " Use a different line.\n"
+        "+Record rollback notes.\n"
+    )
+    (run_dir / "candidate.diff").write_text(conflicting_diff, encoding="utf-8")
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    candidate["diff_hash"] = hashlib.sha256(conflicting_diff.encode("utf-8")).hexdigest()
+    (run_dir / "candidate.json").write_text(
+        json.dumps(candidate, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    db_path = repo / ".sidecar" / "db.sqlite"
+    if db_path.exists():
+        with closing(sqlite3.connect(db_path)) as connection:
+            table_exists = connection.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'audit_events'"
+            ).fetchone()[0]
+            if table_exists:
+                assert connection.execute(
+                    "SELECT COUNT(*) FROM audit_events WHERE event_type = 'apply.applied'"
+                ).fetchone()[0] == 0
+
+
+def test_apply_restores_original_branch_when_vcs_apply_fails_after_branch_creation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+
+    class FailingApplyAdapter(VcsAdapter):
+        def apply_diff(self, diff_path: Path) -> None:
+            raise VcsStateError("git apply failed: simulated conflict")
+
+    monkeypatch.setattr(cli_module, "VcsAdapter", FailingApplyAdapter)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     assert not (run_dir / "apply-plan.json").exists()
 
 

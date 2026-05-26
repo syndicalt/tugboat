@@ -165,8 +165,19 @@ class VcsAdapter:
     def create_branch(self, branch_name: str) -> None:
         self._git("switch", "-c", branch_name)
 
+    def switch_branch(self, branch_name: str) -> None:
+        self._git("switch", branch_name)
+
+    def delete_branch(self, branch_name: str) -> None:
+        self._git("branch", "-D", branch_name)
+
     def apply_diff(self, diff_path: Path) -> None:
-        self._git("apply", str(diff_path))
+        try:
+            self._git("apply", str(diff_path))
+        except subprocess.CalledProcessError as error:
+            message = (error.stderr or error.stdout or "").strip()
+            detail = f": {message}" if message else ""
+            raise VcsStateError(f"git apply failed{detail}") from error
 
     def commit_files(self, files: tuple[str, ...], message: str) -> str:
         self._git("add", "--", *files)
