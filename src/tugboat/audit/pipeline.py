@@ -5,7 +5,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import ArtifactValidationError, SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
@@ -199,7 +199,23 @@ def run_audit_pipeline(
             )
         raw_audit = json.loads(run.output_paths["audit_report"].read_text(encoding="utf-8"))
         if not isinstance(raw_audit, dict):
-            raise ValueError("llmff audit_report output must be a JSON object")
+            return _failed_audit_result(
+                repo,
+                run_dir,
+                manifest_hash=inspect.manifest_hash,
+                episode_id=episode_id,
+                message="audit rejected: llmff audit_report output must be a JSON object",
+            )
+        try:
+            validate_json_artifact("audit.raw.json", raw_audit)
+        except ArtifactValidationError as error:
+            return _failed_audit_result(
+                repo,
+                run_dir,
+                manifest_hash=inspect.manifest_hash,
+                episode_id=episode_id,
+                message=f"audit rejected: {error}",
+            )
         audit_payload.update(raw_audit)
     evidence_refs = [str(ref) for ref in audit_payload.get("evidence_refs", [])]
     raw_instruction_refs = audit_payload.get("instruction_refs")
@@ -231,6 +247,26 @@ def run_audit_pipeline(
     audit_payload["instruction_refs"] = instruction_refs
     write_audit(run_dir, audit_payload)
     return AuditPipelineResult(0, run_dir, f"audit run: {run_dir.name}")
+
+
+def _failed_audit_result(
+    repo: Path,
+    run_dir: Path,
+    *,
+    manifest_hash: str,
+    episode_id: int,
+    message: str,
+) -> AuditPipelineResult:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="audit",
+            manifest_hash=manifest_hash,
+            status="failed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
+    return AuditPipelineResult(1, run_dir, message)
 
 
 def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:

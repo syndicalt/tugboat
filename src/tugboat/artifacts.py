@@ -90,6 +90,26 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "llmff_failure_message": {"type": "string"},
         },
     },
+    "audit.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "edit_warranted",
+            "evidence_refs",
+            "failure_class",
+            "severity",
+            "confidence",
+        ],
+        "properties": {
+            "edit_warranted": {"type": "boolean"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "failure_class": {"type": "string"},
+            "severity": {"type": "string"},
+            "confidence": {"type": "number"},
+            "instruction_refs": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "candidate.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

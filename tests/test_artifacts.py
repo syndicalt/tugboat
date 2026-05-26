@@ -129,6 +129,20 @@ def test_validate_instruction_graph_artifact_accepts_current_schema():
     )
 
 
+def test_validate_audit_raw_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "audit.raw.json",
+        {
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#rules"],
+        },
+    )
+
+
 def test_validate_reflection_artifact_accepts_current_schema():
     validate_json_artifact(
         "reflection.json",
