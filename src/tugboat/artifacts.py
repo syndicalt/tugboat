@@ -9,6 +9,17 @@ SCHEMA_VERSION = 1
 
 JSON_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
 
+BOUNDED_EDIT_OPERATORS = (
+    "add",
+    "annotate",
+    "delete",
+    "demote",
+    "merge",
+    "promote",
+    "replace",
+    "split",
+)
+
 JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     "audit.json": {
         "$schema": JSON_SCHEMA_URI,
@@ -118,7 +129,27 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "type": "array",
                 "items": {"type": "string"},
             },
-            "bounded_edit_metadata": {"type": "array", "items": {"type": "object"}},
+            "bounded_edit_metadata": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "operator",
+                        "file",
+                        "section",
+                        "changed_lines",
+                        "normative_changes",
+                    ],
+                    "properties": {
+                        "operator": {"type": "string", "enum": list(BOUNDED_EDIT_OPERATORS)},
+                        "file": {"type": "string"},
+                        "section": {"type": "string"},
+                        "changed_lines": {"type": "integer"},
+                        "normative_changes": {"type": "integer"},
+                    },
+                },
+            },
         },
     },
     "eval-report.json": {
@@ -384,6 +415,12 @@ def _validate_schema_value(
         raise ArtifactValidationError(f"{artifact_name} field has wrong type: {field_path}")
     if "const" in schema and value != schema["const"]:
         raise ArtifactValidationError(f"{artifact_name} has unsupported schema_version")
+    if "enum" in schema:
+        allowed_values = schema["enum"]
+        if not isinstance(allowed_values, list):
+            raise ArtifactValidationError(f"{artifact_name} schema enum must be an array")
+        if value not in allowed_values:
+            raise ArtifactValidationError(f"{artifact_name} field has unsupported value: {field_path}")
 
     if expected_type == "array":
         item_schema = schema.get("items")

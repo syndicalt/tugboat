@@ -170,6 +170,74 @@ def test_validate_candidate_artifact_rejects_malformed_sources():
         )
 
 
+def test_validate_candidate_artifact_rejects_malformed_bounded_edit_metadata():
+    base_payload = {
+        "schema_version": 1,
+        "audit_id": 1,
+        "base_file": "CODEX.md",
+        "base_hash": "abc",
+        "diff_hash": "def",
+        "risk_class": "instruction_clarification",
+        "rationale": "because",
+        "sources": [{"source_id": "ev_1", "trusted": True}],
+    }
+
+    bad_items = [
+        {
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        },
+        {
+            "operator": "rewrite_everything",
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        },
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": "1",
+            "normative_changes": 0,
+        },
+    ]
+
+    for item in bad_items:
+        with pytest.raises(ArtifactValidationError, match="bounded_edit_metadata"):
+            validate_json_artifact(
+                "candidate.json",
+                {**base_payload, "bounded_edit_metadata": [item]},
+            )
+
+
+def test_validate_candidate_artifact_accepts_bounded_edit_metadata():
+    validate_json_artifact(
+        "candidate.json",
+        {
+            "schema_version": 1,
+            "audit_id": 1,
+            "base_file": "CODEX.md",
+            "base_hash": "abc",
+            "diff_hash": "def",
+            "risk_class": "instruction_clarification",
+            "rationale": "because",
+            "sources": [{"source_id": "ev_1", "trusted": True}],
+            "bounded_edit_metadata": [
+                {
+                    "operator": "add",
+                    "file": "CODEX.md",
+                    "section": "Testing",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
+                }
+            ],
+        },
+    )
+
+
 def test_validate_decision_artifact_requires_policy_reasons():
     with pytest.raises(ArtifactValidationError, match="policy_reasons"):
         validate_json_artifact(
