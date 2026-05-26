@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -58,6 +59,42 @@ def test_run_daemon_once_processes_one_job_through_waiting_review(tmp_path: Path
     }
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         assert queue.get_job(job.id).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
+
+
+def test_run_daemon_once_executes_trace_audit_job_through_storage_layer(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "episode.jsonl"
+    trace.write_text(
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"user_correction","content":"Use regression tests"}\n',
+        encoding="utf-8",
+    )
+    with DaemonQueue.open_sidecar(repo) as queue:
+        job = queue.enqueue(kind="trace_audit", payload={"trace_path": str(trace)}, now=_at(0))
+
+    result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["processed"] is True
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "waiting_review"
+    run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())
+    assert len(run_dirs) == 1
+    audit = json.loads((run_dirs[0] / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "daemon_trace_audit"
+    assert audit["evidence_refs"]
+    with sqlite3.connect(repo / ".sidecar" / "db.sqlite") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM trace_events").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM runs WHERE stage = 'audit'").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM audits").fetchone()[0] == 1
 
 
 def test_run_daemon_once_respects_read_only_kill_switch(tmp_path: Path):

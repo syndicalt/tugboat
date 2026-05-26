@@ -7,7 +7,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from tugboat.audit.service import write_audit
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
+from tugboat.db import Store
+from tugboat.paths import new_run_dir, sidecar_dir
+from tugboat.traces.ingest import ingest_jsonl_trace
 
 
 @dataclass(frozen=True)
@@ -63,7 +67,7 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
                 "final_state": None,
                 "recovered_jobs": list(recovered),
             }
-        final_job = _process_job(queue, job.id, now=config.now)
+        final_job = _process_job(repo, queue, job.id, now=config.now)
         return {
             "processed": True,
             "job_id": final_job.id,
@@ -134,7 +138,46 @@ def _handle_socket_request(
     return {"error": f"unknown daemon command: {command}"}
 
 
-def _process_job(queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
+def _process_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
     running = queue.transition(job_id, JobState.RUNNING, now=now)
+    if running.kind == "trace_audit":
+        _execute_trace_audit(repo, running.payload)
     evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
     return queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
+
+
+def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> None:
+    trace_path = Path(str(payload["trace_path"]))
+    bundle = ingest_jsonl_trace(trace_path)
+    run_dir = new_run_dir(repo)
+    evidence_refs = [event.evidence_id for event in bundle.events]
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="audit",
+            manifest_hash="daemon-trace-audit",
+            status="completed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
+        audit_id = store.insert_audit(
+            run_id=run_dir.name,
+            failure_class="daemon_trace_audit",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=evidence_refs,
+            instruction_refs=[],
+        )
+    write_audit(
+        run_dir,
+        {
+            "audit_id": audit_id,
+            "edit_warranted": True,
+            "evidence_refs": evidence_refs,
+            "failure_class": "daemon_trace_audit",
+            "severity": "medium",
+            "confidence": 0.75,
+            "instruction_refs": [],
+        },
+    )
