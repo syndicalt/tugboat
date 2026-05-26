@@ -34,6 +34,7 @@ def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_
     )
 
     assert result.deleted == ()
+    assert result.redaction_candidates == ()
     assert result.candidates == (
         ".sidecar/runs/run-1/checkpoint-patch-eval.json",
         ".sidecar/runs/run-1/events.jsonl",
@@ -45,6 +46,34 @@ def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_
     assert (run_dir / "events.jsonl").exists()
     assert (run_dir / "checkpoint-patch-eval.json").exists()
     assert (run_dir / "audit.json").exists()
+
+
+def test_retention_policy_dry_run_reports_secret_bearing_runtime_artifacts(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    secret_trace = run_dir / "trace-input.jsonl"
+    _touch_old(secret_trace, days_old=15)
+    secret_trace.write_text('{"output":"OPENAI_API_KEY=sk-1234567890abcdefghijkl"}\n', encoding="utf-8")
+    timestamp = time.time() - 15 * 24 * 60 * 60
+    os.utime(secret_trace, (timestamp, timestamp))
+
+    result = apply_retention_policy(
+        tmp_path,
+        Policy(raw_traces_retention_days=14, checkpoints_retention_days=7),
+        dry_run=True,
+    )
+
+    assert result.deleted == ()
+    assert result.redaction_candidates == (
+        {
+            "path": ".sidecar/runs/run-1/trace-input.jsonl",
+            "line_number": 1,
+            "kind": "openai_api_key",
+        },
+    )
+    assert secret_trace.exists()
+    assert "sk-1234567890abcdefghijkl" in secret_trace.read_text(encoding="utf-8")
 
 
 def test_retention_policy_dry_run_reports_expired_per_manifest_lifecycle_trace_and_events(
@@ -63,6 +92,7 @@ def test_retention_policy_dry_run_reports_expired_per_manifest_lifecycle_trace_a
     )
 
     assert result.deleted == ()
+    assert result.redaction_candidates == ()
     assert result.candidates == (
         ".sidecar/runs/run-1/episode-audit/checkpoint.json",
         ".sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
@@ -123,6 +153,7 @@ retention:
         "retention_mode: dry-run",
         "candidates: 2",
         "deleted: 0",
+        "redaction_candidates: 0",
         f"retention_report: {tmp_path / '.sidecar' / 'ops' / 'retention' / 'retention-report.json'}",
         "candidate: .sidecar/runs/run-1/episode-audit/checkpoint.json",
         "candidate: .sidecar/runs/run-1/trace-input.jsonl",
@@ -140,6 +171,7 @@ retention:
             ".sidecar/runs/run-1/trace-input.jsonl",
         ],
         "deleted": [],
+        "redaction_candidates": [],
     }
     assert (run_dir / "trace-input.jsonl").exists()
     assert (run_dir / "episode-audit" / "checkpoint.json").exists()
@@ -170,6 +202,7 @@ retention:
         "retention_mode: apply",
         "candidates: 2",
         "deleted: 2",
+        "redaction_candidates: 0",
         f"retention_report: {tmp_path / '.sidecar' / 'ops' / 'retention' / 'retention-report.json'}",
         "candidate: .sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
         "candidate: .sidecar/runs/run-1/trace-redacted.jsonl",
@@ -192,6 +225,7 @@ retention:
             ".sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
             ".sidecar/runs/run-1/trace-redacted.jsonl",
         ],
+        "redaction_candidates": [],
     }
     assert not (run_dir / "trace-redacted.jsonl").exists()
     assert not (run_dir / "episode-audit" / "llmff-events.jsonl").exists()
@@ -272,6 +306,7 @@ retention:
         "status": "planned",
         "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
         "deleted": [],
+        "redaction_candidates": [],
     }
 
 
@@ -295,6 +330,7 @@ def test_retention_report_writes_use_unique_temp_paths(
         status="complete",
         candidates=(),
         deleted=(),
+        redaction_candidates=(),
     )
     _write_retention_report(
         tmp_path,
@@ -302,8 +338,64 @@ def test_retention_report_writes_use_unique_temp_paths(
         status="complete",
         candidates=(".sidecar/runs/run-1/trace-input.jsonl",),
         deleted=(),
+        redaction_candidates=(),
     )
 
     assert len(temp_names) == 2
     assert len(set(temp_names)) == 2
     assert ".retention-report.json.tmp" not in temp_names
+
+
+def test_retention_cli_reports_redaction_candidates_without_mutating_file(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+  checkpoints_days: 7
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    trace = run_dir / "trace-input.jsonl"
+    _touch_old(trace, days_old=15)
+    trace.write_text('{"output":"OPENAI_API_KEY=sk-1234567890abcdefghijkl"}\n', encoding="utf-8")
+    timestamp = time.time() - 15 * 24 * 60 * 60
+    os.utime(trace, (timestamp, timestamp))
+
+    assert main(["retention", "--repo", str(tmp_path)]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "retention_mode: dry-run",
+        "candidates: 1",
+        "deleted: 0",
+        "redaction_candidates: 1",
+        f"retention_report: {tmp_path / '.sidecar' / 'ops' / 'retention' / 'retention-report.json'}",
+        "candidate: .sidecar/runs/run-1/trace-input.jsonl",
+        "redaction_candidate: .sidecar/runs/run-1/trace-input.jsonl:1:openai_api_key",
+    ]
+    assert json.loads(
+        (tmp_path / ".sidecar" / "ops" / "retention" / "retention-report.json").read_text(
+            encoding="utf-8"
+        )
+    ) == {
+        "schema_version": 1,
+        "mode": "dry-run",
+        "status": "complete",
+        "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
+        "deleted": [],
+        "redaction_candidates": [
+            {
+                "path": ".sidecar/runs/run-1/trace-input.jsonl",
+                "line_number": 1,
+                "kind": "openai_api_key",
+            }
+        ],
+    }
+    assert "sk-1234567890abcdefghijkl" in trace.read_text(encoding="utf-8")

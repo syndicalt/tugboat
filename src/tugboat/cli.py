@@ -278,6 +278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status="planned",
                 candidates=preflight.candidates,
                 deleted=(),
+                redaction_candidates=preflight.redaction_candidates,
             )
             result = apply_retention_policy(repo, policy, dry_run=False)
             report_path = _write_retention_report(
@@ -286,6 +287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status="complete",
                 candidates=result.candidates,
                 deleted=result.deleted,
+                redaction_candidates=result.redaction_candidates,
             )
         else:
             result = apply_retention_policy(repo, policy, dry_run=True)
@@ -295,15 +297,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status="complete",
                 candidates=result.candidates,
                 deleted=result.deleted,
+                redaction_candidates=result.redaction_candidates,
             )
         print(f"retention_mode: {'apply' if args.apply else 'dry-run'}")
         print(f"candidates: {len(result.candidates)}")
         print(f"deleted: {len(result.deleted)}")
+        print(f"redaction_candidates: {len(result.redaction_candidates)}")
         print(f"retention_report: {report_path}")
         for candidate in result.candidates:
             print(f"candidate: {candidate}")
         for deleted in result.deleted:
             print(f"deleted: {deleted}")
+        for candidate in result.redaction_candidates:
+            print(
+                "redaction_candidate: "
+                f"{candidate['path']}:{candidate['line_number']}:{candidate['kind']}"
+            )
         return 0
 
     if args.command == "ci":
@@ -708,6 +717,7 @@ def _write_retention_report(
     status: str,
     candidates: Sequence[str],
     deleted: Sequence[str],
+    redaction_candidates: Sequence[dict[str, object]],
 ) -> Path:
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -715,6 +725,7 @@ def _write_retention_report(
         "status": status,
         "candidates": list(candidates),
         "deleted": list(deleted),
+        "redaction_candidates": list(redaction_candidates),
     }
     validate_json_artifact("retention-report.json", payload)
     path = sidecar_dir(repo) / "ops" / "retention" / "retention-report.json"

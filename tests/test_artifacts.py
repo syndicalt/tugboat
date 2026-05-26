@@ -743,6 +743,26 @@ def test_validate_retention_report_artifact_accepts_current_schema():
             "status": "complete",
             "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
             "deleted": [],
+            "redaction_candidates": [
+                {
+                    "path": ".sidecar/runs/run-1/trace-input.jsonl",
+                    "line_number": 1,
+                    "kind": "openai_api_key",
+                }
+            ],
+        },
+    )
+
+
+def test_validate_retention_report_accepts_legacy_report_without_redaction_candidates():
+    validate_json_artifact(
+        "retention-report.json",
+        {
+            "schema_version": 1,
+            "mode": "dry-run",
+            "status": "complete",
+            "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
+            "deleted": [],
         },
     )
 
@@ -757,6 +777,7 @@ def test_validate_retention_report_rejects_unknown_status():
                 "status": "maybe-complete",
                 "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
                 "deleted": [],
+                "redaction_candidates": [],
             },
         )
 

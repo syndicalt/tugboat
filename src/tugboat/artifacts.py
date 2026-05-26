@@ -902,13 +902,32 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "mode", "status", "candidates", "deleted"],
+        "required": [
+            "schema_version",
+            "mode",
+            "status",
+            "candidates",
+            "deleted",
+        ],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
             "mode": {"type": "string", "enum": ["dry-run", "apply"]},
             "status": {"type": "string", "enum": ["planned", "complete"]},
             "candidates": {"type": "array", "items": {"type": "string"}},
             "deleted": {"type": "array", "items": {"type": "string"}},
+            "redaction_candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "line_number", "kind"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "line_number": {"type": "integer"},
+                        "kind": {"type": "string"},
+                    },
+                },
+            },
         },
     },
     "mcp-request.json": {
