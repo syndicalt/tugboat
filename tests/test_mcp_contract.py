@@ -484,8 +484,21 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     repo = tmp_path
     tools = list_mcp_tools()
 
-    assert "tugboat_status" in [tool["name"] for tool in tools]
-    assert "tugboat_request_audit" in [tool["name"] for tool in tools]
+    by_name = {tool["name"]: tool for tool in tools}
+    assert "tugboat_status" in by_name
+    assert "tugboat_request_audit" in by_name
+    assert by_name["tugboat_status"] == {
+        "name": "tugboat_status",
+        "mutates_instructions": False,
+        "write_intent": False,
+    }
+    assert by_name["tugboat_request_audit"] == {
+        "name": "tugboat_request_audit",
+        "mutates_instructions": False,
+        "write_intent": True,
+    }
+    assert by_name["tugboat_record_episode"]["write_intent"] is True
+    assert all(tool["mutates_instructions"] is False for tool in tools)
     assert handle_jsonrpc_request(
         {
             "jsonrpc": "2.0",

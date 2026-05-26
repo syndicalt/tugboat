@@ -30,6 +30,15 @@ RUN_ARTIFACTS: tuple[tuple[str, str], ...] = (
     ("report", "report.md"),
 )
 
+WRITE_INTENT_TOOLS = frozenset(
+    {
+        "tugboat_record_episode",
+        "tugboat_request_audit",
+        "tugboat_request_eval",
+        "tugboat_request_proposal",
+    }
+)
+
 
 def tugboat_status(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
@@ -267,7 +276,11 @@ def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dic
 
 def list_mcp_tools() -> list[dict[str, Any]]:
     return [
-        {"name": name, "mutates_instructions": False}
+        {
+            "name": name,
+            "mutates_instructions": False,
+            "write_intent": name in WRITE_INTENT_TOOLS,
+        }
         for name in sorted(MCP_TOOLS)
     ]
 
