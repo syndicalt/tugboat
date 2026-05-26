@@ -814,6 +814,7 @@ def test_write_worktree_profile_records_local_observability_refs(tmp_path: Path)
 
     assert profile_path == tmp_path / ".sidecar" / "worktree-profile.json"
     assert json.loads(profile_path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
         "app_boot": {"command": "python -m app"},
         "observability_refs": ["http://127.0.0.1:3000/health"],
         "runs_dir": ".sidecar/runs",

@@ -183,18 +183,16 @@ def write_worktree_profile(
     observability_refs: list[str],
 ) -> Path:
     path = repo / ".sidecar" / "worktree-profile.json"
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "app_boot": app_boot,
+        "observability_refs": observability_refs,
+        "runs_dir": ".sidecar/runs",
+    }
+    validate_json_artifact("worktree-profile.json", payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(
-            {
-                "app_boot": app_boot,
-                "observability_refs": observability_refs,
-                "runs_dir": ".sidecar/runs",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return path

@@ -134,6 +134,7 @@ def test_daemon_profile_cli_writes_worktree_local_run_profile(tmp_path: Path, ca
     profile_path = tmp_path / ".sidecar" / "worktree-profile.json"
     assert f"worktree_profile: {profile_path}" in capsys.readouterr().out
     assert json.loads(profile_path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
         "app_boot": {
             "command": "python -m app",
             "healthcheck": "http://127.0.0.1:8000/health",

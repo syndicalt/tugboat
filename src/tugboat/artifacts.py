@@ -818,6 +818,23 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "doc_gardening_tasks": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "worktree-profile.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "app_boot",
+            "observability_refs",
+            "runs_dir",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "app_boot": {"type": "object"},
+            "observability_refs": {"type": "array", "items": {"type": "string"}},
+            "runs_dir": {"type": "string", "const": ".sidecar/runs"},
+        },
+    },
     "sidecar-migration-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

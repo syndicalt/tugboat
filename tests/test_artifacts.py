@@ -646,6 +646,30 @@ def test_validate_harness_report_rejects_invalid_knowledge_map_entries():
         )
 
 
+def test_validate_worktree_profile_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "worktree-profile.json",
+        {
+            "schema_version": 1,
+            "app_boot": {"command": "python -m app"},
+            "observability_refs": ["http://127.0.0.1:8000/health"],
+            "runs_dir": ".sidecar/runs",
+        },
+    )
+
+
+def test_validate_worktree_profile_artifact_requires_schema_version():
+    with pytest.raises(ArtifactValidationError, match="schema_version"):
+        validate_json_artifact(
+            "worktree-profile.json",
+            {
+                "app_boot": {"command": "python -m app"},
+                "observability_refs": [],
+                "runs_dir": ".sidecar/runs",
+            },
+        )
+
+
 def test_validate_sidecar_migration_report_artifact_accepts_current_schema():
     validate_json_artifact(
         "sidecar-migration-report.json",
