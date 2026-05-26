@@ -145,6 +145,14 @@ if args[:1] == ["run"]:
     elif manifest == "patch-eval":
         outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
+    elif manifest == "acceptance-summary":
+        outputs["acceptance_summary"].write_text(json.dumps({
+            "decision_recommendation": "needs_review",
+            "reasons": ["policy gate and eval report passed"],
+            "evidence": ["audit:1"],
+            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+        }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
@@ -1165,6 +1173,7 @@ llmff:
         ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
         ("patch-eval.yaml", "completed"),
+        ("acceptance-summary.yaml", "completed"),
     ]
     assert eval_report["trigger_score"] == 0.7
     assert eval_report["held_out_score"] == 0.9
@@ -1189,6 +1198,68 @@ llmff:
         "successful: held_out_improved for candidate "
         f"{decision['candidate_id']} in suite held-out"
     ]
+
+
+def test_optimize_runs_acceptance_summary_manifest_after_eval_gate(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        output = store.connection.execute(
+            """
+            SELECT o.output_name, o.artifact_path
+            FROM llmff_outputs o
+            JOIN llmff_jobs j ON j.id = o.job_id
+            WHERE j.run_id = ? AND j.manifest_name = 'acceptance-summary.yaml'
+            """,
+            (run_dir.name,),
+        ).fetchone()
+
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+        ("patch-eval.yaml", "completed"),
+        ("acceptance-summary.yaml", "completed"),
+    ]
+    summary = json.loads((run_dir / "acceptance-summary.raw.json").read_text(encoding="utf-8"))
+    inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
+    assert summary["decision_recommendation"] == "needs_review"
+    assert set(inputs) == {"candidate_patch", "eval_reports", "policy_gate", "risk_class"}
+    assert (run_dir / "acceptance-summary" / "llmff-inspect.json").exists()
+    assert (run_dir / "acceptance-summary" / "llmff-trace.jsonl").exists()
+    assert (run_dir / "acceptance-summary" / "llmff-events.jsonl").exists()
+    assert (run_dir / "acceptance-summary" / "checkpoint.json").exists()
+    assert output == ("acceptance_summary", str(run_dir / "acceptance-summary.raw.json"))
 
 
 def test_optimize_rejects_candidate_when_held_out_gate_fails(tmp_path: Path):

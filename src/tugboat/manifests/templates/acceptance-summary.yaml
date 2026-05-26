@@ -2,8 +2,8 @@ name: acceptance-summary
 purpose: Summarize accepted, rejected, or deferred instruction optimization proposals.
 inputs:
   - candidate_patch
-  - eval_report
-  - policy_decision
+  - policy_gate
+  - eval_reports
+  - risk_class
 outputs:
   - acceptance_summary
-  - followup_actions

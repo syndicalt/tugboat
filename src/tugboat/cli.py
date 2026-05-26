@@ -631,7 +631,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = latest_run_dir(repo)
         if propose_exit != 0:
             return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
-        main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", args.suite])
+        eval_exit = main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", args.suite])
+        if eval_exit == 0:
+            try:
+                _run_acceptance_summary(
+                    repo,
+                    run_dir,
+                    load_policy(repo),
+                )
+            except (RuntimeError, ValueError) as error:
+                print(str(error))
+                return 1
         return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
 
     if args.command == "apply":
@@ -1449,6 +1459,50 @@ def _run_patch_eval(
     if not isinstance(eval_payload, dict) or not isinstance(decision_payload, dict):
         raise ValueError("llmff patch-eval outputs must be JSON objects")
     return eval_payload, decision_payload
+
+
+def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, object]:
+    manifests = materialize_manifests(repo)
+    if not manifests_are_allowed_by_policy(manifests, policy):
+        raise RuntimeError("manifest hash is not allowed by policy")
+    manifest = next(record.path for record in manifests if record.name == "acceptance-summary.yaml")
+    inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    run = run_manifest(
+        manifest,
+        run_dir=run_dir,
+        policy=policy,
+        timeout_ms=60_000,
+        retry_attempts=0,
+        retry_backoff_ms=0,
+        checkpoint_path=run_dir / "acceptance-summary" / "checkpoint.json",
+        input_paths={
+            "candidate_patch": run_dir / "candidate.raw.json",
+            "policy_gate": run_dir / "policy-gate.json",
+            "eval_reports": run_dir / "eval-report.json",
+            "risk_class": run_dir / "candidate.json",
+        },
+        output_paths={"acceptance_summary": run_dir / "acceptance-summary.raw.json"},
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id=run_dir.name,
+            manifest_hash=inspect.manifest_hash,
+            result=run,
+        )
+        if run.exit_code != 0:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="acceptance_summary",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
+            )
+    if run.exit_code != 0:
+        raise RuntimeError(f"llmff acceptance-summary failed with exit code {run.exit_code}")
+    payload = json.loads(run.output_paths["acceptance_summary"].read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("llmff acceptance_summary output must be a JSON object")
+    return payload
 
 
 def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
