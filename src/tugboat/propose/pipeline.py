@@ -154,6 +154,14 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             "policy",
         },
     )
+    output_paths = _filter_declared_manifest_outputs(
+        manifest,
+        {
+            "candidate_patch": run_dir / "candidate.raw.json",
+            "proposal_rationale": run_dir / "proposal-rationale.raw.json",
+        },
+        required_outputs={"candidate_patch"},
+    )
     run = run_manifest(
         manifest,
         run_dir=run_dir,
@@ -163,7 +171,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         retry_backoff_ms=policy.llmff_retry_backoff_ms,
         checkpoint_path=run_dir / "patch-propose" / "checkpoint.json",
         input_paths=input_paths,
-        output_paths={"candidate_patch": run_dir / "candidate.raw.json"},
+        output_paths=output_paths,
     )
     if run.exit_code != 0:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -183,6 +191,12 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         "candidate.raw.json",
     )
     validate_json_artifact("candidate.raw.json", payload)
+    if "proposal_rationale" in run.output_paths:
+        rationale_payload = load_json_object_artifact(
+            run.output_paths["proposal_rationale"],
+            "proposal-rationale.raw.json",
+        )
+        validate_json_artifact("proposal-rationale.raw.json", rationale_payload)
     _validate_reflections_from_payload(payload)
     return _candidate_from_payload(payload, audit_id=audit_id)
 

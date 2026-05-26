@@ -25,6 +25,7 @@ def _write_fake_llmff(
     secret_artifact: str | None = None,
     invalid_json_output: str | None = None,
     optimizer_notes: object | None = None,
+    proposal_rationale: object | None = None,
 ) -> Path:
     if sources is None:
         sources = [{"source_id": "ev_fake", "trusted": True}]
@@ -91,6 +92,12 @@ def _write_fake_llmff(
             "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         }
+    if proposal_rationale is None:
+        proposal_rationale = {
+            "rationale": "Patch proposal is grounded in drift clusters and optimizer notes.",
+            "evidence_refs": ["ev_fake"],
+            "style_constraints": ["Preserve existing instruction tone."],
+        }
     if reflections is None:
         reflections = [
             {
@@ -113,6 +120,7 @@ AUDIT_REPORT = __AUDIT_REPORT__
 INSTRUCTION_INDEX = __INSTRUCTION_INDEX__
 DRIFT_CLUSTERS = __DRIFT_CLUSTERS__
 OPTIMIZER_NOTES = __OPTIMIZER_NOTES__
+PROPOSAL_RATIONALE = __PROPOSAL_RATIONALE__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
 ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
@@ -208,6 +216,11 @@ if args[:1] == ["run"]:
         import hashlib
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
+        if "proposal_rationale" in outputs:
+            if INVALID_JSON_OUTPUT == "proposal_rationale":
+                outputs["proposal_rationale"].write_text("{not json\\n", encoding="utf-8")
+            else:
+                outputs["proposal_rationale"].write_text(json.dumps(PROPOSAL_RATIONALE) + "\\n", encoding="utf-8")
         if SECRET_ARTIFACT == "candidate_patch":
             outputs["candidate_patch"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
             raise SystemExit(0)
@@ -259,6 +272,8 @@ raise SystemExit(64)
             "__DRIFT_CLUSTERS__", repr(drift_clusters)
         ).replace(
             "__OPTIMIZER_NOTES__", repr(optimizer_notes)
+        ).replace(
+            "__PROPOSAL_RATIONALE__", repr(proposal_rationale)
         ).replace(
             "__EVAL_REPORT__", repr(eval_report)
         ).replace(
@@ -1072,11 +1087,13 @@ llmff:
         "drift_clusters",
         "optimizer_notes",
         "candidate_patch",
+        "proposal_rationale",
     ]
     assert Path(llmff_inputs["drift_clusters"]) == run_dir / "drift.raw.json"
     assert Path(llmff_inputs["optimizer_notes"]) == run_dir / "optimizer-notes.raw.json"
     assert (run_dir / "drift.raw.json").exists()
     assert (run_dir / "optimizer-notes.raw.json").exists()
+    assert (run_dir / "proposal-rationale.raw.json").exists()
 
 
 def test_propose_passes_raw_instruction_index_to_drift_and_patch_manifests(tmp_path: Path):
@@ -1469,6 +1486,97 @@ llmff:
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "optimizer-notes.raw.json contains invalid JSON" in output
     assert (run_dir / "optimizer-notes.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
+def test_propose_rejects_malformed_llmff_proposal_rationale_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        proposal_rationale={
+            "rationale": "Use drift evidence.",
+            "evidence_refs": [7],
+            "style_constraints": ["Preserve tone."],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        output_names = [
+            row[0]
+            for row in store.connection.execute(
+                """
+                SELECT o.output_name
+                FROM llmff_outputs o
+                JOIN llmff_jobs j ON j.id = o.job_id
+                WHERE j.run_id = ?
+                ORDER BY o.id
+                """,
+                (run_dir.name,),
+            )
+        ]
+    assert "proposal-rationale.raw.json field has wrong type: evidence_refs[0]" in output
+    assert "proposal_rationale" in output_names
+    assert (run_dir / "proposal-rationale.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
+def test_propose_rejects_invalid_json_proposal_rationale_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="proposal_rationale",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "proposal-rationale.raw.json contains invalid JSON" in output
+    assert (run_dir / "proposal-rationale.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
 
@@ -2111,6 +2219,7 @@ llmff:
         "drift_clusters",
         "optimizer_notes",
         "candidate_patch",
+        "proposal_rationale",
         "eval_report",
         "policy_decision",
     ]

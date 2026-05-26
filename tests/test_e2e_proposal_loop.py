@@ -58,6 +58,12 @@ if args[:1] == ["run"]:
     elif manifest == "patch-propose":
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
+        if "proposal_rationale" in outputs:
+            outputs["proposal_rationale"].write_text(json.dumps({
+                "rationale": "Patch proposal is grounded in e2e drift evidence.",
+                "evidence_refs": ["ev_e2e"],
+                "style_constraints": ["Preserve concise instruction style."],
+            }) + "\\n", encoding="utf-8")
         outputs["candidate_patch"].write_text(json.dumps({
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),

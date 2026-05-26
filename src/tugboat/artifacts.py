@@ -382,6 +382,17 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "proposal-rationale.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["rationale", "evidence_refs", "style_constraints"],
+        "properties": {
+            "rationale": {"type": "string"},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "style_constraints": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "eval-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
