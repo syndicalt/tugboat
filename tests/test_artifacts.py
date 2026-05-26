@@ -670,6 +670,53 @@ def test_validate_worktree_profile_artifact_requires_schema_version():
         )
 
 
+def test_validate_status_report_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "status-report.json",
+        {
+            "schema_version": 1,
+            "mode": "proposal_only",
+            "auto_apply": "disabled",
+            "indexed_documents": 2,
+            "latest_run": {
+                "run_id": "run-1",
+                "stage": "audit",
+                "status": "completed",
+            },
+            "latest_llmff_job": {
+                "manifest_name": "episode-audit.yaml",
+                "status": "completed",
+            },
+            "latest_llmff_exit_code": 0,
+            "latest_llmff_failure_kind": None,
+            "pending_candidates": 0,
+            "retention_candidates": 0,
+            "retention_redaction_candidates": 0,
+            "manifest_policy": "unrestricted",
+        },
+    )
+
+
+def test_validate_status_report_artifact_requires_schema_version():
+    with pytest.raises(ArtifactValidationError, match="schema_version"):
+        validate_json_artifact(
+            "status-report.json",
+            {
+                "mode": "proposal_only",
+                "auto_apply": "disabled",
+                "indexed_documents": 0,
+                "latest_run": None,
+                "latest_llmff_job": None,
+                "latest_llmff_exit_code": None,
+                "latest_llmff_failure_kind": None,
+                "pending_candidates": 0,
+                "retention_candidates": 0,
+                "retention_redaction_candidates": 0,
+                "manifest_policy": "unrestricted",
+            },
+        )
+
+
 def test_validate_sidecar_migration_report_artifact_accepts_current_schema():
     validate_json_artifact(
         "sidecar-migration-report.json",

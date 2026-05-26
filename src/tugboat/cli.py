@@ -17,6 +17,7 @@ from tugboat.artifacts import (
     SCHEMA_VERSION,
     load_json_object_artifact,
     validate_json_artifact,
+    write_json_artifact,
 )
 from tugboat.audit.pipeline import run_audit_pipeline
 from tugboat.auto_apply import (
@@ -258,6 +259,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             if policy.allowed_manifest_hashes
             else "unrestricted"
         )
+        status_payload = {
+            "schema_version": SCHEMA_VERSION,
+            "mode": policy.mode,
+            "auto_apply": "enabled" if policy.auto_apply_enabled else "disabled",
+            "indexed_documents": indexed_documents,
+            "latest_run": (
+                {"run_id": str(latest[0]), "stage": str(latest[1]), "status": str(latest[2])}
+                if latest
+                else None
+            ),
+            "latest_llmff_job": (
+                {"manifest_name": str(latest_llmff[1]), "status": str(latest_llmff[2])}
+                if latest_llmff
+                else None
+            ),
+            "latest_llmff_exit_code": (
+                int(latest_llmff[3])
+                if latest_llmff is not None and latest_llmff[3] is not None
+                else None
+            ),
+            "latest_llmff_failure_kind": latest_failure_kind,
+            "pending_candidates": pending_candidates,
+            "retention_candidates": len(retention.candidates),
+            "retention_redaction_candidates": len(retention.redaction_candidates),
+            "manifest_policy": manifest_policy,
+        }
+        validate_json_artifact("status-report.json", status_payload)
+        status_report_path = write_json_artifact(sidecar_dir(repo) / "status-report.json", status_payload)
         print(f"mode: {policy.mode}")
         print(f"auto_apply: {'enabled' if policy.auto_apply_enabled else 'disabled'}")
         print(f"indexed_documents: {indexed_documents}")
@@ -273,6 +302,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"retention_candidates: {len(retention.candidates)}")
         print(f"retention_redaction_candidates: {len(retention.redaction_candidates)}")
         print(f"manifest_policy: {manifest_policy}")
+        print(f"status_report: {status_report_path}")
         return 0
 
     if args.command == "retention":

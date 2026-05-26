@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from contextlib import closing
@@ -26,7 +27,22 @@ def test_status_reports_empty_sidecar_state(tmp_path: Path, capsys):
         "retention_candidates: 0",
         "retention_redaction_candidates: 0",
         "manifest_policy: unrestricted",
+        f"status_report: {tmp_path / '.sidecar' / 'status-report.json'}",
     ]
+    assert json.loads((tmp_path / ".sidecar" / "status-report.json").read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "mode": "proposal_only",
+        "auto_apply": "disabled",
+        "indexed_documents": 0,
+        "latest_run": None,
+        "latest_llmff_job": None,
+        "latest_llmff_exit_code": None,
+        "latest_llmff_failure_kind": None,
+        "pending_candidates": 0,
+        "retention_candidates": 0,
+        "retention_redaction_candidates": 0,
+        "manifest_policy": "unrestricted",
+    }
 
 
 def test_status_reports_indexed_documents_and_latest_run(tmp_path: Path, capsys):
