@@ -1223,6 +1223,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "metadata",
             "executed",
             "revert_commit",
+            "source_artifacts",
         ],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
@@ -1231,6 +1232,31 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "metadata": {"type": "object"},
             "executed": {"type": "boolean"},
             "revert_commit": {"type": "string"},
+            "source_artifacts": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["apply_plan"],
+                "properties": {
+                    "apply_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                    "provenance_bundle": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                },
+            },
         },
     },
 }
@@ -1286,7 +1312,7 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
             ):
             if field not in payload:
                 raise ArtifactValidationError(f"{name} missing required field: {field}")
-    if name == "provenance-bundle.json":
+    if name in {"provenance-bundle.json", "rollback-plan.json"}:
         source_artifacts = payload.get("source_artifacts", {})
         if isinstance(source_artifacts, dict):
             for artifact_name, artifact_ref in source_artifacts.items():

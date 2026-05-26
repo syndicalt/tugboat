@@ -1171,6 +1171,34 @@ def test_validate_rollback_plan_rejects_missing_metadata():
         )
 
 
+def test_validate_rollback_plan_accepts_source_artifacts():
+    validate_json_artifact(
+        "rollback-plan.json",
+        {
+            "schema_version": 1,
+            "decision_id": "run-1",
+            "candidate_id": 7,
+            "metadata": {
+                "commit_sha": "abc123",
+                "branch_name": "tugboat/run-1/candidate-7/codex-md",
+                "commands": [["git", "revert", "--no-edit", "abc123"]],
+            },
+            "executed": True,
+            "revert_commit": "def456",
+            "source_artifacts": {
+                "apply_plan": {
+                    "path": ".sidecar/runs/run-1/apply-plan.json",
+                    "sha256": "0" * 64,
+                },
+                "provenance_bundle": {
+                    "path": ".sidecar/runs/run-1/provenance-bundle.json",
+                    "sha256": "1" * 64,
+                },
+            },
+        },
+    )
+
+
 def test_validate_report_markdown_requires_sections():
     with pytest.raises(ArtifactValidationError, match="Rationale"):
         validate_report_markdown("# Tugboat Report\n\n- schema_version: 1\n- candidate: CODEX.md\n")

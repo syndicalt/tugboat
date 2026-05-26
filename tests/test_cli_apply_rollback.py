@@ -386,14 +386,21 @@ def test_rollback_writes_revert_plan_from_apply_decision(tmp_path: Path):
     rollback = json.loads((run_dir / "rollback-plan.json").read_text(encoding="utf-8"))
     assert rollback["decision_id"] == "20260525T000000000000Z"
     assert rollback["metadata"]["commit_sha"] == commit_sha
+    assert rollback["source_artifacts"]["apply_plan"] == {
+        "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+        "sha256": _hash(run_dir / "apply-plan.json"),
+    }
     assert rollback["metadata"]["commands"] == [
         ["git", "switch", "tugboat/20260525t000000000000z/candidate-7/codex-md"],
         ["git", "revert", "--no-edit", commit_sha],
     ]
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'rollback.planned'"
-        ).fetchone()[0] == 1
+        row = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE event_type = 'rollback.planned'"
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["rollback_plan"] == ".sidecar/runs/20260525T000000000000Z/rollback-plan.json"
 
 
 def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Path):
@@ -409,10 +416,17 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
     rollback = json.loads((run_dir / "rollback-plan.json").read_text(encoding="utf-8"))
     assert rollback["executed"] is True
     assert rollback["revert_commit"] == _git(repo, "rev-parse", "HEAD")
+    assert rollback["source_artifacts"]["provenance_bundle"] == {
+        "path": ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json",
+        "sha256": _hash(run_dir / "provenance-bundle.json"),
+    }
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'rollback.applied'"
-        ).fetchone()[0] == 1
+        row = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE event_type = 'rollback.applied'"
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["rollback_plan"] == ".sidecar/runs/20260525T000000000000Z/rollback-plan.json"
 
 
 def test_apply_commit_mode_creates_branch_commit_and_rollback_command(tmp_path: Path):

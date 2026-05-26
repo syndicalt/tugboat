@@ -1851,6 +1851,20 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
             branch_name=str(apply_plan["branch_name"]),
             commit_sha=commit_sha,
         )
+    source_artifacts = {
+        "apply_plan": {
+            "path": _relative_repo_path(repo, run_dir / "apply-plan.json"),
+            "sha256": CandidatePatch.hash_file(run_dir / "apply-plan.json"),
+        }
+    }
+    provenance_bundle = apply_plan.get("provenance_bundle")
+    if isinstance(provenance_bundle, str):
+        provenance_bundle_path = repo / provenance_bundle
+        if provenance_bundle_path.exists():
+            source_artifacts["provenance_bundle"] = {
+                "path": provenance_bundle,
+                "sha256": CandidatePatch.hash_file(provenance_bundle_path),
+            }
     payload = {
         "schema_version": SCHEMA_VERSION,
         "decision_id": str(apply_plan["decision_id"]),
@@ -1858,8 +1872,10 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
         "metadata": metadata.to_json_dict(),
         "executed": execute,
         "revert_commit": revert_commit,
+        "source_artifacts": source_artifacts,
     }
     path = run_dir / "rollback-plan.json"
+    rollback_plan = _relative_repo_path(repo, path)
     validate_json_artifact("rollback-plan.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -1869,6 +1885,7 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                 "candidate_id": int(apply_plan["candidate_id"]),
                 "commit_sha": commit_sha,
                 "decision_id": str(apply_plan["decision_id"]),
+                "rollback_plan": rollback_plan,
                 "target_files": list(target_files),
             },
         )
@@ -1880,6 +1897,7 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                     "commit_sha": commit_sha,
                     "decision_id": str(apply_plan["decision_id"]),
                     "revert_commit": revert_commit,
+                    "rollback_plan": rollback_plan,
                     "target_files": list(target_files),
                 },
             )
