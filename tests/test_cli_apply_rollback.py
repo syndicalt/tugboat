@@ -180,9 +180,14 @@ def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_p
     assert apply_plan["rollback_command"] == []
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'apply.planned'"
-        ).fetchone()[0] == 1
+        row = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE event_type = 'apply.planned'"
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["provenance_bundle"] == (
+        ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json"
+    )
 
 
 def test_apply_rejects_dirty_target_before_writing_plan(tmp_path: Path):
@@ -465,6 +470,7 @@ def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):
         },
         "pre_hashes": apply_plan["pre_hashes"],
         "post_hashes": apply_plan["post_hashes"],
+        "provenance_bundle": ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json",
         "rollback_command": apply_plan["rollback_command"],
     }
     assert apply_plan["provenance_bundle"] == (

@@ -1187,6 +1187,7 @@ def _write_apply_plan(
         "review_required_reasons": list(decision.review_required_reasons),
         "decision_rationale": "policy gate and eval report passed",
     }
+    provenance_bundle = str(payload["provenance_bundle"])
     path = run_dir / "apply-plan.json"
     validate_json_artifact("apply-plan.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1212,6 +1213,7 @@ def _write_apply_plan(
                 "target_files": list(target_files),
                 "applied_commit": applied_commit,
                 "auto_apply": auto_apply,
+                "provenance_bundle": provenance_bundle,
             },
         )
         store.insert_decision(
@@ -1235,6 +1237,7 @@ def _write_apply_plan(
                     applied_commit=applied_commit,
                     pre_hashes=pre_hashes,
                     post_hashes=post_hashes,
+                    provenance_bundle=provenance_bundle,
                     rollback_command=rollback_command,
                 ),
             )
@@ -1567,6 +1570,7 @@ def _apply_applied_event_payload(
     applied_commit: str,
     pre_hashes: dict[str, str],
     post_hashes: dict[str, str],
+    provenance_bundle: str,
     rollback_command: list[list[str]],
 ) -> dict[str, object]:
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
@@ -1589,6 +1593,7 @@ def _apply_applied_event_payload(
         },
         "pre_hashes": pre_hashes,
         "post_hashes": post_hashes,
+        "provenance_bundle": provenance_bundle,
         "rollback_command": rollback_command,
     }
 
