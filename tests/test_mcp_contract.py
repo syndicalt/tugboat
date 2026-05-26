@@ -1415,6 +1415,9 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
             "invalid candidate_id",
         ),
         (lambda repo: tugboat_request_eval(repo, "..", "all"), "invalid candidate_id"),
+        (lambda repo: tugboat_request_eval(repo, "9", ""), "invalid suite"),
+        (lambda repo: tugboat_request_eval(repo, "9", "../all"), "invalid suite"),
+        (lambda repo: tugboat_request_eval(repo, "9", "all/nightly"), "invalid suite"),
     ),
 )
 def test_direct_mcp_write_intent_calls_validate_artifact_ids_before_queueing(
@@ -1851,11 +1854,11 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     assert by_name["tugboat_request_eval"] == {
         "inputSchema": {
             "additionalProperties": False,
-            "properties": {
-                "repo": {"type": "string"},
-                "candidate_id": {"pattern": "^[0-9]+$", "type": "string"},
-                "suite": {"type": "string"},
-            },
+                "properties": {
+                    "repo": {"type": "string"},
+                    "candidate_id": {"pattern": "^[0-9]+$", "type": "string"},
+                    "suite": {"pattern": "^[A-Za-z0-9_.-]{1,64}$", "type": "string"},
+                },
             "required": ["repo", "candidate_id", "suite"],
             "type": "object",
         },

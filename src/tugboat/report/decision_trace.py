@@ -188,6 +188,7 @@ def _decision_trace_payload(
         "trace_events": trace_events,
         "unresolved_evidence_refs": sorted(set(evidence_refs) - resolved_evidence_refs),
         "evals": _evals(store, repo, candidate_id=int(row[1])),
+        "llmff_jobs": _llmff_jobs(store, repo, run_id=str(row[21])),
         "artifacts": _artifact_refs(repo, run_dir),
     }
     validate_json_artifact("decision-trace.json", payload)
@@ -259,6 +260,96 @@ def _evals(store: Store, repo: Path, *, candidate_id: int) -> list[dict[str, Any
             "metrics": _json_object(row[4]),
             "audit_event_sequence": int(row[5]),
             "event_hash": str(row[6]),
+        }
+        for row in rows
+    ]
+
+
+def _llmff_jobs(store: Store, repo: Path, *, run_id: str) -> list[dict[str, Any]]:
+    rows = store.connection.execute(
+        """
+        SELECT
+          j.id,
+          j.manifest_name,
+          j.manifest_hash,
+          j.status,
+          j.exit_code,
+          j.audit_event_sequence,
+          ae.event_hash
+        FROM llmff_jobs j
+        JOIN audit_events ae ON ae.sequence = j.audit_event_sequence
+        WHERE j.run_id = ?
+        ORDER BY j.id
+        """,
+        (run_id,),
+    ).fetchall()
+    return [
+        {
+            "job_id": int(row[0]),
+            "manifest_name": str(row[1]),
+            "manifest_hash": str(row[2]),
+            "status": str(row[3]),
+            "exit_code": None if row[4] is None else int(row[4]),
+            "audit_event_sequence": int(row[5]),
+            "event_hash": str(row[6]),
+            "events": _llmff_events(store, job_id=int(row[0])),
+            "outputs": _llmff_outputs(store, repo, job_id=int(row[0])),
+        }
+        for row in rows
+    ]
+
+
+def _llmff_events(store: Store, *, job_id: int) -> list[dict[str, Any]]:
+    rows = store.connection.execute(
+        """
+        SELECT
+          e.id,
+          e.event_type,
+          e.audit_event_sequence,
+          ae.event_hash
+        FROM llmff_events e
+        JOIN audit_events ae ON ae.sequence = e.audit_event_sequence
+        WHERE e.job_id = ?
+        ORDER BY e.id
+        """,
+        (job_id,),
+    ).fetchall()
+    return [
+        {
+            "event_id": int(row[0]),
+            "event_type": str(row[1]),
+            "audit_event_sequence": int(row[2]),
+            "event_hash": str(row[3]),
+        }
+        for row in rows
+    ]
+
+
+def _llmff_outputs(store: Store, repo: Path, *, job_id: int) -> list[dict[str, Any]]:
+    rows = store.connection.execute(
+        """
+        SELECT
+          o.id,
+          o.output_name,
+          o.artifact_path,
+          o.content_hash,
+          o.audit_event_sequence,
+          ae.event_hash
+        FROM llmff_outputs o
+        JOIN audit_events ae ON ae.sequence = o.audit_event_sequence
+        WHERE o.job_id = ?
+        ORDER BY o.id
+        """,
+        (job_id,),
+    ).fetchall()
+    return [
+        {
+            "output_id": int(row[0]),
+            "output_name": str(row[1]),
+            "artifact_path": _repo_relative_path(repo, Path(str(row[2]))),
+            "content_hash": str(row[3]),
+            "audit_event_sequence": int(row[4]),
+            "event_hash": str(row[5]),
         }
         for row in rows
     ]

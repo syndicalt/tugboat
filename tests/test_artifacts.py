@@ -1280,6 +1280,35 @@ def test_validate_decision_trace_artifact_accepts_provenance_payload():
                     "event_hash": "6" * 64,
                 }
             ],
+            "llmff_jobs": [
+                {
+                    "job_id": 5,
+                    "manifest_name": "patch-eval.yaml",
+                    "manifest_hash": "7" * 64,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "audit_event_sequence": 44,
+                    "event_hash": "8" * 64,
+                    "events": [
+                        {
+                            "event_id": 6,
+                            "event_type": "run_completed",
+                            "audit_event_sequence": 45,
+                            "event_hash": "9" * 64,
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "output_id": 7,
+                            "output_name": "eval_report",
+                            "artifact_path": ".sidecar/runs/run-1/eval-report.raw.json",
+                            "content_hash": "a" * 64,
+                            "audit_event_sequence": 46,
+                            "event_hash": "b" * 64,
+                        }
+                    ],
+                }
+            ],
             "artifacts": {
                 "audit_report": ".sidecar/runs/run-1/audit.json",
                 "candidate_diff": ".sidecar/runs/run-1/candidate.diff",

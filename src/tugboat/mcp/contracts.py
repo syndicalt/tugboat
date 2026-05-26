@@ -61,6 +61,8 @@ _REPO_SCHEMA = {"type": "string"}
 _INTEGER_ID_SCHEMA = {"type": "integer"}
 _SAFE_MCP_ID_PATTERN_TEXT = r"^(?!\.\.?$)[A-Za-z0-9_.-]+$"
 _SAFE_MCP_ID_PATTERN = re.compile(_SAFE_MCP_ID_PATTERN_TEXT)
+_SAFE_MCP_SUITE_PATTERN_TEXT = r"^[A-Za-z0-9_.-]{1,64}$"
+_SAFE_MCP_SUITE_PATTERN = re.compile(_SAFE_MCP_SUITE_PATTERN_TEXT)
 _STRING_ID_SCHEMA = {"pattern": _SAFE_MCP_ID_PATTERN_TEXT, "type": "string"}
 _DECIMAL_ID_SCHEMA = {"pattern": r"^[0-9]+$", "type": "string"}
 
@@ -92,7 +94,11 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         ("repo", "trace_id"),
     ),
     "tugboat_request_eval": _object_schema(
-        {"repo": _REPO_SCHEMA, "candidate_id": _DECIMAL_ID_SCHEMA, "suite": {"type": "string"}},
+        {
+            "repo": _REPO_SCHEMA,
+            "candidate_id": _DECIMAL_ID_SCHEMA,
+            "suite": {"pattern": _SAFE_MCP_SUITE_PATTERN_TEXT, "type": "string"},
+        },
         ("repo", "candidate_id", "suite"),
     ),
     "tugboat_request_proposal": _object_schema(
@@ -620,6 +626,7 @@ def tugboat_request_proposal(repo: str | Path, audit_id: str) -> dict[str, Any]:
 def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dict[str, Any]:
     def validate_candidate_id() -> None:
         _validate_mcp_artifact_id("candidate_id", candidate_id)
+        _validate_mcp_suite_id(suite)
         numeric_candidate_id = _parse_mcp_integer_id("candidate_id", candidate_id)
         with Store.open(sidecar_dir(_resolve_local_repo(repo)) / "db.sqlite") as store:
             row = store.connection.execute(
@@ -841,6 +848,11 @@ def _audit_jsonrpc_validation_failure(
 def _validate_mcp_artifact_id(kind: str, value: str) -> None:
     if not value or value in {".", ".."} or _SAFE_MCP_ID_PATTERN.fullmatch(value) is None:
         raise ValueError(f"invalid {kind}")
+
+
+def _validate_mcp_suite_id(value: str) -> None:
+    if _SAFE_MCP_SUITE_PATTERN.fullmatch(value) is None:
+        raise ValueError("invalid suite")
 
 
 def _parse_mcp_integer_id(kind: str, value: str) -> int:

@@ -213,6 +213,33 @@ llmff:
     ]
     assert decision_trace["evals"][0]["suite_id"] == "all"
     assert decision_trace["evals"][0]["passed"] is True
+    assert [
+        job["manifest_name"] for job in decision_trace["llmff_jobs"]
+    ] == [
+        "instruction-index.yaml",
+        "episode-audit.yaml",
+        "drift-detect.yaml",
+        "patch-propose.yaml",
+        "patch-eval.yaml",
+        "acceptance-summary.yaml",
+    ]
+    assert all(job["status"] == "completed" for job in decision_trace["llmff_jobs"])
+    assert all(job["exit_code"] == 0 for job in decision_trace["llmff_jobs"])
+    assert {
+        output["output_name"]
+        for job in decision_trace["llmff_jobs"]
+        for output in job["outputs"]
+    } >= {
+        "audit_report",
+        "candidate_patch",
+        "eval_report",
+        "acceptance_summary",
+    }
+    assert all(
+        "payload" not in event
+        for job in decision_trace["llmff_jobs"]
+        for event in job["events"]
+    )
     assert decision_trace["artifacts"]["candidate_diff"].endswith("candidate.diff")
     assert decision_trace["artifacts"]["decision_artifact"].endswith("decision.json")
     report = (run_dir / "report.md").read_text(encoding="utf-8")
