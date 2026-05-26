@@ -221,6 +221,66 @@ def test_validate_candidate_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_candidate_raw_artifact_requires_proposal_metadata():
+    with pytest.raises(ArtifactValidationError, match="base_hash"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": "CODEX.md",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+            },
+        )
+
+
+def test_validate_candidate_raw_artifact_rejects_wrong_field_types():
+    with pytest.raises(ArtifactValidationError, match="base_file"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": 123,
+                "base_hash": "abc123",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+            },
+        )
+
+
+def test_validate_candidate_raw_artifact_rejects_malformed_bounded_edit_metadata():
+    payload = {
+        "base_file": "CODEX.md",
+        "base_hash": "abc123",
+        "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+        "risk_class": "instruction_clarification",
+        "rationale": "Preserve regression guidance.",
+        "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+        "evals_required": ["governance-regression"],
+        "rollback_plan": ["revert generated diff"],
+        "sources": [{"source_id": "ev_fake", "trusted": True}],
+        "bounded_edit_metadata": [
+            {
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ],
+    }
+
+    with pytest.raises(ArtifactValidationError, match="bounded_edit_metadata"):
+        validate_json_artifact("candidate.raw.json", payload)
+
+
 def test_validate_eval_raw_artifacts_accept_current_schema():
     validate_json_artifact(
         "eval-report.raw.json",

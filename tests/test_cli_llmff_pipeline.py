@@ -953,6 +953,41 @@ llmff:
     assert candidate_edit[4] is not None
 
 
+def test_propose_preserves_llmff_pending_eval_definition_paths(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        candidate_overrides={
+            "pending_audit_eval_definition_paths": ["tests/fixtures/evals/*.json"],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    assert candidate["pending_audit_eval_definition_paths"] == [
+        "tests/fixtures/evals/*.json"
+    ]
+
+
 def test_propose_runs_drift_detect_before_patch_propose(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1167,7 +1202,7 @@ llmff:
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
-    assert "bounded_edit_metadata[0].operator is required" in output
+    assert "candidate.raw.json missing required field: bounded_edit_metadata[0].operator" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -1207,7 +1242,7 @@ llmff:
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
-    assert "sources[0].trusted must be a boolean" in output
+    assert "candidate.raw.json field has wrong type: sources[0].trusted" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -1249,7 +1284,7 @@ llmff:
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
-    assert "candidate.base_file is required" in output
+    assert "candidate.raw.json field has wrong type: base_file" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -1291,7 +1326,7 @@ llmff:
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
-    assert "reflection.json missing required field: summary" in output
+    assert "candidate.raw.json missing required field: reflections[0].summary" in output
     assert not (run_dir / "reflection-001.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         reflection_count = store.connection.execute(
