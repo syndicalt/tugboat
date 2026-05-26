@@ -467,10 +467,13 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
 
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
-    _validate_mcp_artifact_id("trace_id", trace_id)
     trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
-    if not trace_path.is_file():
-        raise ValueError(f"unknown trace_id: {trace_id}")
+
+    def validate_trace() -> None:
+        _validate_mcp_artifact_id("trace_id", trace_id)
+        if not trace_path.is_file():
+            raise ValueError(f"unknown trace_id: {trace_id}")
+
     return _write_request_artifact(
         repo_path,
         tool="tugboat_request_audit",
@@ -478,6 +481,7 @@ def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
         payload={"trace_id": trace_id},
         queue_kind="trace_audit",
         queue_payload={"trace_path": str(trace_path)},
+        preflight=validate_trace,
     )
 
 
@@ -678,6 +682,8 @@ def _enforce_mcp_policy(repo: Path, tool: str) -> None:
     decision = policy.mcp_tool_policy.get(tool, "allow").lower()
     if decision != "allow":
         raise ValueError(f"MCP tool denied by policy: {tool}")
+    if tool in WRITE_INTENT_TOOLS and default_kill_switch(repo).is_enabled():
+        raise ValueError("MCP write-intent tool denied by read-only kill switch")
 
 
 def _write_request_artifact(
@@ -688,10 +694,13 @@ def _write_request_artifact(
     payload: dict[str, Any],
     queue_kind: str | None = None,
     queue_payload: dict[str, Any] | None = None,
+    preflight: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
     def write() -> dict[str, Any]:
+        if preflight is not None:
+            preflight()
         request_id = f"mcp-{kind}-{_stamp()}"
         path = sidecar_dir(repo_path) / "mcp" / "requests" / f"{request_id}.json"
         repo_policy = _repo_policy_ref(repo_path)

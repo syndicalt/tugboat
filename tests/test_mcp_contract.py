@@ -852,6 +852,87 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
     ]
 
 
+def test_record_episode_denied_when_read_only_kill_switch_enabled(tmp_path: Path):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="read-only kill switch"):
+        tugboat_record_episode(repo, '{"type":"user_request","content":"Fix bug"}\n')
+
+    assert not (sidecar / "mcp" / "episodes").exists()
+    assert not (sidecar / "daemon.sqlite").exists()
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_record_episode"
+    assert events[-1]["status"] == "denied"
+
+
+@pytest.mark.parametrize(
+    ("request_fn", "expected_tool"),
+    (
+        (lambda repo, trace_id: tugboat_request_audit(repo, trace_id), "tugboat_request_audit"),
+        (
+            lambda repo, trace_id: tugboat_request_proposal(repo, "audit-7"),
+            "tugboat_request_proposal",
+        ),
+        (
+            lambda repo, trace_id: tugboat_request_eval(repo, "candidate-9", "all"),
+            "tugboat_request_eval",
+        ),
+    ),
+)
+def test_mcp_write_intent_requests_denied_when_read_only_kill_switch_enabled(
+    tmp_path: Path,
+    request_fn: Callable[[Path, str], dict[str, object]],
+    expected_tool: str,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    episodes = sidecar / "mcp" / "episodes"
+    episodes.mkdir(parents=True)
+    trace_id = "mcp-trace-seeded"
+    (episodes / f"{trace_id}.jsonl").write_text(
+        '{"type":"user_request","content":"Fix bug"}\n',
+        encoding="utf-8",
+    )
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="read-only kill switch"):
+        request_fn(repo, trace_id)
+
+    assert not (sidecar / "mcp" / "requests").exists()
+    assert not (sidecar / "daemon.sqlite").exists()
+    with Store.open(sidecar / "db.sqlite") as store:
+        daemon_jobs = store.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0]
+        daemon_job_events = store.connection.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'daemon_job.recorded'"
+        ).fetchone()[0]
+    assert daemon_jobs == 0
+    assert daemon_job_events == 0
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == expected_tool
+    assert events[-1]["status"] == "denied"
+
+
+def test_request_audit_read_only_kill_switch_denial_precedes_missing_trace_validation(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="read-only kill switch"):
+        tugboat_request_audit(repo, "mcp-trace-missing")
+
+    assert not (sidecar / "mcp" / "requests").exists()
+    assert not (sidecar / "daemon.sqlite").exists()
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_request_audit"
+    assert events[-1]["status"] == "denied"
+
+
 def test_request_audit_enqueues_daemon_executable_trace_audit(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
@@ -1413,6 +1494,39 @@ def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):
 
     assert response["error"]["code"] == -32601
     assert "unknown MCP tool" in response["error"]["message"]
+
+
+def test_mcp_jsonrpc_denies_write_intent_when_read_only_kill_switch_enabled(
+    tmp_path: Path,
+):
+    sidecar = tmp_path / ".sidecar"
+    episodes = sidecar / "mcp" / "episodes"
+    episodes.mkdir(parents=True)
+    trace_id = "mcp-trace-seeded"
+    (episodes / f"{trace_id}.jsonl").write_text(
+        '{"type":"user_request","content":"Fix bug"}\n',
+        encoding="utf-8",
+    )
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_request_audit",
+                "arguments": {"repo": str(tmp_path), "trace_id": trace_id},
+            },
+        }
+    )
+
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == 12
+    assert response["error"]["code"] == -32000
+    assert "read-only kill switch" in response["error"]["message"]
+    assert not (sidecar / "mcp" / "requests").exists()
+    assert not (sidecar / "daemon.sqlite").exists()
 
 
 def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
