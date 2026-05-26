@@ -7,10 +7,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState
+from tugboat.daemon import run_daemon_loop as exported_run_daemon_loop
 from tugboat.daemon.runner import (
     DaemonLoopConfig,
     discover_trace_jobs,
     run_daemon_cycle,
+    run_daemon_loop,
     write_worktree_profile,
 )
 
@@ -312,6 +314,62 @@ def test_run_daemon_cycle_applies_rate_and_concurrency_limits(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         assert queue.get_job(1).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
         assert queue.get_job(2).state is JobState.QUEUED  # type: ignore[union-attr]
+
+
+def test_run_daemon_loop_runs_bounded_cycles_and_sleeps_between_cycles(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
+        queue.enqueue(kind="audit", payload={"n": 2}, now=_at(1))
+    sleeps: list[float] = []
+
+    result = run_daemon_loop(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+        cycles=2,
+        interval_seconds=0.25,
+        sleep=sleeps.append,
+    )
+
+    assert result["cycle_count"] == 2
+    assert [cycle["processed_jobs"] for cycle in result["cycles"]] == [[1], [2]]
+    assert sleeps == [0.25]
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
+        assert queue.get_job(2).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
+
+
+def test_daemon_package_exports_bounded_loop_runner():
+    assert exported_run_daemon_loop is run_daemon_loop
+
+
+def test_run_daemon_loop_rejects_invalid_bounds(tmp_path: Path):
+    config = DaemonLoopConfig(
+        worker_id="worker-a",
+        max_jobs_per_cycle=1,
+        concurrency_limit=1,
+        lease_duration=timedelta(seconds=30),
+        now=_at(10),
+    )
+
+    try:
+        run_daemon_loop(tmp_path, config, cycles=0)
+    except ValueError as error:
+        assert str(error) == "cycles must be at least 1"
+    else:
+        raise AssertionError("cycles=0 should fail")
+
+    try:
+        run_daemon_loop(tmp_path, config, cycles=1, interval_seconds=-0.1)
+    except ValueError as error:
+        assert str(error) == "interval_seconds must be non-negative"
+    else:
+        raise AssertionError("negative interval should fail")
 
 
 def test_run_daemon_cycle_fails_corrupt_queue_payload_without_crashing(

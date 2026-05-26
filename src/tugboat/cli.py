@@ -22,7 +22,12 @@ from tugboat.auto_apply import (
 )
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
-from tugboat.daemon.runner import DaemonLoopConfig, default_trace_dirs, run_daemon_cycle
+from tugboat.daemon.runner import (
+    DaemonLoopConfig,
+    default_trace_dirs,
+    run_daemon_cycle,
+    run_daemon_loop,
+)
 from tugboat.daemon.service import (
     DaemonRunConfig,
     daemon_status,
@@ -147,6 +152,8 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_cycle.add_argument("--max-jobs", type=int, default=1)
     daemon_cycle.add_argument("--concurrency", type=int, default=1)
     daemon_cycle.add_argument("--trace-dir", action="append", default=[])
+    daemon_cycle.add_argument("--cycles", type=int, default=1)
+    daemon_cycle.add_argument("--interval-seconds", type=float, default=0.0)
     daemon_serve = daemon_subcommands.add_parser("serve")
     daemon_serve.add_argument("--repo", required=True)
     daemon_serve.add_argument("--worker-id", default="tugboat-daemon")
@@ -438,17 +445,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.trace_dir
             else tuple(default_trace_dirs(repo))
         )
-        result = run_daemon_cycle(
-            repo,
-            DaemonLoopConfig(
-                worker_id=args.worker_id,
-                max_jobs_per_cycle=args.max_jobs,
-                concurrency_limit=args.concurrency,
-                lease_duration=timedelta(seconds=args.lease_seconds),
-                trace_dirs=trace_dirs,
-                kill_switch=default_kill_switch(repo),
-            ),
+        config = DaemonLoopConfig(
+            worker_id=args.worker_id,
+            max_jobs_per_cycle=args.max_jobs,
+            concurrency_limit=args.concurrency,
+            lease_duration=timedelta(seconds=args.lease_seconds),
+            trace_dirs=trace_dirs,
+            kill_switch=default_kill_switch(repo),
         )
+        if args.cycles < 1:
+            raise ValueError("cycles must be at least 1")
+        if args.interval_seconds < 0:
+            raise ValueError("interval_seconds must be non-negative")
+        if args.cycles == 1:
+            result = run_daemon_cycle(repo, config)
+        else:
+            result = run_daemon_loop(
+                repo,
+                config,
+                cycles=args.cycles,
+                interval_seconds=args.interval_seconds,
+            )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

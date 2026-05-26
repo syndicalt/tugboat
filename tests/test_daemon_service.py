@@ -437,6 +437,66 @@ def test_daemon_cycle_cli_watches_trace_dir_and_reports_discovery(tmp_path: Path
         assert job.payload == {"trace_path": str(trace_dir / "episode.jsonl")}
 
 
+def test_daemon_cycle_cli_can_run_bounded_loop(tmp_path: Path, capsys):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
+        queue.enqueue(kind="audit", payload={"n": 2}, now=_at(1))
+
+    exit_code = main(
+        [
+            "daemon",
+            "cycle",
+            "--repo",
+            str(tmp_path),
+            "--max-jobs",
+            "1",
+            "--concurrency",
+            "1",
+            "--cycles",
+            "2",
+            "--interval-seconds",
+            "0",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cycle_count"] == 2
+    assert [cycle["processed_jobs"] for cycle in payload["cycles"]] == [[1], [2]]
+
+
+def test_daemon_cycle_cli_preserves_one_cycle_output_shape(tmp_path: Path, capsys):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
+
+    exit_code = main(["daemon", "cycle", "--repo", str(tmp_path), "--cycles", "1"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "cycle_count" not in payload
+    assert payload["processed_jobs"] == [1]
+
+
+def test_daemon_cycle_cli_rejects_negative_interval_for_single_cycle(tmp_path: Path):
+    try:
+        main(
+            [
+                "daemon",
+                "cycle",
+                "--repo",
+                str(tmp_path),
+                "--cycles",
+                "1",
+                "--interval-seconds",
+                "-1",
+            ]
+        )
+    except ValueError as error:
+        assert str(error) == "interval_seconds must be non-negative"
+    else:
+        raise AssertionError("negative interval should fail")
+
+
 def test_daemon_unix_socket_serves_status_and_exits_after_bounded_requests(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))

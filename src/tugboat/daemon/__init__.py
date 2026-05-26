@@ -14,6 +14,7 @@ from tugboat.daemon.runner import (
     default_trace_dirs,
     discover_trace_jobs,
     run_daemon_cycle,
+    run_daemon_loop,
     write_worktree_profile,
 )
 from tugboat.daemon.service import DaemonRunConfig, daemon_status, default_kill_switch, run_daemon_once
@@ -32,6 +33,7 @@ __all__ = [
     "default_kill_switch",
     "discover_trace_jobs",
     "run_daemon_cycle",
+    "run_daemon_loop",
     "run_daemon_once",
     "validate_local_bind_address",
     "write_worktree_profile",

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from tugboat.daemon.queue import (
     DaemonQueue,
@@ -132,6 +133,30 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
         "trace_discovery": trace_discovery,
         "rate_limited": remaining_queued > 0,
         "concurrency_limited": config.concurrency_limit < config.max_jobs_per_cycle,
+    }
+
+
+def run_daemon_loop(
+    repo: Path,
+    config: DaemonLoopConfig,
+    *,
+    cycles: int,
+    interval_seconds: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    if cycles < 1:
+        raise ValueError("cycles must be at least 1")
+    if interval_seconds < 0:
+        raise ValueError("interval_seconds must be non-negative")
+
+    cycle_results = []
+    for index in range(cycles):
+        cycle_results.append(run_daemon_cycle(repo, config))
+        if index < cycles - 1 and interval_seconds > 0:
+            sleep(interval_seconds)
+    return {
+        "cycle_count": cycles,
+        "cycles": cycle_results,
     }
 
 
