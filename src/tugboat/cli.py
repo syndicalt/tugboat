@@ -1960,14 +1960,17 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
             branch_name=str(apply_plan["branch_name"]),
             commit_sha=commit_sha,
         )
+    pre_hashes = apply_plan.get("pre_hashes", {})
+    post_rollback_hashes = _target_file_hashes(repo, target_files=target_files) if execute else {}
+    restored_pre_hashes = _rollback_restored_pre_hashes(
+        repo,
+        target_files=target_files,
+        pre_hashes=pre_hashes,
+        executed=execute,
+    )
     post_rollback_eval_result = {
         "executed": execute,
-        "restored_pre_hashes": _rollback_restored_pre_hashes(
-            repo,
-            target_files=target_files,
-            pre_hashes=apply_plan.get("pre_hashes", {}),
-            executed=execute,
-        ),
+        "restored_pre_hashes": restored_pre_hashes,
         "target_files": list(target_files),
     }
     source_artifacts = {
@@ -1991,6 +1994,9 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
         "metadata": metadata.to_json_dict(),
         "executed": execute,
         "revert_commit": revert_commit,
+        "pre_hashes": pre_hashes if isinstance(pre_hashes, dict) else {},
+        "post_rollback_hashes": post_rollback_hashes,
+        "restored_pre_hashes": restored_pre_hashes,
         "source_artifacts": source_artifacts,
     }
     path = run_dir / "rollback-plan.json"
@@ -2024,8 +2030,12 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                     "candidate_id": int(apply_plan["candidate_id"]),
                     "commit_sha": commit_sha,
                     "decision_id": str(apply_plan["decision_id"]),
+                    "pre_hashes": pre_hashes if isinstance(pre_hashes, dict) else {},
+                    "post_rollback_hashes": post_rollback_hashes,
                     "revert_commit": revert_commit,
+                    "restored_pre_hashes": restored_pre_hashes,
                     "rollback_plan": rollback_plan,
+                    "source_artifacts": source_artifacts,
                     "target_files": list(target_files),
                 },
             )
@@ -2048,6 +2058,14 @@ def _rollback_restored_pre_hashes(
         if CandidatePatch.hash_file(repo / target_file) != expected_hash:
             return False
     return True
+
+
+def _target_file_hashes(repo: Path, *, target_files: tuple[str, ...]) -> dict[str, str]:
+    return {
+        target_file: CandidatePatch.hash_file(repo / target_file)
+        for target_file in target_files
+        if (repo / target_file).exists()
+    }
 
 
 def _decision_json(

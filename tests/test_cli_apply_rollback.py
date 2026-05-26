@@ -597,6 +597,17 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
     assert row is not None
     payload = json.loads(row[0])
     assert payload["rollback_plan"] == ".sidecar/runs/20260525T000000000000Z/rollback-plan.json"
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    assert payload["pre_hashes"] == apply_plan["pre_hashes"]
+    assert payload["post_rollback_hashes"] == {"CODEX.md": _hash(repo / "CODEX.md")}
+    assert payload["restored_pre_hashes"] is True
+    assert payload["source_artifacts"]["apply_plan"]["sha256"] == _hash(run_dir / "apply-plan.json")
+    assert payload["source_artifacts"]["provenance_bundle"]["sha256"] == _hash(
+        run_dir / "provenance-bundle.json"
+    )
+    assert rollback["pre_hashes"] == apply_plan["pre_hashes"]
+    assert rollback["post_rollback_hashes"] == {"CODEX.md": _hash(repo / "CODEX.md")}
+    assert rollback["restored_pre_hashes"] is True
     assert rollback_row == (
         "20260525T000000000000Z",
         7,

@@ -1361,6 +1361,9 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "metadata",
             "executed",
             "revert_commit",
+            "pre_hashes",
+            "post_rollback_hashes",
+            "restored_pre_hashes",
             "source_artifacts",
         ],
         "properties": {
@@ -1370,6 +1373,9 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "metadata": {"type": "object"},
             "executed": {"type": "boolean"},
             "revert_commit": {"type": "string"},
+            "pre_hashes": {"type": "object"},
+            "post_rollback_hashes": {"type": "object"},
+            "restored_pre_hashes": {"type": "boolean"},
             "source_artifacts": {
                 "type": "object",
                 "additionalProperties": False,

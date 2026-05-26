@@ -1359,6 +1359,9 @@ def test_validate_rollback_plan_accepts_source_artifacts():
             },
             "executed": True,
             "revert_commit": "def456",
+            "pre_hashes": {"CODEX.md": "a" * 64},
+            "post_rollback_hashes": {"CODEX.md": "a" * 64},
+            "restored_pre_hashes": True,
             "source_artifacts": {
                 "apply_plan": {
                     "path": ".sidecar/runs/run-1/apply-plan.json",
