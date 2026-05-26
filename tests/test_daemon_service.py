@@ -431,6 +431,40 @@ def test_run_daemon_once_fails_malformed_trace_audit_payload_without_crashing(
         assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
 
 
+def test_run_daemon_once_rejects_trace_audit_path_outside_repo_before_artifacts(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside_trace = tmp_path / "outside.jsonl"
+    outside_trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    with DaemonQueue.open_sidecar(repo) as queue:
+        job = queue.enqueue(
+            kind="trace_audit",
+            payload={"trace_path": str(outside_trace)},
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": job.id,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+    assert not (repo / ".sidecar" / "runs").exists()
+    with DaemonQueue.open_sidecar(repo) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
 def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
     tmp_path: Path,
 ):

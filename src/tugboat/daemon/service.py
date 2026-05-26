@@ -224,7 +224,10 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
 
 
 def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> AuditPipelineResult:
-    trace_path = Path(_required_payload_text(payload, "trace_path"))
+    repo_root = repo.resolve()
+    trace_path = Path(_required_payload_text(payload, "trace_path")).expanduser().resolve()
+    if not trace_path.is_relative_to(repo_root):
+        raise DaemonJobPayloadError("trace_path must resolve inside repo")
     return run_audit_pipeline(repo, trace_path)
 
 
