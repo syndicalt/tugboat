@@ -182,6 +182,20 @@ def _seed_review_target(repo: Path) -> tuple[int, int]:
     return audit_id, candidate_id
 
 
+def _allow_mcp_repo(repo: Path) -> None:
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir(exist_ok=True)
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
 def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
     repo = tmp_path
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -924,6 +938,28 @@ mcp:
         tugboat_status(repo)
 
     event = _mcp_events(repo)[-1]
+    assert event["tool"] == "tugboat_status"
+    assert event["status"] == "denied"
+
+
+def test_mcp_jsonrpc_requires_explicit_repo_allowlist_before_invocation(tmp_path: Path):
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_status",
+                "arguments": {"repo": str(tmp_path)},
+            },
+        }
+    )
+
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == 15
+    assert response["error"]["code"] == -32000
+    assert "MCP repo allowlist is required" in response["error"]["message"]
+    event = _mcp_events(tmp_path)[-1]
     assert event["tool"] == "tugboat_status"
     assert event["status"] == "denied"
 
@@ -1678,6 +1714,7 @@ def test_write_intent_episode_rejects_secret_payloads(tmp_path: Path):
 
 def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     tools = list_mcp_tools()
 
     by_name = {tool["name"]: tool for tool in tools}
@@ -1853,6 +1890,7 @@ def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):
 def test_mcp_jsonrpc_denies_write_intent_when_read_only_kill_switch_enabled(
     tmp_path: Path,
 ):
+    _allow_mcp_repo(tmp_path)
     sidecar = tmp_path / ".sidecar"
     episodes = sidecar / "mcp" / "episodes"
     episodes.mkdir(parents=True)
@@ -2066,6 +2104,7 @@ def test_mcp_jsonrpc_rejects_unknown_write_intent_targets_before_queueing(
     arguments: dict[str, str],
     expected_message: str,
 ):
+    _allow_mcp_repo(tmp_path)
     response = handle_jsonrpc_request(
         {
             "jsonrpc": "2.0",
@@ -2091,6 +2130,7 @@ def test_mcp_jsonrpc_rejects_unknown_write_intent_targets_before_queueing(
 
 
 def test_mcp_jsonrpc_redacts_secret_bearing_error_messages(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
     response = handle_jsonrpc_request(
         {
             "jsonrpc": "2.0",
@@ -2115,6 +2155,8 @@ def test_mcp_jsonrpc_redacts_secret_bearing_tool_results(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    _allow_mcp_repo(tmp_path)
+
     def fake_status(repo: str) -> dict[str, object]:
         return {
             "mode": "proposal_only",

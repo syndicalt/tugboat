@@ -71,6 +71,17 @@ def test_cli_module_can_run_audit_from_source_tree(tmp_path: Path):
 def test_cli_module_can_run_mcp_stdio_from_source_tree(tmp_path: Path):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path.cwd() / "src")
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {tmp_path.resolve().as_posix()}
+""".lstrip(),
+        encoding="utf-8",
+    )
     request = {
         "jsonrpc": "2.0",
         "id": 1,

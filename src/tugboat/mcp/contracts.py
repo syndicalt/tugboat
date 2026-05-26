@@ -674,6 +674,10 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
             invalid_params = _validate_tool_arguments(name, arguments)
             if invalid_params is not None:
                 return _jsonrpc_error(request_id, -32602, f"invalid params: {invalid_params}")
+            invalid_policy = _validate_jsonrpc_mcp_policy(name, arguments)
+            if invalid_policy is not None:
+                _audit_jsonrpc_policy_denial(name, arguments, invalid_policy)
+                return _jsonrpc_error(request_id, -32000, invalid_policy)
             result = tool(**arguments)
             return {
                 "jsonrpc": "2.0",
@@ -754,6 +758,55 @@ def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> str |
         if pattern is not None and isinstance(value, str) and re.fullmatch(str(pattern), value) is None:
             return f"{name} has invalid format"
     return None
+
+
+def _validate_jsonrpc_mcp_policy(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    repo_value = arguments.get("repo")
+    if not isinstance(repo_value, str):
+        return None
+    repo = Path(repo_value).expanduser().resolve()
+    if not repo.is_dir():
+        return None
+    policy = load_policy(repo)
+    allowed_repositories = tuple(
+        Path(path).expanduser().resolve() for path in policy.mcp_allowed_repositories
+    )
+    if not allowed_repositories:
+        return "MCP repo allowlist is required"
+    if repo not in allowed_repositories:
+        return f"repo is not allowed for MCP: {repo}"
+    decision = policy.mcp_tool_policy.get(tool_name, "allow").lower()
+    if decision != "allow":
+        return f"MCP tool denied by policy: {tool_name}"
+    return None
+
+
+def _audit_jsonrpc_policy_denial(
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+) -> None:
+    repo_value = arguments.get("repo")
+    if not isinstance(repo_value, str):
+        return
+    try:
+        repo = _resolve_local_repo(repo_value)
+    except ValueError:
+        return
+    payload = {
+        "tool": tool_name,
+        "repo": repo.as_posix(),
+        "arguments": redact_payload(arguments),
+        "status": "denied",
+        "reason": redact_text(reason),
+    }
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_mcp_call(
+            tool_name=tool_name,
+            repo_path=repo,
+            status="denied",
+            payload=payload,
+        )
 
 
 def _validate_mcp_artifact_id(kind: str, value: str) -> None:
