@@ -206,6 +206,85 @@ def test_run_daemon_once_respects_read_only_kill_switch(tmp_path: Path):
         assert queue.get_job(job.id).state is JobState.QUEUED  # type: ignore[union-attr]
 
 
+def test_run_daemon_once_fails_unknown_job_kind_without_processing_success(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="unknown", payload={}, now=_at(0))
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": job.id,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_once_fails_malformed_trace_audit_payload_without_crashing(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="trace_audit", payload={}, now=_at(0))
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": job.id,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="trace_audit",
+            payload=[],  # type: ignore[arg-type]
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": job.id,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
 def test_daemon_status_cli_and_mcp_read_queue_state(tmp_path: Path, capsys):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="eval", payload={"candidate_id": "candidate-1"}, now=_at(0))

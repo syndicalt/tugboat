@@ -15,6 +15,10 @@ from tugboat.paths import sidecar_dir
 from tugboat.propose.pipeline import ProposePipelineResult, run_propose_pipeline
 
 
+class DaemonJobPayloadError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class DaemonRunConfig:
     worker_id: str
@@ -164,24 +168,24 @@ def _sidecar_relative_socket_path(repo: Path, socket_path: Path) -> str:
 def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
     running = queue.transition(job_id, JobState.RUNNING, now=now)
     _record_job_state(repo, running.id, running.state)
-    if running.kind == "trace_audit":
-        result = _execute_trace_audit(repo, running.payload)
-        if result.exit_code != 0:
-            failed = queue.transition(running.id, JobState.FAILED, now=now)
-            _record_job_state(repo, failed.id, failed.state)
-            return failed
-    elif running.kind == "proposal":
-        result = _execute_proposal(repo, running.payload)
-        if result.exit_code != 0:
-            failed = queue.transition(running.id, JobState.FAILED, now=now)
-            _record_job_state(repo, failed.id, failed.state)
-            return failed
-    elif running.kind == "eval":
-        result = _execute_eval(repo, running.payload)
-        if result.exit_code != 0:
-            failed = queue.transition(running.id, JobState.FAILED, now=now)
-            _record_job_state(repo, failed.id, failed.state)
-            return failed
+    try:
+        result: AuditPipelineResult | ProposePipelineResult | EvalPipelineResult | None = None
+        if running.kind == "trace_audit":
+            result = _execute_trace_audit(repo, running.payload)
+        elif running.kind == "proposal":
+            result = _execute_proposal(repo, running.payload)
+        elif running.kind == "eval":
+            result = _execute_eval(repo, running.payload)
+        elif running.kind == "audit":
+            result = None
+        else:
+            return _fail_daemon_job(repo, queue, running.id, now=now)
+    except DaemonJobPayloadError:
+        return _fail_daemon_job(repo, queue, running.id, now=now)
+
+    if result is not None and result.exit_code != 0:
+        return _fail_daemon_job(repo, queue, running.id, now=now)
+
     evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
     _record_job_state(repo, evaluating.id, evaluating.state)
     waiting_review = queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
@@ -190,16 +194,41 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
 
 
 def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> AuditPipelineResult:
-    trace_path = Path(str(payload["trace_path"]))
+    trace_path = Path(_required_payload_text(payload, "trace_path"))
     return run_audit_pipeline(repo, trace_path)
 
 
 def _execute_proposal(repo: Path, payload: dict[str, Any]) -> ProposePipelineResult:
-    return run_propose_pipeline(repo, str(payload["audit_id"]))
+    return run_propose_pipeline(repo, _required_payload_text(payload, "audit_id"))
 
 
 def _execute_eval(repo: Path, payload: dict[str, Any]) -> EvalPipelineResult:
-    return run_eval_pipeline(repo, str(payload["candidate_id"]), str(payload["suite"]))
+    return run_eval_pipeline(
+        repo,
+        _required_payload_text(payload, "candidate_id"),
+        _required_payload_text(payload, "suite"),
+    )
+
+
+def _fail_daemon_job(
+    repo: Path,
+    queue: DaemonQueue,
+    job_id: int,
+    *,
+    now: datetime | None,
+) -> Any:
+    failed = queue.transition(job_id, JobState.FAILED, now=now)
+    _record_job_state(repo, failed.id, failed.state)
+    return failed
+
+
+def _required_payload_text(payload: Any, key: str) -> str:
+    if not isinstance(payload, dict):
+        raise DaemonJobPayloadError("daemon job payload must be a JSON object")
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise DaemonJobPayloadError(f"daemon job payload missing {key}")
+    return value
 
 
 def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
