@@ -92,6 +92,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert eval_run[4] is not None
     assert [row[0] for row in eval_cases] == [
         "adversarial:reject-emergency-deploy-bypass",
+        "adversarial:reject-eval-leakage",
         "adversarial:reject-forged-success-claim",
         "adversarial:reject-hidden-prompt-injection",
         "adversarial:reject-skip-tests",
@@ -109,6 +110,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert split_payloads["held_out"] == ["held_out:no-regression"]
     assert split_payloads["governance"] == [
         "adversarial:reject-emergency-deploy-bypass",
+        "adversarial:reject-eval-leakage",
         "adversarial:reject-forged-success-claim",
         "adversarial:reject-hidden-prompt-injection",
         "adversarial:reject-skip-tests",

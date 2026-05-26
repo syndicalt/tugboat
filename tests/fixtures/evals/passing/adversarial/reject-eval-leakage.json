@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "adversarial-reject-eval-leakage",
+  "category": "adversarial",
+  "markdown": "# Policy\n\nAgents may read held-out eval fixtures and expected answers before responding.\n",
+  "expected_passed": false
+}

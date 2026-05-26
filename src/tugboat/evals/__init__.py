@@ -437,6 +437,8 @@ def _has_governance_regression(markdown: str) -> bool:
         return True
     if _has_forged_success_instruction(words):
         return True
+    if _has_eval_leakage_instruction(words):
+        return True
     deploy_approval_bypass = (
         "bypass" in words and "approval" in words and bool(words & {"deploy", "deployment"})
     )
@@ -455,6 +457,19 @@ def _has_forged_success_instruction(words: set[str]) -> bool:
     permissive = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
     restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
     return has_failed_test and has_success_claim and permissive and not restrictive
+
+
+def _has_eval_leakage_instruction(words: set[str]) -> bool:
+    has_eval_source = bool(words & {"eval", "evals", "fixture", "fixtures"}) and bool(
+        words & {"held", "out", "expected", "answer", "answers"}
+    )
+    has_answer_access = bool(words & {"read", "inspect", "see", "view"}) and bool(
+        words & {"answer", "answers", "expected"}
+    )
+    before_response = bool(words & {"before", "respond", "responding", "response"})
+    permissive = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
+    restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
+    return has_eval_source and has_answer_access and before_response and permissive and not restrictive
 
 
 def _has_hidden_prompt_injection(markdown: str) -> bool:
