@@ -1117,6 +1117,21 @@ mcp:
     }
 
 
+def test_request_audit_rejects_trace_id_path_traversal_without_queueing(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    escaped_trace = repo / ".sidecar" / "mcp" / "policy.jsonl"
+    (repo / ".sidecar" / "mcp" / "episodes").mkdir(parents=True)
+    escaped_trace.write_text('{"type":"user_request","content":"do not use"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid trace_id"):
+        tugboat_request_audit(repo, "../policy")
+
+    assert not (repo / ".sidecar" / "mcp" / "requests").exists()
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        assert queue_store.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+
+
 def test_write_intent_episode_rejects_secret_payloads(tmp_path: Path):
     with pytest.raises(ValueError, match="secret"):
         tugboat_record_episode(
@@ -1185,7 +1200,7 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
             "additionalProperties": False,
             "properties": {
                 "repo": {"type": "string"},
-                "trace_id": {"type": "string"},
+                "trace_id": {"pattern": "^(?!\\.\\.?$)[A-Za-z0-9_.-]+$", "type": "string"},
             },
             "required": ["repo", "trace_id"],
             "type": "object",
@@ -1326,6 +1341,28 @@ def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
             },
         }
     )
+    unsafe_trace_id = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_request_audit",
+                "arguments": {"repo": str(tmp_path), "trace_id": "../policy"},
+            },
+        }
+    )
+    dotdot_trace_id = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_request_audit",
+                "arguments": {"repo": str(tmp_path), "trace_id": ".."},
+            },
+        }
+    )
 
     assert missing_repo == {
         "jsonrpc": "2.0",
@@ -1354,6 +1391,16 @@ def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
         "jsonrpc": "2.0",
         "id": 9,
         "error": {"code": -32602, "message": "invalid params: arguments must be an object"},
+    }
+    assert unsafe_trace_id == {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "error": {"code": -32602, "message": "invalid params: trace_id has invalid format"},
+    }
+    assert dotdot_trace_id == {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "error": {"code": -32602, "message": "invalid params: trace_id has invalid format"},
     }
     assert _mcp_events(tmp_path) == []
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,7 +55,9 @@ def _object_schema(
 
 _REPO_SCHEMA = {"type": "string"}
 _INTEGER_ID_SCHEMA = {"type": "integer"}
-_STRING_ID_SCHEMA = {"type": "string"}
+_SAFE_MCP_ID_PATTERN_TEXT = r"^(?!\.\.?$)[A-Za-z0-9_.-]+$"
+_SAFE_MCP_ID_PATTERN = re.compile(_SAFE_MCP_ID_PATTERN_TEXT)
+_STRING_ID_SCHEMA = {"pattern": _SAFE_MCP_ID_PATTERN_TEXT, "type": "string"}
 
 MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "tugboat_active_instructions": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
@@ -464,6 +467,7 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
 
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
+    _validate_mcp_artifact_id("trace_id", trace_id)
     trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
     if not trace_path.is_file():
         raise ValueError(f"unknown trace_id: {trace_id}")
@@ -607,7 +611,15 @@ def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> str |
         maximum = expected.get("maximum")
         if maximum is not None and isinstance(value, int) and value > int(maximum):
             return f"{name} must be <= {maximum}"
+        pattern = expected.get("pattern")
+        if pattern is not None and isinstance(value, str) and re.fullmatch(str(pattern), value) is None:
+            return f"{name} has invalid format"
     return None
+
+
+def _validate_mcp_artifact_id(kind: str, value: str) -> None:
+    if not value or value in {".", ".."} or _SAFE_MCP_ID_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"invalid {kind}")
 
 
 def _audit_call(
