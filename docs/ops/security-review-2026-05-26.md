@@ -9,7 +9,7 @@ verification_status: verified
 
 Release: Tugboat 0.1.0 proposal-only MVP.
 
-Build/code artifact commit reviewed: `df91d51`.
+Build/code artifact commit reviewed: `6bb6f90`.
 
 Release evidence is maintained in the release documentation commits after that build artifact.
 
@@ -24,10 +24,10 @@ PYTHONPATH=src python -m tugboat harness check --repo .
 PYTHONPATH=src pytest --cov=src --cov-report=term-missing -q
 python -m build --wheel
 python -m twine check dist/tugboat-0.1.0-py3-none-any.whl
-PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit df91d51011313d7ce32988f1d33b7c2a824667d4 --ci-url local://release-smoke/2026-05-26-df91d51 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
+PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit 6bb6f90b5e192113a3fc61057cf2dc234403f7f1 --ci-url local://release-smoke/2026-05-26-6bb6f90 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
 ```
 
-Latest retained coverage evidence: 750 tests and 90.04% coverage.
+Latest retained coverage evidence: 757 tests and 90.06% coverage.
 
 ## Findings
 
@@ -42,6 +42,8 @@ Accepted file-backed `llmff` eval reports must include non-overlapping trigger a
 SQLite audit events are protected from direct update and deletion at the storage layer.
 
 The read-only kill switch blocks direct CLI write paths before apply, auto-apply, retention deletion, migration apply, or harness cleanup writes begin.
+
+`llmff inspect` artifacts must declare explicit external calls, and provider declarations must be represented as provider external-call targets.
 
 ## Decision
 
