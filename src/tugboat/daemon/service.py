@@ -67,6 +67,7 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
                 "final_state": None,
                 "recovered_jobs": list(recovered),
             }
+        _record_job_state(repo, job.id, job.state)
         final_job = _process_job(repo, queue, job.id, now=config.now)
         return {
             "processed": True,
@@ -140,10 +141,14 @@ def _handle_socket_request(
 
 def _process_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
     running = queue.transition(job_id, JobState.RUNNING, now=now)
+    _record_job_state(repo, running.id, running.state)
     if running.kind == "trace_audit":
         _execute_trace_audit(repo, running.payload)
     evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
-    return queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
+    _record_job_state(repo, evaluating.id, evaluating.state)
+    waiting_review = queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
+    _record_job_state(repo, waiting_review.id, waiting_review.state)
+    return waiting_review
 
 
 def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> None:
@@ -181,3 +186,12 @@ def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> None:
             "instruction_refs": [],
         },
     )
+
+
+def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.update_daemon_job_state(
+            job_id=str(job_id),
+            repo_path=repo,
+            state=state.value,
+        )

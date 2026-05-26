@@ -853,6 +853,40 @@ class Store:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def update_daemon_job_state(
+        self,
+        *,
+        job_id: str,
+        repo_path: Path,
+        state: str,
+    ) -> None:
+        row = self.connection.execute(
+            """
+            SELECT 1 FROM daemon_jobs
+            WHERE job_id = ? AND repo_path = ?
+            """,
+            (job_id, str(repo_path)),
+        ).fetchone()
+        if row is None:
+            return
+        event = self.append_audit_event(
+            "daemon_job.state_changed",
+            {
+                "job_id": job_id,
+                "repo": str(repo_path),
+                "state": state,
+            },
+        )
+        self.connection.execute(
+            """
+            UPDATE daemon_jobs
+            SET state = ?, audit_event_sequence = ?
+            WHERE job_id = ? AND repo_path = ?
+            """,
+            (state, event.sequence, job_id, str(repo_path)),
+        )
+        self.connection.commit()
+
     def record_mcp_call(
         self,
         *,

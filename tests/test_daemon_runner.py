@@ -95,6 +95,51 @@ def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueu
     }
 
 
+def test_run_daemon_cycle_updates_main_store_job_state_for_discovered_trace(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "configured-traces"
+    trace_dir.mkdir()
+    (trace_dir / "episode.jsonl").write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            trace_dirs=(trace_dir,),
+            now=_at(0),
+        ),
+    )
+
+    assert result["processed_jobs"] == [1]
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        ledger_job = connection.execute(
+            """
+            SELECT job_id, state
+            FROM daemon_jobs
+            """
+        ).fetchone()
+        transition_events = connection.execute(
+            """
+            SELECT event_type, json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence
+            """
+        ).fetchall()
+
+    assert ledger_job == ("1", "waiting_review")
+    assert transition_events == [
+        ("daemon_job.state_changed", "inspecting"),
+        ("daemon_job.state_changed", "running"),
+        ("daemon_job.state_changed", "evaluating"),
+        ("daemon_job.state_changed", "waiting_review"),
+    ]
+
+
 def test_run_daemon_cycle_applies_rate_and_concurrency_limits(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         for number in range(3):

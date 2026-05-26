@@ -74,18 +74,23 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
             )
             if job is None:
                 break
+            _record_job_state(repo, job.id, job.state)
             if job.kind == "llmff_resume":
                 resume = _resume_metadata(job.id, job.payload)
                 if resume is None:
-                    queue.transition(job.id, JobState.FAILED, now=config.now)
+                    failed = queue.transition(job.id, JobState.FAILED, now=config.now)
+                    _record_job_state(repo, failed.id, failed.state)
                     failed_jobs.append(
                         {"job_id": job.id, "reason": "checkpoint_manifest_mismatch"}
                     )
                     continue
                 resume_jobs.append(resume)
-            queue.transition(job.id, JobState.RUNNING, now=config.now)
-            queue.transition(job.id, JobState.EVALUATING, now=config.now)
-            queue.transition(job.id, JobState.WAITING_REVIEW, now=config.now)
+            running = queue.transition(job.id, JobState.RUNNING, now=config.now)
+            _record_job_state(repo, running.id, running.state)
+            evaluating = queue.transition(job.id, JobState.EVALUATING, now=config.now)
+            _record_job_state(repo, evaluating.id, evaluating.state)
+            waiting_review = queue.transition(job.id, JobState.WAITING_REVIEW, now=config.now)
+            _record_job_state(repo, waiting_review.id, waiting_review.state)
             processed_jobs.append(job.id)
         remaining_queued = _queued_count(queue)
 
@@ -153,6 +158,15 @@ def _queued_count(queue: DaemonQueue) -> int:
             (JobState.QUEUED.value,),
         ).fetchone()[0]
     )
+
+
+def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.update_daemon_job_state(
+            job_id=str(job_id),
+            repo_path=repo,
+            state=state.value,
+        )
 
 
 def _load_discovered_traces(repo: Path) -> set[str]:
