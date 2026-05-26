@@ -1188,6 +1188,7 @@ llmff:
         "audit_run": run_dir.name,
         "candidate_id": decision["candidate_id"],
         "decision": "needs_review",
+        "governance_passed": True,
         "held_out_score": 0.9,
         "recommendation": "accept",
         "suite_id": "held-out",

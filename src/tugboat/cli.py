@@ -1830,11 +1830,13 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
     reason = "proposal rejected"
     trigger_score: float | None = None
     held_out_score: float | None = None
+    governance_passed = False
     recommendation = "reject"
     if eval_report_path.exists():
         eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
         trigger_score = _score_from_eval_report(eval_report, "trigger_score")
         held_out_score = _score_from_eval_report(eval_report, "held_out_score")
+        governance_passed = bool(eval_report.get("governance_passed", False))
         recommendation = str(eval_report.get("recommendation", "reject"))
         try:
             _assert_eval_acceptance(eval_report, _read_optional_json_object(policy_gate_path))
@@ -1879,6 +1881,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         "audit_run": run_dir.name,
         "candidate_id": candidate_id,
         "decision": decision,
+        "governance_passed": governance_passed,
         "held_out_score": held_out_score,
         "recommendation": recommendation,
         "suite_id": suite_id,

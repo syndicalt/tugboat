@@ -193,6 +193,7 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
                 "audit_run": "run-1",
                 "candidate_id": 5,
                 "decision": "needs_review",
+                "governance_passed": True,
                 "held_out_score": 0.92,
                 "recommendation": "accept",
                 "suite_id": "provider-smoke",
