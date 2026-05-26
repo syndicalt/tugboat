@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tugboat.cli import main
+from tugboat.artifacts import ArtifactValidationError
+from tugboat.cli import _write_ops_command_bundle, main
 from tugboat.paths import sidecar_dir
 
 
@@ -77,3 +78,26 @@ def test_ops_restore_writes_non_executing_sidecar_restore_plan(
         str(repo.resolve()),
     ]
     assert not staging.exists()
+
+
+def test_write_ops_command_bundle_validates_payload_before_writing(tmp_path: Path) -> None:
+    output_path = sidecar_dir(tmp_path) / "ops" / "backup-plan.json"
+
+    try:
+        _write_ops_command_bundle(
+            output_path,
+            {
+                "name": "sidecar-backup",
+                "commands": [
+                    {
+                        "label": "create sidecar archive",
+                    }
+                ],
+            },
+        )
+    except ArtifactValidationError as error:
+        assert "bundle.commands[0].argv" in str(error)
+    else:
+        raise AssertionError("invalid ops command bundle should be rejected")
+
+    assert not output_path.exists()

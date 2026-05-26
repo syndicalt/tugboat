@@ -641,11 +641,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _write_ops_command_bundle(path: Path, bundle: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "bundle": bundle,
     }
+    validate_json_artifact("ops-command-bundle.json", payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 

@@ -791,6 +791,41 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "version_marker": {"type": "string"},
         },
     },
+    "ops-command-bundle.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "bundle"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "bundle": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "commands"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "commands": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["label", "argv"],
+                            "properties": {
+                                "label": {"type": "string"},
+                                "argv": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {"type": "string"},
+                                },
+                                "stdout_path": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

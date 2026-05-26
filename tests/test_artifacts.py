@@ -607,6 +607,47 @@ def test_validate_sidecar_migration_report_rejects_missing_step_actions():
         )
 
 
+def test_validate_ops_command_bundle_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "ops-command-bundle.json",
+        {
+            "schema_version": 1,
+            "bundle": {
+                "name": "sidecar-backup",
+                "commands": [
+                    {
+                        "label": "create sidecar archive",
+                        "argv": ["tar", "-czf", "sidecar-backup.tgz", ".sidecar"],
+                    },
+                    {
+                        "label": "write archive checksum",
+                        "argv": ["sha256sum", "sidecar-backup.tgz"],
+                        "stdout_path": "sidecar-backup.tgz.sha256",
+                    },
+                ],
+            },
+        },
+    )
+
+
+def test_validate_ops_command_bundle_rejects_command_without_argv():
+    with pytest.raises(ArtifactValidationError, match="bundle.commands\\[0\\].argv"):
+        validate_json_artifact(
+            "ops-command-bundle.json",
+            {
+                "schema_version": 1,
+                "bundle": {
+                    "name": "sidecar-backup",
+                    "commands": [
+                        {
+                            "label": "create sidecar archive",
+                        }
+                    ],
+                },
+            },
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 
