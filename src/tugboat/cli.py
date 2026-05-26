@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     ci = subcommands.add_parser("ci")
     ci.add_argument("--repo", required=True)
     ci.add_argument("--max-instruction-lines", type=int, default=100)
+    ci.add_argument("--candidate")
+    ci.add_argument("--suite", default="all")
 
     index = subcommands.add_parser("index")
     index.add_argument("--repo", required=True)
@@ -245,16 +247,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "ci":
-        repo = Path(args.repo)
-        report_path, payload = _write_ci_report(repo, max_instruction_lines=args.max_instruction_lines)
+        repo = Path(args.repo).resolve()
+        report_path, payload = _write_ci_report(
+            repo,
+            max_instruction_lines=args.max_instruction_lines,
+            candidate=args.candidate,
+            suite=args.suite,
+        )
         harness = payload["checks"]["harness"]
-        if harness["passed"]:
+        eval_check = payload["checks"].get("eval")
+        if harness["passed"] and (eval_check is None or eval_check["passed"]):
             print("ci: ok")
             print(f"report: {report_path}")
             return 0
         print("ci: failed")
         for finding in harness["findings"]:
             print(finding)
+        if eval_check is not None and not eval_check["passed"]:
+            print(f"eval suite {eval_check['suite_id']} failed")
         print(f"report: {report_path}")
         return 1
 
@@ -552,7 +562,13 @@ def console_main() -> None:
     raise SystemExit(main())
 
 
-def _write_ci_report(repo: Path, *, max_instruction_lines: int) -> tuple[Path, dict[str, Any]]:
+def _write_ci_report(
+    repo: Path,
+    *,
+    max_instruction_lines: int,
+    candidate: str | None,
+    suite: str,
+) -> tuple[Path, dict[str, Any]]:
     policy = load_policy(repo)
     index = index_repo(repo, policy)
     harness = check_harness_legibility(repo, max_instruction_lines)
@@ -571,6 +587,16 @@ def _write_ci_report(repo: Path, *, max_instruction_lines: int) -> tuple[Path, d
             },
         },
     }
+    if candidate is not None:
+        eval_result = run_eval_pipeline(repo, candidate, suite)
+        eval_payload = _ci_eval_check_payload(
+            repo,
+            candidate=candidate,
+            suite=suite,
+            run_dir=eval_result.run_dir,
+            passed=eval_result.exit_code == 0,
+        )
+        payload["checks"]["eval"] = eval_payload
     validate_json_artifact("ci-report.json", payload)
     report_path = sidecar_dir(repo) / "ci" / "ci-report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -580,10 +606,44 @@ def _write_ci_report(repo: Path, *, max_instruction_lines: int) -> tuple[Path, d
             "ci.check_completed",
             {
                 "artifact": report_path.relative_to(repo).as_posix(),
-                "passed": bool(harness.passed),
+                "passed": _ci_payload_passed(payload),
             },
         )
     return report_path, payload
+
+
+def _ci_eval_check_payload(
+    repo: Path,
+    *,
+    candidate: str,
+    suite: str,
+    run_dir: Path,
+    passed: bool,
+) -> dict[str, Any]:
+    report_path = run_dir / "eval-report.json"
+    if passed and report_path.exists():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    else:
+        report = {}
+    return {
+        "passed": passed,
+        "candidate": candidate,
+        "suite_id": suite,
+        "report_path": report_path.relative_to(repo).as_posix(),
+        "trigger_score": float(report.get("trigger_score", 0.0)),
+        "held_out_score": float(report.get("held_out_score", 0.0)),
+        "governance_passed": bool(report.get("governance_passed", False)),
+        "recommendation": str(report.get("recommendation", "reject")),
+    }
+
+
+def _ci_payload_passed(payload: dict[str, Any]) -> bool:
+    checks = payload["checks"]
+    return bool(
+        checks["index"]["passed"]
+        and checks["harness"]["passed"]
+        and ("eval" not in checks or checks["eval"]["passed"])
+    )
 
 
 def _persist_harness_report(repo: Path, report) -> Path:

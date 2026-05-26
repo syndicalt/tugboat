@@ -676,6 +676,16 @@ def test_validate_ci_report_artifact_requires_check_results():
             "checks": {
                 "index": {"passed": True, "indexed_documents": 1},
                 "harness": {"passed": True, "findings": []},
+                "eval": {
+                    "passed": True,
+                    "candidate": "run-1",
+                    "suite_id": "all",
+                    "report_path": ".sidecar/runs/run-1/eval-report.json",
+                    "trigger_score": 1.0,
+                    "held_out_score": 1.0,
+                    "governance_passed": True,
+                    "recommendation": "accept",
+                },
             },
         },
     )
