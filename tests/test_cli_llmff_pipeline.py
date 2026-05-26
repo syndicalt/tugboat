@@ -3156,6 +3156,73 @@ def test_optimization_summary_requires_acceptance_summary_for_needs_review(tmp_p
     assert not (run_dir / "optimization-summary.json").exists()
 
 
+def test_optimization_summary_rejects_malformed_eval_report_before_acceptance(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": 7,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "risk_class": "instruction_clarification",
+                "bounded_edit_metadata": [
+                    {
+                        "changed_lines": 1,
+                        "file": "CODEX.md",
+                        "normative_changes": 0,
+                        "operator": "add",
+                        "section": "Testing",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "decision.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "decision": "rejected",
+                "policy_allowed": False,
+                "policy_reasons": ["seed"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": 7,
+                "governance_passed": True,
+                "held_out_score": 0.9,
+                "metrics": {"governance_regressions": 0},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "held-out",
+                "trigger_score": 0.7,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ArtifactValidationError, match="eval-report.json missing required field"):
+        _write_optimization_summary(repo, run_dir, suite_id="held-out")
+
+    assert not (run_dir / "optimization-summary.json").exists()
+
+
 def test_optimize_passes_policy_llmff_runtime_knobs_to_all_manifests(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

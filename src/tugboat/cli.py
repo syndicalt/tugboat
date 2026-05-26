@@ -2288,6 +2288,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
     accepted_bounded_edit_metadata: list[object] = []
     if eval_report_path.exists():
         eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
+        validate_json_artifact("eval-report.json", eval_report)
         trigger_score = _score_from_eval_report(eval_report, "trigger_score")
         held_out_score = _score_from_eval_report(eval_report, "held_out_score")
         governance_passed = bool(eval_report.get("governance_passed", False))
