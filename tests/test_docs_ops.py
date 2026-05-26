@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -263,6 +264,46 @@ def test_phase_10_operations_docs_exist_with_required_sections_and_commands(
 
     for text in contract["required_text"]:
         assert text in content, f"{relative_path} is missing required text {text!r}"
+
+
+def test_dated_security_review_matches_release_evidence_commit() -> None:
+    release_notes = (REPO_ROOT / "docs/releases/0.1.0.md").read_text(encoding="utf-8")
+    security_review = (REPO_ROOT / "docs/ops/security-review-2026-05-26.md").read_text(
+        encoding="utf-8"
+    )
+
+    expected_commit = _single_match(
+        r"Build/code artifact commit: `([0-9a-f]{7,40})`\.",
+        release_notes,
+    )
+    expected_ci_url = _single_match(
+        r"--ci-url (local://release-smoke/2026-05-26-[0-9a-f]{7,40})",
+        release_notes,
+    )
+    expected_coverage = _single_match(
+        r"passed with ([0-9]+ tests and [0-9]+\.[0-9]+% coverage)",
+        release_notes,
+    )
+
+    assert f"Build/code artifact commit: `{expected_commit}`." in release_notes
+    assert f"--commit {expected_commit}" in release_notes
+    assert f"Build/code artifact commit reviewed: `{expected_commit}`." in security_review
+    assert f"--commit {expected_commit}" in security_review
+    assert expected_ci_url in release_notes
+    assert expected_ci_url in security_review
+    assert expected_coverage in release_notes
+    assert expected_coverage in security_review
+    combined = f"{release_notes}\n{security_review}"
+    assert "e58d673" not in combined
+    assert "725 tests" not in combined
+    assert "90.11% coverage" not in combined
+    assert "local://release-smoke/2026-05-26 --approver" not in combined
+
+
+def _single_match(pattern: str, content: str) -> str:
+    matches = re.findall(pattern, content)
+    assert len(matches) == 1
+    return matches[0]
 
 
 def _markdown_body(content: str) -> str:

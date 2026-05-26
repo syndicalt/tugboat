@@ -9,7 +9,7 @@ verification_status: verified
 
 Release: Tugboat 0.1.0 proposal-only MVP.
 
-Build/code artifact commit reviewed: `e58d673`.
+Build/code artifact commit reviewed: `1b979e3`.
 
 Release evidence is maintained in the release documentation commits after that build artifact.
 
@@ -24,8 +24,10 @@ PYTHONPATH=src python -m tugboat harness check --repo .
 PYTHONPATH=src pytest --cov=src --cov-report=term-missing -q
 python -m build --wheel
 python -m twine check dist/tugboat-0.1.0-py3-none-any.whl
-PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit e58d673 --ci-url local://release-smoke/2026-05-26 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
+PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit 1b979e3 --ci-url local://release-smoke/2026-05-26-1b979e3 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
 ```
+
+Latest retained coverage evidence: 728 tests and 90.00% coverage.
 
 ## Findings
 
