@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS audits (
   severity TEXT NOT NULL,
   confidence REAL NOT NULL,
   evidence_json TEXT NOT NULL,
-  instruction_refs_json TEXT NOT NULL
+  instruction_refs_json TEXT NOT NULL,
+  audit_event_sequence INTEGER
 );
 CREATE TABLE IF NOT EXISTS candidates (
   id INTEGER PRIMARY KEY,
@@ -267,6 +268,7 @@ class Store:
         connection = sqlite3.connect(path)
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(SCHEMA)
+        _ensure_column(connection, "audits", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
@@ -552,7 +554,12 @@ class Store:
         )
         self.connection.commit()
         audit_id = int(cursor.lastrowid)
-        self.append_audit_event("audit.recorded", {"audit_id": audit_id, "run_id": run_id})
+        event = self.append_audit_event("audit.recorded", {"audit_id": audit_id, "run_id": run_id})
+        self.connection.execute(
+            "UPDATE audits SET audit_event_sequence = ? WHERE id = ?",
+            (event.sequence, audit_id),
+        )
+        self.connection.commit()
         return audit_id
 
     def insert_candidate(

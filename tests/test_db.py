@@ -90,6 +90,30 @@ def test_insert_decision_stores_audit_event_sequence(tmp_path: Path):
     assert row[1] is not None
 
 
+def test_insert_audit_stores_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["event:1"],
+            instruction_refs=["CODEX.md#rules"],
+        )
+        row = store.connection.execute(
+            """
+            SELECT audits.id, audits.audit_event_sequence, audit_events.event_type
+            FROM audits
+            JOIN audit_events ON audit_events.sequence = audits.audit_event_sequence
+            WHERE audits.id = ?
+            """,
+            (audit_id,),
+        ).fetchone()
+
+    assert row == (audit_id, row[1], "audit.recorded")
+    assert row[1] is not None
+
+
 def test_store_can_be_used_as_context_manager(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         store.append_audit_event("run.created", {"run_id": "run-1"})
