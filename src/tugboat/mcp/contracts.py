@@ -673,6 +673,7 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
                 return _jsonrpc_error(request_id, -32601, f"unknown MCP tool: {name}")
             invalid_params = _validate_tool_arguments(name, arguments)
             if invalid_params is not None:
+                _audit_jsonrpc_validation_failure(name, arguments, invalid_params)
                 return _jsonrpc_error(request_id, -32602, f"invalid params: {invalid_params}")
             invalid_policy = _validate_jsonrpc_mcp_policy(name, arguments)
             if invalid_policy is not None:
@@ -805,6 +806,34 @@ def _audit_jsonrpc_policy_denial(
             tool_name=tool_name,
             repo_path=repo,
             status="denied",
+            payload=payload,
+        )
+
+
+def _audit_jsonrpc_validation_failure(
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+) -> None:
+    repo_value = arguments.get("repo")
+    if not isinstance(repo_value, str):
+        return
+    try:
+        repo = _resolve_local_repo(repo_value)
+    except ValueError:
+        return
+    payload = {
+        "tool": tool_name,
+        "repo": repo.as_posix(),
+        "arguments": redact_payload(arguments),
+        "status": "failed",
+        "reason": redact_text(reason),
+    }
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_mcp_call(
+            tool_name=tool_name,
+            repo_path=repo,
+            status="failed",
             payload=payload,
         )
 

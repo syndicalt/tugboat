@@ -1974,6 +1974,7 @@ def test_mcp_jsonrpc_denies_write_intent_when_read_only_kill_switch_enabled(
 
 
 def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
     missing_repo = handle_jsonrpc_request(
         {
             "jsonrpc": "2.0",
@@ -2090,7 +2091,43 @@ def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
         "id": 11,
         "error": {"code": -32602, "message": "invalid params: trace_id has invalid format"},
     }
-    assert _mcp_events(tmp_path) == []
+    assert _mcp_events(tmp_path) == [
+        {
+            "tool": "tugboat_candidate_report",
+            "repo": tmp_path.as_posix(),
+            "arguments": {"repo": str(tmp_path), "candidate_id": "7"},
+            "status": "failed",
+            "reason": "candidate_id must be integer",
+        },
+        {
+            "tool": "tugboat_status",
+            "repo": tmp_path.as_posix(),
+            "arguments": {"repo": str(tmp_path), "extra": "ignored?"},
+            "status": "failed",
+            "reason": "unknown argument: extra",
+        },
+        {
+            "tool": "tugboat_latest_runs",
+            "repo": tmp_path.as_posix(),
+            "arguments": {"repo": str(tmp_path), "limit": 0},
+            "status": "failed",
+            "reason": "limit must be >= 1",
+        },
+        {
+            "tool": "tugboat_request_audit",
+            "repo": tmp_path.as_posix(),
+            "arguments": {"repo": str(tmp_path), "trace_id": "../policy"},
+            "status": "failed",
+            "reason": "trace_id has invalid format",
+        },
+        {
+            "tool": "tugboat_request_audit",
+            "repo": tmp_path.as_posix(),
+            "arguments": {"repo": str(tmp_path), "trace_id": ".."},
+            "status": "failed",
+            "reason": "trace_id has invalid format",
+        },
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2132,7 +2169,16 @@ def test_mcp_jsonrpc_rejects_non_decimal_write_intent_target_ids_before_invocati
         "error": {"code": -32602, "message": expected_message},
     }
     assert not (sidecar_dir(tmp_path) / "daemon.sqlite").exists()
-    assert _mcp_events(tmp_path) == []
+    events = _mcp_events(tmp_path)
+    assert events == [
+        {
+            "tool": tool_name,
+            "repo": tmp_path.as_posix(),
+            "arguments": {"repo": str(tmp_path), **arguments},
+            "status": "failed",
+            "reason": expected_message.removeprefix("invalid params: "),
+        }
+    ]
 
 
 @pytest.mark.parametrize(
