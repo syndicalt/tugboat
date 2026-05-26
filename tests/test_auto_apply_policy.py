@@ -15,7 +15,7 @@ def _passing_candidate(**overrides: object) -> AutoApplyCandidate:
         "candidate_id": "candidate-123",
         "repository": "allowed/repo",
         "change_class": "A",
-        "categories": ("instruction_copyedit",),
+        "categories": ("typo_fix",),
         "held_out_eval_passed": True,
         "governance_regression_passed": True,
         "rejection_rate": 0.02,
@@ -167,6 +167,22 @@ def test_forbidden_categories_and_non_class_a_changes_are_never_eligible():
         for reason in decision.reasons
         if reason.startswith("forbidden_category:")
     ) == tuple(f"forbidden_category:{category}" for category in forbidden_categories)
+
+
+def test_auto_apply_requires_narrow_allowed_change_type():
+    unsupported = evaluate_auto_apply(
+        candidate=_passing_candidate(categories=("instruction_clarification",)),
+        readiness=_ready(),
+    )
+    allowed = evaluate_auto_apply(
+        candidate=_passing_candidate(categories=("broken_internal_link",)),
+        readiness=_ready(),
+    )
+
+    assert unsupported.eligible is False
+    assert unsupported.approval_bundle is None
+    assert unsupported.reasons == ("auto_apply_change_type_not_allowed",)
+    assert allowed.eligible is True
 
 
 def test_eligible_candidate_returns_approval_bundle_without_apply_execution():

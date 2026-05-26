@@ -16,6 +16,15 @@ FORBIDDEN_CATEGORIES = frozenset(
         "sidecar_authority",
     }
 )
+ALLOWED_CHANGE_CATEGORIES = frozenset(
+    {
+        "broken_internal_link",
+        "duplicate_sentence_removal",
+        "formatting_normalization",
+        "stale_command_reference",
+        "typo_fix",
+    }
+)
 REASON_ORDER = (
     "explicit_policy_required",
     "auto_apply_disabled",
@@ -24,6 +33,7 @@ REASON_ORDER = (
     "burn_in_period_too_short",
     "repository_not_allowlisted",
     "change_class_not_allowed",
+    "auto_apply_change_type_not_allowed",
     "held_out_eval_failed",
     "governance_regression_failed",
     "rejection_rate_too_high",
@@ -171,6 +181,8 @@ def evaluate_auto_apply(
         policy is not None and candidate.change_class not in policy.allowed_change_classes
     ):
         found_reasons.add("change_class_not_allowed")
+    if not any(_category_key(category) in ALLOWED_CHANGE_CATEGORIES for category in candidate.categories):
+        found_reasons.add("auto_apply_change_type_not_allowed")
     if not candidate.held_out_eval_passed:
         found_reasons.add("held_out_eval_failed")
     if not candidate.governance_regression_passed:
@@ -218,6 +230,7 @@ __all__ = [
     "AutoApplyDecision",
     "AutoApplyPolicy",
     "AutoApplyReadiness",
+    "ALLOWED_CHANGE_CATEGORIES",
     "FORBIDDEN_CATEGORIES",
     "VcsProof",
     "evaluate_auto_apply",

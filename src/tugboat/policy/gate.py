@@ -71,6 +71,10 @@ RESTRICTED_RISK_CLASSES = frozenset(
 STRONG_MODALS = re.compile(r"\b(must|never|required|shall)\b", re.IGNORECASE)
 WEAK_MODALS = re.compile(r"\b(should|may|can|could|optional|recommend)\b", re.IGNORECASE)
 EXTERNAL_ENDPOINT = re.compile(r"https?://[^\s)>\"]+", re.IGNORECASE)
+REPO_PLUGIN_LOADING = re.compile(
+    r"\b(load|loading|install|installing|enable|enabling)\b.*\bplugins?\b.*\b(repo|repository)\b",
+    re.IGNORECASE,
+)
 FENCE_START = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 MARKDOWN_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -209,6 +213,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("secret_exposure")
     if _has_new_external_endpoint(candidate.diff):
         found_reasons.add("new_external_endpoint")
+    if _has_repo_plugin_loading_instruction(candidate.diff):
+        found_reasons.add("prohibited_risk_class")
     if not any(source.trusted for source in candidate.sources):
         found_reasons.add("missing_trusted_source")
     if len(candidate.sources) == 1 and not candidate.sources[0].trusted:
@@ -276,6 +282,15 @@ def _has_new_external_endpoint(diff: str) -> bool:
         for endpoint in EXTERNAL_ENDPOINT.findall(line)
     }
     return bool(added_endpoints - removed_endpoints)
+
+
+def _has_repo_plugin_loading_instruction(diff: str) -> bool:
+    removed = {_diff_body(line) for line in diff.splitlines() if _is_removed_line(line)}
+    added = {_diff_body(line) for line in diff.splitlines() if _is_added_line(line)}
+    return any(
+        REPO_PLUGIN_LOADING.search(line) and line not in removed
+        for line in added
+    )
 
 
 def _markdown_validation_reasons(base_path: Path, diff: str) -> set[str]:

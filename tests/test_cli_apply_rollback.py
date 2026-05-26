@@ -43,7 +43,12 @@ def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _candidate_run(repo: Path, *, risk_class: str = "instruction_clarification") -> Path:
+def _candidate_run(
+    repo: Path,
+    *,
+    risk_class: str = "instruction_clarification",
+    bounded_section: str | None = None,
+) -> Path:
     run_dir = repo / ".sidecar" / "runs" / "20260525T000000000000Z"
     run_dir.mkdir(parents=True)
     diff = (
@@ -66,6 +71,16 @@ def _candidate_run(repo: Path, *, risk_class: str = "instruction_clarification")
         "rationale": "Keep rollback provenance visible.",
         "sources": [{"source_id": "audit:1", "trusted": True}],
     }
+    if bounded_section is not None:
+        candidate["bounded_edit_metadata"] = [
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": bounded_section,
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ]
     (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
     (run_dir / "candidate.json").write_text(
         json.dumps(candidate, indent=2, sort_keys=True) + "\n",
@@ -761,7 +776,7 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
     tmp_path: Path,
 ):
     repo = _init_repo(tmp_path)
-    run_dir = _candidate_run(repo, risk_class="A")
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
 
@@ -857,6 +872,61 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
         apply_plan["applied_commit"],
         json.dumps(approval["rollback_command"], sort_keys=True),
     )
+
+
+def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="General")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.decided'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert event is not None
+    event_payload = json.loads(event[0])
+    assert event_payload["eligible"] is False
+    assert event_payload["reasons"] == ["auto_apply_change_type_not_allowed"]
 
 
 def test_auto_apply_rejects_class_a_candidate_touching_forbidden_policy_domain(
@@ -970,7 +1040,7 @@ auto_apply:
 
 def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
     repo = _init_repo(tmp_path)
-    run_dir = _candidate_run(repo, risk_class="A")
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
     _write_auto_apply_policy(repo, version=3)
     _seed_auto_apply_history(repo)
 
