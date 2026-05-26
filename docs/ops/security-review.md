@@ -22,7 +22,7 @@ Run from the repository root:
 rg -n "OPENAI_API_KEY|ANTHROPIC_API_KEY|api[_-]?key|token|secret|password" . --glob '!.git/**' --glob '!.sidecar/runs/**'
 tugboat doctor
 tugboat harness check --repo .
-tugboat audit --repo . --trace traces/example.jsonl --mock-llmff-inspect
+tugboat audit --repo . --trace traces/example.jsonl
 ```
 
 Review outputs for:

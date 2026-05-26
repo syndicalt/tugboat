@@ -367,12 +367,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("audit does not warrant an instruction edit")
             return 1
         policy = load_policy(repo)
+        if not (run_dir / "audit.raw.json").exists():
+            print("propose requires llmff audit output: missing audit.raw.json")
+            return 1
         try:
-            candidate = (
-                _run_patch_propose(repo, run_dir, policy, audit_id=int(audit["audit_id"]))
-                if (run_dir / "audit.raw.json").exists()
-                else _default_candidate(repo, audit_id=int(audit["audit_id"]))
-            )
+            candidate = _run_patch_propose(repo, run_dir, policy, audit_id=int(audit["audit_id"]))
         except ValueError as error:
             print(f"candidate rejected: {error}")
             return 1
@@ -967,23 +966,6 @@ def _score_outcome_json(outcome: ScoreOutcome) -> dict[str, object]:
         "metrics": outcome.metrics,
         "evidence": list(outcome.evidence),
     }
-
-
-def _default_candidate(repo: Path, audit_id: int) -> CandidatePatch:
-    base_file = "CODEX.md"
-    base_path = repo / base_file
-    if not base_path.exists():
-        base_file = "AGENTS.md"
-        base_path = repo / base_file
-    return CandidatePatch(
-        audit_id=audit_id,
-        base_file=base_file,
-        base_hash=CandidatePatch.hash_file(base_path),
-        diff=f"--- a/{base_file}\n+++ b/{base_file}\n@@\n+Add regression tests for bug fixes.\n",
-        risk_class="instruction_clarification",
-        rationale="User correction showed missing regression-test guidance.",
-        sources=(SourceRef("audit:latest", trusted=True),),
-    )
 
 
 def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> CandidatePatch:

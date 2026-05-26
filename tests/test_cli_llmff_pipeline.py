@@ -249,6 +249,25 @@ llmff:
     assert not (run_dir / "audit.raw.json").exists()
 
 
+def test_propose_requires_real_llmff_audit_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace), "--mock-llmff-inspect"]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "propose requires llmff audit output" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
 def test_propose_consumes_real_llmff_file_backed_candidate_output(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

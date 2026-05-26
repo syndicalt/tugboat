@@ -33,15 +33,16 @@ mkdir -p traces
 printf '{"event":"user_correction","message":"The runbook missed the rollback command."}\n' > traces/example.jsonl
 ```
 
-Run the proposal loop without credentials:
+Run the proposal loop without credentials, using a local or fixture-backed `llmff` configuration:
 
 ```bash
-tugboat audit --repo . --trace traces/example.jsonl --mock-llmff-inspect
+tugboat audit --repo . --trace traces/example.jsonl
 tugboat propose --repo . --audit latest
 tugboat report --repo . --run latest
 ```
 
 Review the generated `.sidecar/runs/<run-id>/candidate.diff` before applying anything manually. Proposal-only adoption is successful when the team can inspect the report and reject or copy changes by hand.
+Do not use `--mock-llmff-inspect` for this loop; mock audit output is intentionally rejected by `propose`.
 
 ## Stop Criteria
 

@@ -117,7 +117,7 @@ DOC_CONTRACTS = {
             "proposal_only",
             "tugboat doctor",
             "tugboat index --repo .",
-            "tugboat audit --repo . --trace traces/example.jsonl --mock-llmff-inspect",
+            "tugboat audit --repo . --trace traces/example.jsonl",
             "tugboat propose --repo . --audit latest",
         ],
     },

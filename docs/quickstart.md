@@ -37,13 +37,13 @@ This runs audit, proposal, held-out evaluation, and the final acceptance gate. I
 For debugging or CI decomposition, the same loop can be run step by step:
 
 ```bash
-tugboat audit --repo . --trace traces/example.jsonl --mock-llmff-inspect
+tugboat audit --repo . --trace traces/example.jsonl
 tugboat propose --repo . --audit latest
 tugboat eval --repo . --candidate latest --suite all
 tugboat report --repo . --run latest
 ```
 
-This is designed to work under 15 minutes for an existing repo and does not require provider credentials in proposal-only mode.
+This is designed to work under 15 minutes for an existing repo and does not require provider credentials in proposal-only mode when `llmff` is configured for local or fixture-backed manifests. `--mock-llmff-inspect` is audit-only smoke-test mode and cannot feed `propose`.
 
 Live provider smoke checks are opt-in. Without opt-in, the suite records a skipped live-provider report instead of making a provider call:
 
