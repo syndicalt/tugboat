@@ -77,6 +77,10 @@ def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> 
     fields = (
         ("decision", "optimization_decision"),
         ("suite_id", "optimization_suite_id"),
+        ("trigger_score", "optimization_trigger_score"),
+        ("held_out_score", "optimization_held_out_score"),
+        ("governance_passed", "optimization_governance_passed"),
+        ("recommendation", "optimization_recommendation"),
     )
     return [
         f"- optimization_summary: {optimization_summary_path.relative_to(repo)}",
