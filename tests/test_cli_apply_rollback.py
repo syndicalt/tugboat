@@ -435,6 +435,7 @@ def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):
     assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
 
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    provenance_bundle = json.loads((run_dir / "provenance-bundle.json").read_text(encoding="utf-8"))
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         row = connection.execute(
             """
@@ -465,6 +466,42 @@ def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):
         "pre_hashes": apply_plan["pre_hashes"],
         "post_hashes": apply_plan["post_hashes"],
         "rollback_command": apply_plan["rollback_command"],
+    }
+    assert apply_plan["provenance_bundle"] == (
+        ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json"
+    )
+    assert provenance_bundle == {
+        "schema_version": 1,
+        "run_id": run_dir.name,
+        "candidate_id": 7,
+        "mode": "commit",
+        "target_files": ["CODEX.md"],
+        "applied_commit": apply_plan["applied_commit"],
+        "rollback_command": apply_plan["rollback_command"],
+        "pre_hashes": apply_plan["pre_hashes"],
+        "post_hashes": apply_plan["post_hashes"],
+        "source_artifacts": {
+            "apply_plan": {
+                "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+                "sha256": _hash(run_dir / "apply-plan.json"),
+            },
+            "candidate_diff": {
+                "path": ".sidecar/runs/20260525T000000000000Z/candidate.diff",
+                "sha256": _hash(run_dir / "candidate.diff"),
+            },
+            "candidate_metadata": {
+                "path": ".sidecar/runs/20260525T000000000000Z/candidate.json",
+                "sha256": _hash(run_dir / "candidate.json"),
+            },
+            "eval_report": {
+                "path": ".sidecar/runs/20260525T000000000000Z/eval-report.json",
+                "sha256": _hash(run_dir / "eval-report.json"),
+            },
+            "policy_gate": {
+                "path": ".sidecar/runs/20260525T000000000000Z/policy-gate.json",
+                "sha256": _hash(run_dir / "policy-gate.json"),
+            },
+        },
     }
 
 

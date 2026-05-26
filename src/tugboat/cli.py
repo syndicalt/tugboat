@@ -1179,6 +1179,7 @@ def _write_apply_plan(
         "post_hashes": post_hashes,
         "applied_commit": applied_commit,
         "rollback_command": rollback_command,
+        "provenance_bundle": _relative_repo_path(repo, run_dir / "provenance-bundle.json"),
         "pr_metadata": pr_metadata,
         "review_actor": review_actor,
         "auto_apply": auto_apply,
@@ -1189,6 +1190,18 @@ def _write_apply_plan(
     path = run_dir / "apply-plan.json"
     validate_json_artifact("apply-plan.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_provenance_bundle(
+        repo,
+        run_dir,
+        candidate_id=candidate_id,
+        mode=mode,
+        target_files=target_files,
+        applied_commit=applied_commit,
+        rollback_command=rollback_command,
+        pre_hashes=pre_hashes,
+        post_hashes=post_hashes,
+        apply_plan_path=path,
+    )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
             "apply.planned",
@@ -1257,6 +1270,49 @@ def _write_apply_plan(
                 action="approved",
                 reason=",".join(decision.review_required_reasons),
             )
+    return path
+
+
+def _write_provenance_bundle(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    mode: str,
+    target_files: tuple[str, ...],
+    applied_commit: str,
+    rollback_command: list[list[str]],
+    pre_hashes: dict[str, str],
+    post_hashes: dict[str, str],
+    apply_plan_path: Path,
+) -> Path:
+    def artifact_ref(path: Path) -> dict[str, str]:
+        return {
+            "path": _relative_repo_path(repo, path),
+            "sha256": CandidatePatch.hash_file(path),
+        }
+
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "run_id": run_dir.name,
+        "candidate_id": candidate_id,
+        "mode": mode,
+        "target_files": list(target_files),
+        "applied_commit": applied_commit,
+        "rollback_command": rollback_command,
+        "pre_hashes": pre_hashes,
+        "post_hashes": post_hashes,
+        "source_artifacts": {
+            "apply_plan": artifact_ref(apply_plan_path),
+            "candidate_diff": artifact_ref(run_dir / "candidate.diff"),
+            "candidate_metadata": artifact_ref(run_dir / "candidate.json"),
+            "eval_report": artifact_ref(run_dir / "eval-report.json"),
+            "policy_gate": artifact_ref(run_dir / "policy-gate.json"),
+        },
+    }
+    path = run_dir / "provenance-bundle.json"
+    validate_json_artifact("provenance-bundle.json", payload)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 

@@ -1033,6 +1033,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "post_hashes",
             "applied_commit",
             "rollback_command",
+            "provenance_bundle",
             "pr_metadata",
             "review_actor",
             "auto_apply",
@@ -1056,12 +1057,102 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "type": "array",
                 "items": {"type": "array", "items": {"type": "string"}},
             },
+            "provenance_bundle": {"type": "string"},
             "pr_metadata": {"type": "object"},
             "review_actor": {"type": "string"},
             "auto_apply": {"type": "boolean"},
             "explicit_human_review": {"type": "boolean"},
             "review_required_reasons": {"type": "array", "items": {"type": "string"}},
             "decision_rationale": {"type": "string"},
+        },
+    },
+    "provenance-bundle.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "run_id",
+            "candidate_id",
+            "mode",
+            "target_files",
+            "applied_commit",
+            "rollback_command",
+            "pre_hashes",
+            "post_hashes",
+            "source_artifacts",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "run_id": {"type": "string"},
+            "candidate_id": {"type": "integer"},
+            "mode": {"type": "string"},
+            "target_files": {"type": "array", "items": {"type": "string"}},
+            "applied_commit": {"type": "string"},
+            "rollback_command": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": "string"}},
+            },
+            "pre_hashes": {"type": "object"},
+            "post_hashes": {"type": "object"},
+            "source_artifacts": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "apply_plan",
+                    "candidate_diff",
+                    "candidate_metadata",
+                    "eval_report",
+                    "policy_gate",
+                ],
+                "properties": {
+                    "apply_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                    "candidate_diff": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                    "candidate_metadata": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                    "eval_report": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                    "policy_gate": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                },
+            },
         },
     },
     "auto-apply-approval.json": {
@@ -1192,9 +1283,24 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
             "accepted_bounded_edit_metadata",
             "reviewer_checklist",
             "rollback_command",
-        ):
+            ):
             if field not in payload:
                 raise ArtifactValidationError(f"{name} missing required field: {field}")
+    if name == "provenance-bundle.json":
+        source_artifacts = payload.get("source_artifacts", {})
+        if isinstance(source_artifacts, dict):
+            for artifact_name, artifact_ref in source_artifacts.items():
+                if not isinstance(artifact_ref, dict):
+                    continue
+                sha256 = artifact_ref.get("sha256")
+                if not (
+                    isinstance(sha256, str)
+                    and len(sha256) == 64
+                    and all(character in "0123456789abcdef" for character in sha256)
+                ):
+                    raise ArtifactValidationError(
+                        f"{name} source_artifacts.{artifact_name}.sha256 must be a SHA-256 digest"
+                    )
 
 
 def validate_report_markdown(text: str) -> None:

@@ -966,6 +966,7 @@ def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
             "post_hashes": {"CODEX.md": "after"},
             "applied_commit": "abc123",
             "rollback_command": [["git", "revert", "--no-edit", "abc123"]],
+            "provenance_bundle": ".sidecar/runs/run-1/provenance-bundle.json",
             "pr_metadata": {},
             "review_actor": "tugboat",
             "auto_apply": False,
@@ -974,6 +975,112 @@ def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
             "decision_rationale": "policy gate and eval report passed",
         },
     )
+
+
+def test_validate_provenance_bundle_artifact_accepts_apply_evidence_bundle():
+    validate_json_artifact(
+        "provenance-bundle.json",
+        {
+            "schema_version": 1,
+            "run_id": "run-1",
+            "candidate_id": 7,
+            "mode": "commit",
+            "target_files": ["CODEX.md"],
+            "applied_commit": "abc123",
+            "rollback_command": [["git", "revert", "--no-edit", "abc123"]],
+            "pre_hashes": {"CODEX.md": "before"},
+            "post_hashes": {"CODEX.md": "after"},
+            "source_artifacts": {
+                "apply_plan": {
+                    "path": ".sidecar/runs/run-1/apply-plan.json",
+                    "sha256": "0" * 64,
+                },
+                "candidate_diff": {
+                    "path": ".sidecar/runs/run-1/candidate.diff",
+                    "sha256": "1" * 64,
+                },
+                "candidate_metadata": {
+                    "path": ".sidecar/runs/run-1/candidate.json",
+                    "sha256": "2" * 64,
+                },
+                "eval_report": {
+                    "path": ".sidecar/runs/run-1/eval-report.json",
+                    "sha256": "3" * 64,
+                },
+                "policy_gate": {
+                    "path": ".sidecar/runs/run-1/policy-gate.json",
+                    "sha256": "4" * 64,
+                },
+            },
+        },
+    )
+
+
+def test_validate_apply_plan_artifact_requires_provenance_bundle_link():
+    with pytest.raises(ArtifactValidationError, match="provenance_bundle"):
+        validate_json_artifact(
+            "apply-plan.json",
+            {
+                "schema_version": 1,
+                "mode": "commit",
+                "candidate_id": 7,
+                "decision_id": "run-1",
+                "run_id": "run-1",
+                "target_files": ["CODEX.md"],
+                "branch_name": "tugboat/run-1/candidate-7/codex-md",
+                "commit_message": "tugboat: apply candidate 7",
+                "pre_hashes": {"CODEX.md": "before"},
+                "post_hashes": {"CODEX.md": "after"},
+                "applied_commit": "abc123",
+                "rollback_command": [["git", "revert", "--no-edit", "abc123"]],
+                "pr_metadata": {},
+                "review_actor": "tugboat",
+                "auto_apply": False,
+                "explicit_human_review": False,
+                "review_required_reasons": [],
+                "decision_rationale": "policy gate and eval report passed",
+            },
+        )
+
+
+def test_validate_provenance_bundle_artifact_rejects_malformed_sha256():
+    with pytest.raises(ArtifactValidationError, match="sha256"):
+        validate_json_artifact(
+            "provenance-bundle.json",
+            {
+                "schema_version": 1,
+                "run_id": "run-1",
+                "candidate_id": 7,
+                "mode": "commit",
+                "target_files": ["CODEX.md"],
+                "applied_commit": "abc123",
+                "rollback_command": [["git", "revert", "--no-edit", "abc123"]],
+                "pre_hashes": {"CODEX.md": "before"},
+                "post_hashes": {"CODEX.md": "after"},
+                "source_artifacts": {
+                    "apply_plan": {
+                        "path": ".sidecar/runs/run-1/apply-plan.json",
+                        "sha256": "apply-plan-hash",
+                    },
+                    "candidate_diff": {
+                        "path": ".sidecar/runs/run-1/candidate.diff",
+                        "sha256": "0" * 64,
+                    },
+                    "candidate_metadata": {
+                        "path": ".sidecar/runs/run-1/candidate.json",
+                        "sha256": "1" * 64,
+                    },
+                    "eval_report": {
+                        "path": ".sidecar/runs/run-1/eval-report.json",
+                        "sha256": "2" * 64,
+                    },
+                    "policy_gate": {
+                        "path": ".sidecar/runs/run-1/policy-gate.json",
+                        "sha256": "3" * 64,
+                    },
+                },
+            },
+        )
 
 
 def test_validate_ci_report_artifact_requires_check_results():
