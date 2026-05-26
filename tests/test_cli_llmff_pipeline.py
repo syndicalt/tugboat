@@ -414,6 +414,13 @@ llmff:
                 """
             )
         ]
+        rejected_memory = store.connection.execute(
+            """
+            SELECT memory_type, key, payload_json, audit_event_sequence
+            FROM optimizer_memory
+            WHERE memory_type = 'rejected_edit'
+            """
+        ).fetchone()
 
     assert jobs == [
         ("episode-audit.yaml", "completed"),
@@ -426,3 +433,12 @@ llmff:
         "eval_report",
         "policy_decision",
     ]
+    assert rejected_memory is not None
+    assert rejected_memory[0] == "rejected_edit"
+    assert len(rejected_memory[1]) == 64
+    assert json.loads(rejected_memory[2]) == {
+        "rejection_reason": "reject",
+        "semantic_fingerprint": rejected_memory[1],
+        "source_refs": ["audit:1"],
+    }
+    assert rejected_memory[3] is not None

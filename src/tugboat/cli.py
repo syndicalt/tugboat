@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -449,6 +450,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         split_name=split_name,
                         case_ids=case_ids,
                     )
+            if not passed or recommendation == "reject":
+                _record_rejected_candidate_memory(
+                    store,
+                    repo=repo,
+                    run_dir=run_dir,
+                    reason=recommendation,
+                )
         print(f"eval suite: {args.suite} {'passed' if passed else 'failed'}")
         return 0 if passed else 1
 
@@ -907,6 +915,38 @@ def _record_candidate_provenance(
             source_ref=str(reflection.get("source_ref", f"candidate:{candidate_id}")),
             artifact_path=artifact_path,
         )
+
+
+def _record_rejected_candidate_memory(
+    store: Store,
+    *,
+    repo: Path,
+    run_dir: Path,
+    reason: str,
+) -> None:
+    if not (run_dir / "candidate.diff").exists():
+        return
+    candidate = _candidate_from_artifacts(run_dir)
+    for item in candidate.bounded_edit_metadata:
+        operator = str(item.get("operator", "unknown"))
+        target_file = str(item.get("file", candidate.base_file))
+        section = str(item.get("section", ""))
+        fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "semantic_fingerprint": fingerprint,
+                "rejection_reason": reason,
+                "source_refs": [f"audit:{candidate.audit_id}"],
+            },
+        )
+
+
+def _bounded_edit_fingerprint(operator: str, target_file: str, section: str) -> str:
+    value = f"{operator}\n{target_file}\n{section}".encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
 
 
 def _run_patch_eval(
