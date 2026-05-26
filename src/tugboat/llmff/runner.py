@@ -9,7 +9,7 @@ from typing import Any
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.llmff.contracts import InspectPolicyError, InspectResult, LlmffRunner, RunResult
 from tugboat.models import Policy
-from tugboat.security.secrets import scan_path
+from tugboat.security.secrets import SecretFinding, SecretScanError, scan_path
 
 
 class CheckpointMismatchError(RuntimeError):
@@ -129,7 +129,7 @@ class LlmffRunSupervisor:
             _validate_declared_outputs_exist(outputs)
         for path in (trace_path, events_path, actual_checkpoint_path, *outputs.values()):
             if path.exists():
-                scan_path(path)
+                _scan_path_or_remove_secret_bearing_files(path)
         failure_kind, failure_message = (None, None)
         if boundary_timeout:
             failure_kind, failure_message = ("timeout", f"Timed out after {timeout_ms} ms")
@@ -304,7 +304,7 @@ def inspect_manifest(
         json.dumps(artifact, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
-    scan_path(artifact_path)
+    _scan_path_or_remove_secret_bearing_files(artifact_path)
     return InspectResult(
         manifest_path=manifest_path,
         manifest_hash=manifest_digest,
@@ -312,3 +312,18 @@ def inspect_manifest(
         inspect=inspect_payload,
         network_required=network_required,
     )
+
+
+def _scan_path_or_remove_secret_bearing_files(path: Path) -> None:
+    try:
+        scan_path(path)
+    except SecretScanError as exc:
+        _remove_secret_bearing_files(exc.findings)
+        raise
+
+
+def _remove_secret_bearing_files(findings: tuple[SecretFinding, ...]) -> None:
+    for finding in findings:
+        finding_path = Path(finding.path)
+        if finding_path.exists() and finding_path.is_file():
+            finding_path.unlink()

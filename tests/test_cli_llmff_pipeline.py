@@ -952,7 +952,7 @@ llmff:
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "secret scan failed" in output
     assert "openai_api_key" in output
-    assert (run_dir / "candidate.raw.json").exists()
+    assert not (run_dir / "candidate.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
 
@@ -2261,7 +2261,7 @@ llmff:
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "eval rejected: secret scan failed" in output
     assert "openai_api_key" in output
-    assert (run_dir / "eval-report.raw.json").exists()
+    assert not (run_dir / "eval-report.raw.json").exists()
     assert not (run_dir / "eval-report.json").exists()
 
 

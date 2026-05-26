@@ -988,6 +988,47 @@ def test_daemon_serve_cli_can_exit_without_accepting_requests(tmp_path: Path, ca
     assert payload == {"requests_served": 0, "socket_path": ".sidecar/daemon.sock"}
 
 
+def test_daemon_socket_service_constructs_only_unix_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    socket_calls: list[tuple[int, int]] = []
+
+    class RecordingSocket:
+        def __init__(self, family: int, kind: int):
+            socket_calls.append((family, kind))
+
+        def __enter__(self) -> RecordingSocket:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def bind(self, address: str) -> None:
+            assert address == str(tmp_path / ".sidecar" / "daemon.sock")
+
+        def listen(self, backlog: int) -> None:
+            assert backlog == 1
+
+        def accept(self) -> tuple[object, object]:
+            raise AssertionError("max_requests=0 must not accept connections")
+
+    monkeypatch.setattr(socket, "socket", RecordingSocket)
+
+    assert serve_daemon_socket(
+        tmp_path,
+        socket_path=tmp_path / ".sidecar" / "daemon.sock",
+        config=DaemonRunConfig(
+            worker_id="socket-worker",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+        max_requests=0,
+    ) == {"requests_served": 0, "socket_path": ".sidecar/daemon.sock"}
+
+    assert socket_calls == [(socket.AF_UNIX, socket.SOCK_STREAM)]
+
+
 def _connect_unix_socket(path: Path) -> socket.socket:
     for _ in range(100):
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

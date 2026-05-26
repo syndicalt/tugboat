@@ -391,15 +391,20 @@ def test_run_manifest_rejects_secret_in_checkpoint(monkeypatch, tmp_path: Path):
     manifest = tmp_path / "episode-audit.yaml"
     manifest.write_text("name: episode-audit\n", encoding="utf-8")
 
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    checkpoint_path = run_dir / "episode-audit" / "checkpoint.json"
+
     with pytest.raises(SecretScanError, match="ghp_token"):
         run_manifest(
             manifest,
-            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            run_dir=run_dir,
             policy=Policy(),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
         )
+
+    assert not checkpoint_path.exists()
 
 
 def test_python_boundary_timeout_scans_partial_artifacts(monkeypatch, tmp_path: Path):
@@ -415,12 +420,17 @@ def test_python_boundary_timeout_scans_partial_artifacts(monkeypatch, tmp_path: 
     manifest = tmp_path / "episode-audit.yaml"
     manifest.write_text("name: episode-audit\n", encoding="utf-8")
 
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    checkpoint_path = run_dir / "episode-audit" / "checkpoint.json"
+
     with pytest.raises(SecretScanError, match="ghp_token"):
         run_manifest(
             manifest,
-            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            run_dir=run_dir,
             policy=Policy(),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
         )
+
+    assert not checkpoint_path.exists()

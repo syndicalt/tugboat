@@ -25,7 +25,9 @@ tugboat doctor
 tugboat index --repo . --check
 tugboat harness check --repo .
 python -m pytest --cov=src --cov-report=term-missing -q
-tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0
+python -m build --wheel
+python -m twine check dist/<wheel>.whl
+tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
 ```
 
 Before tagging:

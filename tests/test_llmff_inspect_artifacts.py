@@ -10,6 +10,7 @@ from tugboat.audit.service import write_audit
 from tugboat.llmff.contracts import InspectPolicyError
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest
 from tugboat.models import Policy
+from tugboat.security.secrets import SecretScanError
 
 
 def test_inspect_manifest_writes_sidecar_artifact_with_manifest_hash(tmp_path: Path):
@@ -135,6 +136,29 @@ def test_inspect_manifest_rejects_malformed_provider_declarations(tmp_path: Path
     assert not (
         tmp_path / ".sidecar" / "runs" / "run-1" / "manifest" / "llmff-inspect.json"
     ).exists()
+
+
+def test_inspect_manifest_removes_secret_bearing_artifact(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    runner = FixtureLlmffRunner(
+        inspect_payload={
+            "network_required": False,
+            "providers": [],
+            "example_token": "ghp_abcdefghijklmnopqrstuvwx",
+        }
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            runner=runner,
+        )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
 
 
 def test_write_audit_writes_deterministic_pretty_json(tmp_path: Path):
