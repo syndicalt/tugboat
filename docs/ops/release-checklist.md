@@ -39,6 +39,16 @@ Before tagging:
 - Confirm generated artifacts under `.sidecar/runs` contain no raw secrets.
 - Record the release version, git commit, CI run URL, and approver.
 
+## Publish
+
+After the checklist passes and the release owner approves publication:
+
+```bash
+git tag -a v<version> <sha> -m "tugboat <version>"
+git push origin v<version>
+python -m twine upload dist/<wheel>.whl
+```
+
 ## Rollback
 
 Rollback means returning users to the prior package and keeping the current `.sidecar` directory readable:
