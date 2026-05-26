@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS trace_events (
   source_trust TEXT NOT NULL DEFAULT 'untrusted',
   line_number INTEGER NOT NULL,
   payload_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS instruction_snapshots (
   id INTEGER PRIMARY KEY,
@@ -130,14 +130,14 @@ CREATE TABLE IF NOT EXISTS instruction_snapshots (
   path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   artifact_path TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS instruction_graphs (
   id INTEGER PRIMARY KEY,
   run_id TEXT NOT NULL,
   graph_hash TEXT NOT NULL,
   artifact_path TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS llmff_jobs (
   id INTEGER PRIMARY KEY,
@@ -146,14 +146,14 @@ CREATE TABLE IF NOT EXISTS llmff_jobs (
   manifest_hash TEXT NOT NULL,
   status TEXT NOT NULL,
   exit_code INTEGER,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS llmff_events (
   id INTEGER PRIMARY KEY,
   job_id INTEGER NOT NULL,
   event_type TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS llmff_outputs (
   id INTEGER PRIMARY KEY,
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS llmff_outputs (
   output_name TEXT NOT NULL,
   artifact_path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS reflections (
   id INTEGER PRIMARY KEY,
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS reflections (
   source_ref TEXT NOT NULL,
   reflection_hash TEXT NOT NULL,
   artifact_path TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS edit_operations (
   id INTEGER PRIMARY KEY,
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS edit_operations (
   operator TEXT NOT NULL,
   target_path TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS candidate_edits (
   id INTEGER PRIMARY KEY,
@@ -185,14 +185,14 @@ CREATE TABLE IF NOT EXISTS candidate_edits (
   edit_operation_id INTEGER NOT NULL,
   target_path TEXT NOT NULL,
   risk_class TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS eval_cases (
   id INTEGER PRIMARY KEY,
   suite_id TEXT NOT NULL,
   case_id TEXT NOT NULL,
   case_hash TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS eval_runs (
   id INTEGER PRIMARY KEY,
@@ -200,14 +200,14 @@ CREATE TABLE IF NOT EXISTS eval_runs (
   suite_id TEXT NOT NULL,
   status TEXT NOT NULL,
   report_path TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS validation_splits (
   id INTEGER PRIMARY KEY,
   suite_id TEXT NOT NULL,
   split_name TEXT NOT NULL,
   case_ids_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS review_actions (
   id INTEGER PRIMARY KEY,
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS review_actions (
   actor TEXT NOT NULL,
   action TEXT NOT NULL,
   reason TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS mcp_calls (
   id INTEGER PRIMARY KEY,
@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS mcp_calls (
   repo_path TEXT NOT NULL,
   status TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS daemon_jobs (
   id INTEGER PRIMARY KEY,
@@ -231,21 +231,21 @@ CREATE TABLE IF NOT EXISTS daemon_jobs (
   repo_path TEXT NOT NULL,
   state TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS harness_findings (
   id INTEGER PRIMARY KEY,
   repo_path TEXT NOT NULL,
   finding TEXT NOT NULL,
   severity TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS doc_gardening_runs (
   id INTEGER PRIMARY KEY,
   repo_path TEXT NOT NULL,
   status TEXT NOT NULL,
   report_path TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS optimizer_memory (
   id INTEGER PRIMARY KEY,
@@ -253,9 +253,31 @@ CREATE TABLE IF NOT EXISTS optimizer_memory (
   memory_type TEXT NOT NULL,
   key TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 """
+
+
+ROADMAP_EXTENSION_TABLES: tuple[str, ...] = (
+    "trace_events",
+    "instruction_snapshots",
+    "instruction_graphs",
+    "llmff_jobs",
+    "llmff_events",
+    "llmff_outputs",
+    "reflections",
+    "edit_operations",
+    "candidate_edits",
+    "eval_cases",
+    "eval_runs",
+    "validation_splits",
+    "review_actions",
+    "mcp_calls",
+    "daemon_jobs",
+    "harness_findings",
+    "doc_gardening_runs",
+    "optimizer_memory",
+)
 
 
 @dataclass(frozen=True)
@@ -282,23 +304,33 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path)
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.executescript(SCHEMA)
-        _ensure_column(connection, "audits", "audit_event_sequence", "INTEGER")
-        _ensure_column(connection, "candidates", "audit_event_sequence", "INTEGER")
-        _ensure_column(connection, "evals", "audit_event_sequence", "INTEGER")
-        _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
-        _ensure_column(connection, "rollbacks", "audit_event_sequence", "INTEGER")
-        _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
-        _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
-        _ensure_column(connection, "llmff_jobs", "exit_code", "INTEGER")
-        _ensure_column(
-            connection,
-            "trace_events",
-            "source_trust",
-            "TEXT NOT NULL DEFAULT 'untrusted'",
-        )
-        connection.commit()
-        return cls(connection)
+        try:
+            if _is_daemon_queue_database(connection):
+                return cls(connection)
+            connection.executescript(SCHEMA)
+            _ensure_column(connection, "audits", "audit_event_sequence", "INTEGER")
+            _ensure_column(connection, "candidates", "audit_event_sequence", "INTEGER")
+            _ensure_column(connection, "evals", "audit_event_sequence", "INTEGER")
+            _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
+            _ensure_column(connection, "rollbacks", "audit_event_sequence", "INTEGER")
+            _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(connection, "llmff_jobs", "exit_code", "INTEGER")
+            _ensure_column(
+                connection,
+                "trace_events",
+                "source_trust",
+                "TEXT NOT NULL DEFAULT 'untrusted'",
+            )
+            for table in ROADMAP_EXTENSION_TABLES:
+                _ensure_column(connection, table, "audit_event_sequence", "INTEGER")
+            connection.commit()
+            _repair_roadmap_audit_event_constraints(connection)
+            connection.commit()
+            return cls(connection)
+        except Exception:
+            connection.close()
+            raise
 
     def table_names(self) -> set[str]:
         rows = self.connection.execute(
@@ -1204,6 +1236,115 @@ def _ensure_column(
     }
     if column not in columns:
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _is_daemon_queue_database(connection: sqlite3.Connection) -> bool:
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(daemon_jobs)").fetchall()
+    }
+    return {
+        "kind",
+        "payload_json",
+        "state",
+        "attempts",
+        "created_at",
+        "updated_at",
+    }.issubset(columns) and "repo_path" not in columns
+
+
+def _repair_roadmap_audit_event_constraints(connection: sqlite3.Connection) -> None:
+    for table in ROADMAP_EXTENSION_TABLES:
+        if not _requires_audit_event_constraint_repair(connection, table):
+            continue
+        _validate_audit_event_reachability(connection, table)
+        _rebuild_table_with_audit_event_constraint(connection, table)
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise ValueError(f"foreign key check failed after roadmap schema repair: {violations!r}")
+
+
+def _requires_audit_event_constraint_repair(connection: sqlite3.Connection, table: str) -> bool:
+    columns = {
+        str(row[1]): row
+        for row in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})").fetchall()
+    }
+    column = columns.get("audit_event_sequence")
+    if column is None or int(column[3]) != 1:
+        return True
+    return not any(
+        str(row[2]) == "audit_events"
+        and str(row[3]) == "audit_event_sequence"
+        and str(row[4]) == "sequence"
+        for row in connection.execute(f"PRAGMA foreign_key_list({_quote_identifier(table)})").fetchall()
+    )
+
+
+def _validate_audit_event_reachability(connection: sqlite3.Connection, table: str) -> None:
+    quoted = _quote_identifier(table)
+    null_count = int(
+        connection.execute(
+            f"SELECT COUNT(*) FROM {quoted} WHERE audit_event_sequence IS NULL"
+        ).fetchone()[0]
+    )
+    if null_count:
+        raise ValueError(f"{table}.audit_event_sequence contains NULL")
+    orphan_count = int(
+        connection.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {quoted} row
+            LEFT JOIN audit_events audit
+              ON audit.sequence = row.audit_event_sequence
+            WHERE audit.sequence IS NULL
+            """
+        ).fetchone()[0]
+    )
+    if orphan_count:
+        raise ValueError(f"{table}.audit_event_sequence has orphaned values")
+
+
+def _rebuild_table_with_audit_event_constraint(connection: sqlite3.Connection, table: str) -> None:
+    temporary = f"__{table}_audit_migration"
+    quoted_table = _quote_identifier(table)
+    quoted_temporary = _quote_identifier(temporary)
+    columns = connection.execute(f"PRAGMA table_info({quoted_table})").fetchall()
+    if not columns:
+        return
+    column_definitions = ",\n  ".join(_column_definition(row) for row in columns)
+    column_names = ", ".join(_quote_identifier(str(row[1])) for row in columns)
+
+    connection.execute(f"DROP TABLE IF EXISTS {quoted_temporary}")
+    connection.execute(f"ALTER TABLE {quoted_table} RENAME TO {quoted_temporary}")
+    connection.execute(f"CREATE TABLE {quoted_table} (\n  {column_definitions}\n)")
+    connection.execute(
+        f"INSERT INTO {quoted_table} ({column_names}) SELECT {column_names} FROM {quoted_temporary}"
+    )
+    connection.execute(f"DROP TABLE {quoted_temporary}")
+
+
+def _column_definition(row: sqlite3.Row | tuple[Any, ...]) -> str:
+    name = str(row[1])
+    if name == "audit_event_sequence":
+        return (
+            f"{_quote_identifier(name)} INTEGER NOT NULL "
+            "REFERENCES audit_events(sequence)"
+        )
+    column_type = str(row[2] or "")
+    parts = [_quote_identifier(name)]
+    if column_type:
+        parts.append(column_type)
+    if int(row[5]):
+        parts.append("PRIMARY KEY")
+    elif int(row[3]):
+        parts.append("NOT NULL")
+    if row[4] is not None:
+        parts.append(f"DEFAULT {row[4]}")
+    return " ".join(parts)
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
 
 
 def _jsonl_payloads(path: Path) -> tuple[dict[str, Any], ...]:

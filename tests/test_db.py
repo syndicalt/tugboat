@@ -52,6 +52,44 @@ def test_store_initializes_roadmap_extension_tables(tmp_path: Path):
         }.issubset(tables)
 
 
+def test_roadmap_extension_tables_require_audit_event_sequence(tmp_path: Path):
+    roadmap_tables = {
+        "trace_events",
+        "instruction_snapshots",
+        "instruction_graphs",
+        "llmff_jobs",
+        "llmff_events",
+        "llmff_outputs",
+        "reflections",
+        "edit_operations",
+        "candidate_edits",
+        "eval_cases",
+        "eval_runs",
+        "validation_splits",
+        "review_actions",
+        "mcp_calls",
+        "daemon_jobs",
+        "harness_findings",
+        "doc_gardening_runs",
+        "optimizer_memory",
+    }
+    with Store.open(tmp_path / "db.sqlite") as store:
+        for table in roadmap_tables:
+            columns = {
+                row[1]: row
+                for row in store.connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            foreign_keys = store.connection.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+
+            assert columns["audit_event_sequence"][3] == 1, table
+            assert any(
+                row[2] == "audit_events"
+                and row[3] == "audit_event_sequence"
+                and row[4] == "sequence"
+                for row in foreign_keys
+            ), table
+
+
 def test_store_migrates_legacy_trace_events_with_source_trust_column(tmp_path: Path):
     db_path = tmp_path / "db.sqlite"
     with Store.open(db_path) as store:
@@ -82,6 +120,131 @@ def test_store_migrates_legacy_trace_events_with_source_trust_column(tmp_path: P
     assert columns["source_trust"][2] == "TEXT"
     assert columns["source_trust"][3] == 1
     assert columns["source_trust"][4] == "'untrusted'"
+
+
+def test_store_migrates_legacy_nullable_audit_event_sequence_constraint(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "db.sqlite"
+    with Store.open(db_path) as store:
+        event = store.append_audit_event(
+            "trace_event.recorded",
+            {"evidence_id": "ev-1", "event_type": "user_request"},
+        )
+        store.connection.execute("ALTER TABLE trace_events RENAME TO trace_events_legacy")
+        store.connection.execute(
+            """
+            CREATE TABLE trace_events (
+              id INTEGER PRIMARY KEY,
+              episode_id INTEGER,
+              evidence_id TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              source_trust TEXT NOT NULL DEFAULT 'untrusted',
+              line_number INTEGER NOT NULL,
+              payload_json TEXT NOT NULL,
+              audit_event_sequence INTEGER
+            )
+            """
+        )
+        store.connection.execute(
+            """
+            INSERT INTO trace_events(
+              episode_id, evidence_id, event_type, source_trust, line_number,
+              payload_json, audit_event_sequence
+            )
+            VALUES (NULL, 'ev-1', 'user_request', 'user', 1, '{"type":"user_request"}', ?)
+            """,
+            (event.sequence,),
+        )
+        store.connection.execute("DROP TABLE trace_events_legacy")
+        store.connection.commit()
+
+    with Store.open(db_path) as store:
+        columns = {
+            row[1]: row
+            for row in store.connection.execute("PRAGMA table_info(trace_events)").fetchall()
+        }
+        foreign_keys = store.connection.execute("PRAGMA foreign_key_list(trace_events)").fetchall()
+        row = store.connection.execute(
+            "SELECT evidence_id, audit_event_sequence FROM trace_events"
+        ).fetchone()
+
+    assert columns["audit_event_sequence"][3] == 1
+    assert any(
+        key[2] == "audit_events"
+        and key[3] == "audit_event_sequence"
+        and key[4] == "sequence"
+        for key in foreign_keys
+    )
+    assert row == ("ev-1", event.sequence)
+
+
+def test_store_rejects_legacy_null_audit_event_sequence(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    with Store.open(db_path) as store:
+        store.connection.execute("ALTER TABLE trace_events RENAME TO trace_events_legacy")
+        store.connection.execute(
+            """
+            CREATE TABLE trace_events (
+              id INTEGER PRIMARY KEY,
+              episode_id INTEGER,
+              evidence_id TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              source_trust TEXT NOT NULL DEFAULT 'untrusted',
+              line_number INTEGER NOT NULL,
+              payload_json TEXT NOT NULL,
+              audit_event_sequence INTEGER
+            )
+            """
+        )
+        store.connection.execute(
+            """
+            INSERT INTO trace_events(
+              episode_id, evidence_id, event_type, source_trust, line_number,
+              payload_json, audit_event_sequence
+            )
+            VALUES (NULL, 'ev-1', 'user_request', 'user', 1, '{"type":"user_request"}', NULL)
+            """
+        )
+        store.connection.execute("DROP TABLE trace_events_legacy")
+        store.connection.commit()
+
+    with pytest.raises(ValueError, match="trace_events.audit_event_sequence contains NULL"):
+        Store.open(db_path)
+
+
+def test_store_rejects_legacy_orphan_audit_event_sequence(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    with Store.open(db_path) as store:
+        store.connection.execute("ALTER TABLE trace_events RENAME TO trace_events_legacy")
+        store.connection.execute(
+            """
+            CREATE TABLE trace_events (
+              id INTEGER PRIMARY KEY,
+              episode_id INTEGER,
+              evidence_id TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              source_trust TEXT NOT NULL DEFAULT 'untrusted',
+              line_number INTEGER NOT NULL,
+              payload_json TEXT NOT NULL,
+              audit_event_sequence INTEGER
+            )
+            """
+        )
+        store.connection.execute(
+            """
+            INSERT INTO trace_events(
+              episode_id, evidence_id, event_type, source_trust, line_number,
+              payload_json, audit_event_sequence
+            )
+            VALUES (NULL, 'ev-1', 'user_request', 'user', 1, '{"type":"user_request"}', 999)
+            """
+        )
+        store.connection.execute("DROP TABLE trace_events_legacy")
+        store.connection.commit()
+
+    with pytest.raises(ValueError, match="trace_events.audit_event_sequence has orphaned values"):
+        Store.open(db_path)
 
 
 def test_record_llmff_run_persists_exit_code(tmp_path: Path):

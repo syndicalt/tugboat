@@ -109,15 +109,23 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             finding="Duplicate instruction rule appears 2 times: run tests.",
             severity="duplicate_rule",
         )
+        trace_event = store.append_audit_event(
+            "trace_event.recorded",
+            {
+                "episode_id": None,
+                "evidence_id": "ev-1",
+                "event_type": "user_correction",
+            },
+        )
     with closing(sqlite3.connect(sidecar / "db.sqlite")) as connection:
         connection.execute(
             """
             INSERT INTO trace_events(
               episode_id, evidence_id, event_type, line_number, payload_json, audit_event_sequence
             )
-            VALUES (NULL, 'ev-1', 'user_correction', 1, ?, NULL)
+            VALUES (NULL, 'ev-1', 'user_correction', 1, ?, ?)
             """,
-            (json.dumps({"content": "Run tests before final."}, sort_keys=True),),
+            (json.dumps({"content": "Run tests before final."}, sort_keys=True), trace_event.sequence),
         )
         connection.execute(
             """
