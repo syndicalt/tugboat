@@ -8,8 +8,8 @@ from tugboat.models import Policy
 from tugboat.paths import runs_dir
 
 
-RAW_TRACE_FILES = frozenset({"trace-input.jsonl"})
-CHECKPOINT_FILES = frozenset({"events.jsonl"})
+RAW_TRACE_FILES = frozenset({"trace-input.jsonl", "llmff-trace.jsonl"})
+CHECKPOINT_FILES = frozenset({"events.jsonl", "llmff-events.jsonl"})
 
 
 @dataclass(frozen=True)

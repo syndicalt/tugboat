@@ -40,6 +40,30 @@ def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_
     assert (run_dir / "audit.json").exists()
 
 
+def test_retention_policy_dry_run_reports_expired_per_manifest_lifecycle_trace_and_events(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _touch_old(run_dir / "episode-audit" / "llmff-trace.jsonl", days_old=15)
+    _touch_old(run_dir / "episode-audit" / "llmff-events.jsonl", days_old=8)
+    _touch_old(run_dir / "episode-audit" / "checkpoint.json", days_old=8)
+    _touch_old(run_dir / "episode-audit" / "llmff-inspect.json", days_old=99)
+
+    result = apply_retention_policy(
+        tmp_path,
+        Policy(raw_traces_retention_days=14, checkpoints_retention_days=7),
+        dry_run=True,
+    )
+
+    assert result.deleted == ()
+    assert result.candidates == (
+        ".sidecar/runs/run-1/episode-audit/checkpoint.json",
+        ".sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
+        ".sidecar/runs/run-1/episode-audit/llmff-trace.jsonl",
+    )
+    assert (run_dir / "episode-audit" / "llmff-inspect.json").exists()
+
+
 def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
     _touch_old(run_dir / "trace-input.jsonl", days_old=15)
