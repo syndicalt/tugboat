@@ -757,6 +757,20 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "duplicate_rule_count": {"type": "integer"},
                     "user_correction_recurrence": {"type": "object"},
                     "recurring_incident_rate": {"type": "object"},
+                    "daemon_queue": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "jobs_by_state",
+                            "oldest_queued_job_id",
+                            "kill_switch_enabled",
+                        ],
+                        "properties": {
+                            "jobs_by_state": {"type": "object"},
+                            "oldest_queued_job_id": {"type": ["integer", "null"]},
+                            "kill_switch_enabled": {"type": "boolean"},
+                        },
+                    },
                 },
             },
         },

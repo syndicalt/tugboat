@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tugboat.artifacts import validate_json_artifact
 from tugboat.cli import main
+from tugboat.daemon.queue import DaemonQueue
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 
@@ -135,6 +136,8 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             (str(repo),),
         )
         connection.commit()
+    with DaemonQueue.open_sidecar(repo) as queue:
+        queue.enqueue(kind="trace_audit", payload={"trace_path": "trace.jsonl"})
 
     assert main(["ops", "observability", "--repo", str(repo)]) == 0
 
@@ -159,4 +162,9 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
         "recurring_incident_count": 2,
         "rate": 0.666667,
         "unique_incident_class_count": 2,
+    }
+    assert summary["daemon_queue"] == {
+        "jobs_by_state": {"queued": 1},
+        "oldest_queued_job_id": 1,
+        "kill_switch_enabled": False,
     }

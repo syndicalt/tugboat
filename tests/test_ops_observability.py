@@ -5,6 +5,7 @@ import json
 import warnings
 from pathlib import Path
 
+from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
 from tugboat.ops.observability import summarize_observability, summarize_sidecar_observability
@@ -154,6 +155,24 @@ def test_summarize_sidecar_observability_closes_sqlite_connection(tmp_path: Path
         for warning in caught
         if issubclass(warning.category, ResourceWarning)
     ] == []
+
+
+def test_sidecar_observability_includes_daemon_queue_state(tmp_path: Path):
+    repo = tmp_path
+    with Store.open(repo / ".sidecar" / "db.sqlite"):
+        pass
+    with DaemonQueue.open_sidecar(repo) as queue:
+        queued = queue.enqueue(kind="trace_audit", payload={"trace_path": "trace.jsonl"})
+        active = queue.enqueue(kind="proposal", payload={"audit_id": "1"})
+        queue.transition(active.id, JobState.INSPECTING)
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["daemon_queue"] == {
+        "jobs_by_state": {"inspecting": 1, "queued": 1},
+        "oldest_queued_job_id": queued.id,
+        "kill_switch_enabled": False,
+    }
 
 
 def test_sidecar_observability_counts_llmff_job_failure_without_events(

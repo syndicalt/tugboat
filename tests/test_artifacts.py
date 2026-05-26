@@ -591,6 +591,11 @@ def test_validate_observability_summary_artifact_accepts_current_schema():
                     "rate": 0.666667,
                     "unique_incident_class_count": 2,
                 },
+                "daemon_queue": {
+                    "jobs_by_state": {"queued": 1},
+                    "oldest_queued_job_id": 1,
+                    "kill_switch_enabled": False,
+                },
             },
         },
     )
