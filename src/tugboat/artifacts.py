@@ -154,6 +154,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "test_results",
             "user_corrections",
             "subagent_reports",
+            "final_answer",
             "events",
             "outcome_labels",
             "verifier_scores",
