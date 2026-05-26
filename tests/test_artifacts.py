@@ -151,6 +151,62 @@ def test_validate_decision_artifact_requires_policy_reasons():
         )
 
 
+def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
+    validate_json_artifact(
+        "apply-plan.json",
+        {
+            "schema_version": 1,
+            "mode": "commit",
+            "candidate_id": 7,
+            "decision_id": "run-1",
+            "run_id": "run-1",
+            "target_files": ["CODEX.md"],
+            "branch_name": "tugboat/run-1/candidate-7/codex-md",
+            "commit_message": "tugboat: apply candidate 7",
+            "pre_hashes": {"CODEX.md": "before"},
+            "post_hashes": {"CODEX.md": "after"},
+            "applied_commit": "abc123",
+            "rollback_command": [["git", "revert", "--no-edit", "abc123"]],
+            "pr_metadata": {},
+            "review_actor": "tugboat",
+            "auto_apply": False,
+            "explicit_human_review": False,
+            "review_required_reasons": [],
+            "decision_rationale": "policy gate and eval report passed",
+        },
+    )
+
+
+def test_validate_auto_apply_approval_requires_readiness_metrics():
+    with pytest.raises(ArtifactValidationError, match="readiness_metrics"):
+        validate_json_artifact(
+            "auto-apply-approval.json",
+            {
+                "actor": "operator@example.com",
+                "candidate_id": "7",
+                "change_class": "A",
+                "policy_version": 9,
+                "repository": "/repo",
+                "rollback_command": ["tugboat", "rollback", "--execute"],
+                "vcs": {"branch_name": "branch", "commit_sha": "abc", "mode": "commit"},
+            },
+        )
+
+
+def test_validate_rollback_plan_rejects_missing_metadata():
+    with pytest.raises(ArtifactValidationError, match="metadata"):
+        validate_json_artifact(
+            "rollback-plan.json",
+            {
+                "schema_version": 1,
+                "decision_id": "run-1",
+                "candidate_id": 7,
+                "executed": True,
+                "revert_commit": "def456",
+            },
+        )
+
+
 def test_validate_report_markdown_requires_sections():
     with pytest.raises(ArtifactValidationError, match="Rationale"):
         validate_report_markdown("# Tugboat Report\n\n- schema_version: 1\n- candidate: CODEX.md\n")

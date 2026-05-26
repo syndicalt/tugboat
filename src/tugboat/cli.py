@@ -1249,6 +1249,7 @@ def _write_apply_plan(
         "decision_rationale": "policy gate and eval report passed",
     }
     path = run_dir / "apply-plan.json"
+    validate_json_artifact("apply-plan.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
@@ -1288,6 +1289,7 @@ def _write_apply_plan(
             )
         if auto_apply and auto_apply_approval is not None:
             approval_path = run_dir / "auto-apply-approval.json"
+            validate_json_artifact("auto-apply-approval.json", auto_apply_approval)
             approval_path.write_text(
                 json.dumps(auto_apply_approval, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
@@ -1679,6 +1681,7 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
         "revert_commit": revert_commit,
     }
     path = run_dir / "rollback-plan.json"
+    validate_json_artifact("rollback-plan.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
