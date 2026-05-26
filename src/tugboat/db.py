@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS candidates (
   diff_path TEXT NOT NULL,
   risk_class TEXT NOT NULL,
   rationale TEXT NOT NULL,
-  state TEXT NOT NULL
+  state TEXT NOT NULL,
+  audit_event_sequence INTEGER
 );
 CREATE TABLE IF NOT EXISTS evals (
   id INTEGER PRIMARY KEY,
@@ -269,6 +270,7 @@ class Store:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(SCHEMA)
         _ensure_column(connection, "audits", "audit_event_sequence", "INTEGER")
+        _ensure_column(connection, "candidates", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
@@ -588,7 +590,15 @@ class Store:
         )
         self.connection.commit()
         candidate_id = int(cursor.lastrowid)
-        self.append_audit_event("candidate.recorded", {"candidate_id": candidate_id, "audit_id": audit_id})
+        event = self.append_audit_event(
+            "candidate.recorded",
+            {"candidate_id": candidate_id, "audit_id": audit_id},
+        )
+        self.connection.execute(
+            "UPDATE candidates SET audit_event_sequence = ? WHERE id = ?",
+            (event.sequence, candidate_id),
+        )
+        self.connection.commit()
         return candidate_id
 
     def update_candidate_state(self, *, candidate_id: int, state: str, reason: str) -> None:
