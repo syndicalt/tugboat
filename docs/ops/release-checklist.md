@@ -27,13 +27,17 @@ tugboat harness check --repo .
 python -m pytest --cov=src --cov-report=term-missing -q
 python -m build --wheel
 python -m twine check dist/<wheel>.whl
-tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
+python -m venv .sidecar/ci/install-smoke-venv
+.sidecar/ci/install-smoke-venv/bin/python -m pip install dist/<wheel>.whl
+.sidecar/ci/install-smoke-venv/bin/tugboat doctor
+tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
 Before tagging:
 
 - Confirm `tugboat doctor` reports `proposal_only` and `auto_apply: disabled`.
 - Confirm CI retained the pytest log, harness output, and release artifact manifest.
+- Confirm the built wheel installs in a clean virtual environment and the installed `tugboat doctor` command runs.
 - Confirm `.sidecar/ops/release-artifact-manifest.json` records the wheel hash, retained evidence, commit, CI URL, approver, and security review decision.
 - Confirm the security review for the release has no open critical or high findings.
 - Confirm generated artifacts under `.sidecar/runs` contain no raw secrets.
@@ -70,5 +74,6 @@ Retain these release records for at least one year:
 - `tugboat doctor` output.
 - `tugboat harness check --repo .` output.
 - `python -m pytest --cov=src --cov-report=term-missing -q` output.
+- Installed-wheel smoke output.
 - Security review approval.
 - Artifact retention/redaction confirmation.

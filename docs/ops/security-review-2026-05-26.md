@@ -24,7 +24,10 @@ PYTHONPATH=src python -m tugboat harness check --repo .
 PYTHONPATH=src pytest --cov=src --cov-report=term-missing -q
 python -m build --wheel
 python -m twine check dist/tugboat-0.1.0-py3-none-any.whl
-PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit c1b83fd96b66df4973d603e2938ff2fc02fb851a --ci-url local://release-smoke/2026-05-26-c1b83fd --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
+python -m venv .sidecar/ci/install-smoke-venv
+.sidecar/ci/install-smoke-venv/bin/python -m pip install dist/tugboat-0.1.0-py3-none-any.whl
+.sidecar/ci/install-smoke-venv/bin/tugboat doctor
+PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit c1b83fd96b66df4973d603e2938ff2fc02fb851a --ci-url local://release-smoke/2026-05-26-c1b83fd --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
 Latest retained coverage evidence: 760 tests and 90.08% coverage.
