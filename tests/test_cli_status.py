@@ -97,6 +97,46 @@ def test_status_reports_failed_llmff_job_and_retention_candidates(tmp_path: Path
     assert "retention_candidates: 1" in lines
 
 
+def test_status_reports_llmff_failure_kind_from_job_record_without_events(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    lifecycle_dir = run_dir / "patch-eval"
+    lifecycle_dir.mkdir(parents=True)
+    manifest = tmp_path / "patch-eval.yaml"
+    manifest.write_text("name: patch-eval\n", encoding="utf-8")
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="eval",
+            manifest_hash="abc",
+            status="failed",
+            run_dir=run_dir,
+        )
+        store.record_llmff_run(
+            run_id="run-1",
+            manifest_hash="abc",
+            result=RunResult(
+                manifest_path=manifest,
+                exit_code=124,
+                trace_path=lifecycle_dir / "llmff-trace.jsonl",
+                events_path=lifecycle_dir / "missing-events.jsonl",
+                checkpoint_path=lifecycle_dir / "checkpoint.json",
+                output_paths={},
+                failure_kind="timeout",
+                failure_message="Timed out after 12000 ms",
+            ),
+        )
+
+    assert main(["status", "--repo", str(repo)]) == 0
+
+    assert "latest_llmff_failure_kind: timeout" in capsys.readouterr().out.splitlines()
+
+
 def test_status_reports_llmff_job_for_latest_run_only(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()

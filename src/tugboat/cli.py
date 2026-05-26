@@ -1008,19 +1008,39 @@ def _latest_llmff_failure_kind(store: Store, job_id: int) -> str | None:
         """,
         (job_id,),
     ).fetchone()
+    if row is not None:
+        try:
+            payload = json.loads(str(row[0]))
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            details = payload.get("run_failed")
+            if isinstance(details, dict) and details.get("failure_kind"):
+                return str(details["failure_kind"])
+            failure_kind = payload.get("failure_kind")
+            if failure_kind:
+                return str(failure_kind)
+    row = store.connection.execute(
+        """
+        SELECT ae.payload_json
+        FROM llmff_jobs job
+        JOIN audit_events ae ON ae.sequence = job.audit_event_sequence
+        WHERE job.id = ? AND ae.event_type = 'llmff_job.recorded'
+        """,
+        (job_id,),
+    ).fetchone()
     if row is None:
         return None
     try:
-        payload = json.loads(str(row[0]))
+        job_payload = json.loads(str(row[0]))
     except json.JSONDecodeError:
         return None
-    if not isinstance(payload, dict):
+    if not isinstance(job_payload, dict):
         return None
-    details = payload.get("run_failed")
-    if isinstance(details, dict) and details.get("failure_kind"):
-        return str(details["failure_kind"])
-    failure_kind = payload.get("failure_kind")
-    return str(failure_kind) if failure_kind else None
+    run_failed = job_payload.get("run_failed")
+    if isinstance(run_failed, dict) and run_failed.get("failure_kind"):
+        return str(run_failed["failure_kind"])
+    return None
 
 
 def _write_apply_plan(

@@ -376,14 +376,20 @@ class Store:
         result: RunResult,
     ) -> int:
         status = "completed" if result.exit_code == 0 else "failed"
+        job_payload: dict[str, Any] = {
+            "run_id": run_id,
+            "manifest_name": result.manifest_path.name,
+            "status": status,
+            "exit_code": result.exit_code,
+        }
+        if result.failure_kind is not None or result.failure_message is not None:
+            job_payload["run_failed"] = {
+                "failure_kind": result.failure_kind,
+                "failure_message": result.failure_message,
+            }
         job_event = self.append_audit_event(
             "llmff_job.recorded",
-            {
-                "run_id": run_id,
-                "manifest_name": result.manifest_path.name,
-                "status": status,
-                "exit_code": result.exit_code,
-            },
+            job_payload,
         )
         cursor = self.connection.execute(
             """

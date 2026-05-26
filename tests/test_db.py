@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,44 @@ def test_record_llmff_run_persists_exit_code(tmp_path: Path):
         ).fetchone()
 
     assert row == ("patch-eval.yaml", "failed", 7)
+
+
+def test_record_llmff_run_captures_failure_summary_without_events(tmp_path: Path):
+    manifest = tmp_path / "patch-eval.yaml"
+    manifest.write_text("name: patch-eval\n", encoding="utf-8")
+    events = tmp_path / "missing-events.jsonl"
+    trace = tmp_path / "llmff-trace.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id="run-1",
+            manifest_hash="abc",
+            result=RunResult(
+                manifest_path=manifest,
+                exit_code=124,
+                trace_path=trace,
+                events_path=events,
+                checkpoint_path=checkpoint,
+                output_paths={},
+                failure_kind="timeout",
+                failure_message="Timed out after 12000 ms",
+            ),
+        )
+        row = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM audit_events
+            WHERE event_type = 'llmff_job.recorded'
+            """
+        ).fetchone()
+
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["run_failed"] == {
+        "failure_kind": "timeout",
+        "failure_message": "Timed out after 12000 ms",
+    }
 
 
 def test_audit_events_are_hash_chained(tmp_path: Path):

@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 
 from tugboat.db import Store
+from tugboat.llmff.contracts import RunResult
 from tugboat.ops.observability import summarize_observability, summarize_sidecar_observability
 
 
@@ -149,3 +150,80 @@ def test_summarize_sidecar_observability_closes_sqlite_connection(tmp_path: Path
         for warning in caught
         if issubclass(warning.category, ResourceWarning)
     ] == []
+
+
+def test_sidecar_observability_counts_llmff_job_failure_without_events(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    run_dir = sidecar / "runs" / "run-1"
+    lifecycle_dir = run_dir / "patch-eval"
+    lifecycle_dir.mkdir(parents=True)
+    manifest = tmp_path / "patch-eval.yaml"
+    manifest.write_text("name: patch-eval\n", encoding="utf-8")
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="eval",
+            manifest_hash="abc",
+            status="failed",
+            run_dir=run_dir,
+        )
+        store.record_llmff_run(
+            run_id="run-1",
+            manifest_hash="abc",
+            result=RunResult(
+                manifest_path=manifest,
+                exit_code=124,
+                trace_path=lifecycle_dir / "llmff-trace.jsonl",
+                events_path=lifecycle_dir / "missing-events.jsonl",
+                checkpoint_path=lifecycle_dir / "checkpoint.json",
+                output_paths={},
+                failure_kind="timeout",
+                failure_message="Timed out after 12000 ms",
+            ),
+        )
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["failure_kind_counts"] == {"timeout": 1}
+
+
+def test_sidecar_observability_deduplicates_llmff_job_failure_with_run_event(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    run_dir = sidecar / "runs" / "run-1"
+    lifecycle_dir = run_dir / "patch-eval"
+    lifecycle_dir.mkdir(parents=True)
+    manifest = tmp_path / "patch-eval.yaml"
+    manifest.write_text("name: patch-eval\n", encoding="utf-8")
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id="run-1",
+            manifest_hash="abc",
+            result=RunResult(
+                manifest_path=manifest,
+                exit_code=124,
+                trace_path=lifecycle_dir / "llmff-trace.jsonl",
+                events_path=lifecycle_dir / "llmff-events.jsonl",
+                checkpoint_path=lifecycle_dir / "checkpoint.json",
+                output_paths={},
+                failure_kind="timeout",
+                failure_message="Timed out after 12000 ms",
+            ),
+        )
+        store.append_audit_event(
+            "run_failed",
+            {
+                "run_id": "run-1",
+                "failure_kind": "timeout",
+                "status": "failed",
+            },
+        )
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["failure_kind_counts"] == {"timeout": 1}

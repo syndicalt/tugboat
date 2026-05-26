@@ -156,7 +156,28 @@ def _audit_event_jobs(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _audit_event_runs(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
-    for event in events:
+    event_items = list(events)
+    explicit_failure_run_ids = {
+        str(event.get("run_id"))
+        for event in event_items
+        if event.get("failure_kind") is not None and event.get("run_id") is not None
+    }
+    for event in event_items:
+        run_failed = event.get("run_failed")
+        if isinstance(run_failed, dict) and run_failed.get("failure_kind") is not None:
+            if str(event.get("run_id", "")) in explicit_failure_run_ids:
+                continue
+            runs.append(
+                {
+                    "run_id": event.get("run_id", ""),
+                    "failure_kind": run_failed.get("failure_kind"),
+                    "provider": event.get("provider"),
+                    "backend": event.get("backend"),
+                    "status": event.get("status", "failed"),
+                    "duration_seconds": event.get("duration_seconds", 0),
+                }
+            )
+            continue
         if event.get("failure_kind") is None:
             continue
         runs.append(
