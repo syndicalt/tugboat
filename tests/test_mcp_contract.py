@@ -992,6 +992,38 @@ def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path
     ]
 
 
+def test_record_episode_normalizes_mcp_live_events_for_mcp_capture(tmp_path: Path):
+    repo = tmp_path
+
+    episode = tugboat_record_episode(
+        repo,
+        '{"event":"request","text":"Update docs"}\n'
+        '{"event":"tool.started","tool":"apply_patch"}\n'
+        '{"event":"tool.finished","tool":"apply_patch","exit_code":0}\n'
+        '{"event":"agent.final","text":"Done"}\n',
+    )
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rows = store.connection.execute(
+            """
+            SELECT event_type, source_trust, payload_json
+            FROM trace_events
+            ORDER BY line_number
+            """
+        ).fetchall()
+
+    assert episode["artifact_ref"].startswith(".sidecar/mcp/episodes/")
+    assert [row[0] for row in rows] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+        "final_answer",
+    ]
+    assert [row[1] for row in rows] == ["user", "tool", "tool", "agent"]
+    assert json.loads(rows[0][2])["content"] == "Update docs"
+    assert json.loads(rows[2][2])["exit_code"] == 0
+
+
 def test_record_episode_denied_when_read_only_kill_switch_enabled(tmp_path: Path):
     repo = tmp_path
     sidecar = repo / ".sidecar"

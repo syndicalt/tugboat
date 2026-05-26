@@ -19,6 +19,7 @@ from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import runs_dir, sidecar_dir
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
+from tugboat.traces.adapters import ingest_mcp_session_bundle
 from tugboat.traces.ingest import ingest_jsonl_trace
 
 
@@ -538,7 +539,11 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
             path.unlink(missing_ok=True)
             raise ValueError("secret detected in episode payload") from error
         try:
-            bundle = ingest_jsonl_trace(path)
+            bundle = (
+                ingest_mcp_session_bundle(path)
+                if _looks_like_mcp_live_event_jsonl(path)
+                else ingest_jsonl_trace(path)
+            )
         except (json.JSONDecodeError, ValueError) as error:
             path.unlink(missing_ok=True)
             raise ValueError("invalid episode JSONL payload") from error
@@ -556,6 +561,18 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
         {"trace_jsonl": "[artifact-payload]"},
         write,
     )
+
+
+def _looks_like_mcp_live_event_jsonl(path: Path) -> bool:
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError("trace line must be a JSON object")
+            return "event" in payload and "type" not in payload
+    return False
 
 
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
