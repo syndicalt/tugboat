@@ -97,6 +97,11 @@ DOC_CONTRACTS = {
             "OPENAI_API_KEY",
             "redacted",
             "optimization-summary.json",
+            "| Runtime lifecycle streams | events, checkpoints | 7 days |",
+            "tugboat retention --repo .",
+            ".sidecar/ops/retention/retention-report.json",
+            "status: planned",
+            "status: complete",
         ],
     },
     "docs/ops/operating-runbook.md": {

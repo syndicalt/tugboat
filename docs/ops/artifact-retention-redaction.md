@@ -11,7 +11,7 @@ Default retention targets:
 | Class | Examples | Retention |
 | --- | --- | --- |
 | Raw trace inputs | `trace-input.jsonl`, transcript exports | 14 days |
-| Lifecycle artifacts | inspect reports, events, checkpoints | 30 days |
+| Runtime lifecycle streams | events, checkpoints | 7 days |
 | Review artifacts | `audit.json`, `candidate.diff`, `eval-report.json`, `optimization-summary.json`, `report.md` | 180 days |
 | Decisions | accepted, rejected, rollback, release evidence | 1 year |
 
@@ -34,19 +34,23 @@ If the scan finds sensitive content:
 
 ## Deletion Procedure
 
-Preview before deleting:
+Preview with Tugboat before deleting:
 
 ```bash
-find .sidecar/runs -type f -name "trace-input.jsonl" -mtime +14 -print
-find .sidecar/runs -type f \( -name "events.jsonl" -o -name "checkpoint*" \) -mtime +30 -print
+tugboat retention --repo .
 ```
 
-Delete only after the preview is reviewed:
+The command writes `.sidecar/ops/retention/retention-report.json`. A dry run records `status: complete`, the candidate paths, and an empty deleted list.
+
+Delete only after the dry-run report is reviewed:
 
 ```bash
-find .sidecar/runs -type f -name "trace-input.jsonl" -mtime +14 -delete
-find .sidecar/runs -type f \( -name "events.jsonl" -o -name "checkpoint*" \) -mtime +30 -delete
+tugboat retention --repo . --apply
 ```
+
+Apply mode writes a preflight report with `status: planned` before deleting anything, then atomically replaces it with `status: complete` after deletion succeeds. If the final report write fails, treat the remaining `status: planned` report as an incomplete cleanup record that needs operator review.
+
+Use raw `find .sidecar/runs` cleanup only for manual incident recovery, and attach the command output to the review record.
 
 Never delete `audit.json`, `candidate.diff`, `eval-report.json`, `optimization-summary.json`, `decision.json`, or `report.md` while a proposal, release, rollback, or incident review is open.
 
@@ -56,6 +60,6 @@ For each cleanup, record:
 
 - Date and operator.
 - Retention rule applied.
-- Dry-run output.
-- Deletion command output.
+- Dry-run output and `.sidecar/ops/retention/retention-report.json`.
+- Apply output, when deletion was approved.
 - Redaction scan result, including whether `OPENAI_API_KEY` or any other credential pattern was found.
