@@ -369,6 +369,81 @@ def test_apply_rejects_sidecar_policy_self_apply_even_when_stored_gate_passed(
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_sidecar_audit_record_edit_even_when_stored_gate_passed(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir(parents=True)
+    policy_path = sidecar / "policy.yaml"
+    policy_path.write_text(
+        "version: 1\n"
+        "mode: proposal_only\n"
+        "instruction_files:\n"
+        "  - path: .sidecar/db.sqlite\n"
+        "    kind: audit_record\n"
+        "    precedence: 100\n"
+        "    protected: true\n",
+        encoding="utf-8",
+    )
+    audit_db = sidecar / "db.sqlite"
+    original_audit_db = "sqlite audit history\n"
+    audit_db.write_text(original_audit_db, encoding="utf-8")
+    run_dir = sidecar / "runs" / "20260525T000000000002Z"
+    run_dir.mkdir(parents=True)
+    diff = (
+        "--- a/.sidecar/db.sqlite\n"
+        "+++ b/.sidecar/db.sqlite\n"
+        "@@\n"
+        "-sqlite audit history\n"
+        "+rewritten audit history\n"
+    )
+    candidate = {
+        "schema_version": 1,
+        "audit_id": 1,
+        "candidate_id": 9,
+        "base_file": ".sidecar/db.sqlite",
+        "base_hash": _hash(audit_db),
+        "diff_hash": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+        "risk_class": "A",
+        "rationale": "Simulate a misclassified sidecar audit record edit.",
+        "sources": [{"source_id": "audit:history", "trusted": True}],
+    }
+    (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
+    (run_dir / "candidate.json").write_text(
+        json.dumps(candidate, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"allowed": True, "reasons": []}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 9,
+                "suite_id": "all",
+                "passed": True,
+                "trigger_score": 0.80,
+                "held_out_score": 0.90,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": 0},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert audit_db.read_text(encoding="utf-8") == original_audit_db
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

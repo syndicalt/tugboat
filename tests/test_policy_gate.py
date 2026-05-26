@@ -809,6 +809,80 @@ def test_policy_gate_rejects_sidecar_approval_policy_self_apply_by_resolved_path
     assert decision.reasons == ("approval_policy_self_apply",)
 
 
+def test_policy_gate_rejects_sidecar_audit_record_edits_by_resolved_path(
+    tmp_path: Path,
+):
+    (tmp_path / "docs").mkdir()
+    audit_db = tmp_path / ".sidecar" / "db.sqlite"
+    audit_db.parent.mkdir()
+    audit_db.write_bytes(b"sqlite audit history")
+    diff = (
+        "--- a/docs/../.sidecar/db.sqlite\n"
+        "+++ b/docs/../.sidecar/db.sqlite\n"
+        "@@\n"
+        "-sqlite audit history\n"
+        "+rewritten audit history\n"
+    )
+    candidate = _candidate(
+        base_file="docs/../.sidecar/db.sqlite",
+        base_hash=CandidatePatch.hash_file(audit_db),
+        diff=diff,
+        risk_class="A",
+    )
+    policy = Policy(
+        instruction_files=(
+            InstructionFilePolicy(
+                path="docs/../.sidecar/db.sqlite",
+                kind="audit_record",
+                precedence=100,
+                protected=True,
+            ),
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, policy, candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("audit_history_edit",)
+
+
+def test_policy_gate_rejects_sidecar_run_artifact_edits_as_audit_records(
+    tmp_path: Path,
+):
+    (tmp_path / "docs").mkdir()
+    audit_artifact = tmp_path / ".sidecar" / "runs" / "20260525T000000000000Z" / "audit.json"
+    audit_artifact.parent.mkdir(parents=True)
+    audit_artifact.write_text('{"schema_version":1,"audit_id":7}\n', encoding="utf-8")
+    diff = (
+        "--- a/docs/../.sidecar/runs/20260525T000000000000Z/audit.json\n"
+        "+++ b/docs/../.sidecar/runs/20260525T000000000000Z/audit.json\n"
+        "@@\n"
+        '-{"schema_version":1,"audit_id":7}\n'
+        '+{"schema_version":1,"audit_id":999}\n'
+    )
+    candidate = _candidate(
+        base_file="docs/../.sidecar/runs/20260525T000000000000Z/audit.json",
+        base_hash=CandidatePatch.hash_file(audit_artifact),
+        diff=diff,
+        risk_class="A",
+    )
+    policy = Policy(
+        instruction_files=(
+            InstructionFilePolicy(
+                path="docs/../.sidecar/runs/**",
+                kind="audit_record",
+                precedence=100,
+                protected=True,
+            ),
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, policy, candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("audit_history_edit",)
+
+
 def test_policy_gate_rejects_pending_candidate_eval_definition_edits(tmp_path: Path):
     eval_file = tmp_path / "tests" / "fixtures" / "evals" / "regression.json"
     eval_file.parent.mkdir(parents=True)

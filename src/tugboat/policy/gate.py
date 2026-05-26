@@ -18,6 +18,7 @@ DENIAL_REASON_ORDER = (
     "base_file_not_allowed",
     "pending_eval_definition_edit",
     "approval_policy_self_apply",
+    "audit_history_edit",
     "higher_priority_contradiction",
     "max_changed_lines_exceeded",
     "risk_class_changed_lines_exceeded",
@@ -186,6 +187,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("pending_eval_definition_edit")
     if _is_sidecar_approval_policy(base_path, repo_root):
         found_reasons.add("approval_policy_self_apply")
+    if _is_sidecar_audit_record(base_path, repo_root):
+        found_reasons.add("audit_history_edit")
     if _has_higher_priority_contradiction(repo, policy, candidate):
         found_reasons.add("higher_priority_contradiction")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
@@ -537,6 +540,14 @@ def _is_pending_eval_definition_edit(base_file: str, candidate: CandidatePatch) 
 
 def _is_sidecar_approval_policy(base_path: Path, repo_root: Path) -> bool:
     return base_path == (repo_root / ".sidecar" / "policy.yaml").resolve()
+
+
+def _is_sidecar_audit_record(base_path: Path, repo_root: Path) -> bool:
+    runs_root = (repo_root / ".sidecar" / "runs").resolve()
+    return base_path == (repo_root / ".sidecar" / "db.sqlite").resolve() or _is_relative_to(
+        base_path,
+        runs_root,
+    )
 
 
 def _has_higher_priority_contradiction(
