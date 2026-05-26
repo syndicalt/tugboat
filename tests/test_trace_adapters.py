@@ -104,6 +104,49 @@ def test_ingest_codex_session_maps_response_item_envelopes(tmp_path: Path):
     assert episode.final_answer == "Done"
 
 
+def test_ingest_codex_session_maps_session_meta_base_instructions(tmp_path: Path):
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "base_instructions": {
+                                "source": "CODEX.md",
+                                "text": "Use tests and cite verification.",
+                            }
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix bug"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_codex_session(session)
+
+    assert episode.instruction_snapshot == (
+        {
+            "type": "instruction_snapshot",
+            "source": "CODEX.md",
+            "text": "Use tests and cite verification.",
+        },
+    )
+
+
 def test_ingest_claude_transcript_maps_corrections_and_subagents(tmp_path: Path):
     transcript = tmp_path / "claude.json"
     transcript.write_text(

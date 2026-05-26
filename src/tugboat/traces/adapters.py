@@ -23,6 +23,10 @@ def ingest_codex_session_bundle(path: Path) -> TraceBundle:
             events.append({"type": "final_answer", "content": row.get("content", "")})
         elif row.get("type") in {"tool_call", "tool_result", "diff", "test_result"}:
             events.append(_normalize_codex_event(row))
+        elif row.get("type") == "session_meta" and isinstance(row.get("payload"), dict):
+            event = _normalize_codex_session_meta(row["payload"])
+            if event is not None:
+                events.append(event)
         elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
             event = _normalize_codex_response_item(row["payload"], tool_names_by_call_id)
             if event is not None:
@@ -155,6 +159,20 @@ def _normalize_codex_response_item(
             "output": str(payload.get("output", "")),
         }
     return None
+
+
+def _normalize_codex_session_meta(payload: dict[str, Any]) -> dict[str, Any] | None:
+    base_instructions = payload.get("base_instructions")
+    if not isinstance(base_instructions, dict):
+        return None
+    text = base_instructions.get("text")
+    if text is None:
+        return None
+    return {
+        "type": "instruction_snapshot",
+        "source": str(base_instructions.get("source", "base_instructions")),
+        "text": str(text),
+    }
 
 
 def _codex_content_text(content: object) -> str:

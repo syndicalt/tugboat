@@ -190,3 +190,63 @@ def test_audit_cli_ingests_codex_response_item_envelopes(tmp_path: Path):
     ]
     assert json.loads(rows[1][1])["tool"] == "exec_command"
     assert json.loads(rows[2][1])["output"] == "1 failed"
+
+
+def test_audit_cli_ingests_codex_session_meta_instruction_snapshot(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "codex.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "base_instructions": {
+                                "source": "CODEX.md",
+                                "text": "Use tests and cite verification.",
+                            }
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix bug"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "codex",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == ["instruction_snapshot", "user_request"]
+    assert json.loads(rows[0][1]) == {
+        "type": "instruction_snapshot",
+        "source": "CODEX.md",
+        "text": "Use tests and cite verification.",
+    }
