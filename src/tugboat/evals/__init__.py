@@ -75,6 +75,12 @@ _PATH_SUFFIXES = (
     ".sh",
 )
 _INSTRUCTION_FILENAMES = ("CODEX.md", "AGENTS.md", "CLAUDE.md", "SKILL.md")
+_REQUIRED_PHASE_4_FIXTURE_METRICS = (
+    "incident_replay_cases",
+    "held_out_cases",
+    "adversarial_cases",
+    "cross_agent_cases",
+)
 
 
 def evaluate_markdown_pair(
@@ -167,16 +173,19 @@ def run_offline_eval_suite(
     )
     eval_cases = (*structural_cases, *fixture_cases)
     validation_splits = _validation_splits(eval_cases)
-    behavioral_cases = max(
-        1,
+    behavioral_cases = (
         fixture_metrics["incident_replay_cases"]
         + fixture_metrics["held_out_cases"]
         + fixture_metrics["cross_agent_cases"]
         + fixture_metrics["common_obligation_cases"]
         + fixture_metrics["final_answer_evidence_cases"]
-        + fixture_metrics["tool_permission_boundary_cases"],
+        + fixture_metrics["tool_permission_boundary_cases"]
     )
-    adversarial_cases = max(1, fixture_metrics["adversarial_cases"])
+    missing_phase_4_fixture_categories = sum(
+        1
+        for metric_name in _REQUIRED_PHASE_4_FIXTURE_METRICS
+        if fixture_metrics[metric_name] == 0
+    )
     passed = (
         all(report.passed for report in structural_reports)
         and governance_regressions == 0
@@ -186,7 +195,7 @@ def run_offline_eval_suite(
         **fixture_metrics,
         "structural_cases": len(structural_reports),
         "behavioral_cases": behavioral_cases,
-        "adversarial_cases": adversarial_cases,
+        "phase_4_fixture_categories_missing": missing_phase_4_fixture_categories,
         "candidate_preview_files": candidate_preview_files,
         "governance_regressions": governance_regressions,
         "structural_findings": sum(len(report.findings) for report in structural_reports),
@@ -217,6 +226,8 @@ def run_offline_eval_suite(
         held_out_improved = held_out_score > trigger_score
         metrics["held_out_improved"] = int(held_out_improved)
         if not held_out_improved:
+            passed = False
+        if missing_phase_4_fixture_categories:
             passed = False
     return OfflineEvalReport(
         suite_id=suite_id,
@@ -430,12 +441,21 @@ def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord
             raise ValueError(f"eval fixture must be a JSON object: {path}")
         if int(payload.get("schema_version", 0)) != 1:
             raise ValueError(f"unsupported eval fixture schema_version: {path}")
-        category = str(payload["category"])
+        category_value = payload.get("category")
+        if not isinstance(category_value, str) or not category_value:
+            raise ValueError(f"eval fixture category must be a non-empty string: {path}")
+        category = category_value
         metric = category_metric.get(category)
         if metric is None:
             raise ValueError(f"unknown eval fixture category: {category}")
-        markdown = str(payload["markdown"])
-        expected_passed = bool(payload["expected_passed"])
+        markdown_value = payload.get("markdown")
+        if not isinstance(markdown_value, str):
+            raise ValueError(f"eval fixture markdown must be a string: {path}")
+        expected_value = payload.get("expected_passed")
+        if not isinstance(expected_value, bool):
+            raise ValueError(f"eval fixture expected_passed must be boolean: {path}")
+        markdown = markdown_value
+        expected_passed = expected_value
         actual_passed = evaluate_markdown_candidate(markdown, root=root).passed and not _has_governance_regression(markdown)
         cases.append(
             EvalCaseRecord(
