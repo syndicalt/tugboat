@@ -683,9 +683,24 @@ def test_rollback_writes_revert_plan_from_apply_decision(tmp_path: Path):
                 "schema_version": 1,
                 "mode": "commit",
                 "candidate_id": 7,
+                "run_id": "20260525T000000000000Z",
                 "branch_name": "tugboat/20260525t000000000000z/candidate-7/codex-md",
+                "commit_message": "Apply Tugboat candidate 7",
                 "target_files": ["CODEX.md"],
+                "pre_hashes": {"CODEX.md": _hash(repo / "CODEX.md")},
+                "post_hashes": {"CODEX.md": _hash(repo / "CODEX.md")},
                 "applied_commit": commit_sha,
+                "rollback_command": [
+                    ["git", "switch", "tugboat/20260525t000000000000z/candidate-7/codex-md"],
+                    ["git", "revert", "--no-edit", commit_sha],
+                ],
+                "provenance_bundle": ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json",
+                "pr_metadata": {},
+                "review_actor": "tugboat",
+                "auto_apply": False,
+                "explicit_human_review": False,
+                "review_required_reasons": [],
+                "decision_rationale": "manual test fixture",
                 "decision_id": "20260525T000000000000Z",
             },
             indent=2,
@@ -715,6 +730,22 @@ def test_rollback_writes_revert_plan_from_apply_decision(tmp_path: Path):
     assert row is not None
     payload = json.loads(row[0])
     assert payload["rollback_plan"] == ".sidecar/runs/20260525T000000000000Z/rollback-plan.json"
+
+
+def test_rollback_rejects_malformed_apply_plan_before_writing_plan(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    apply_plan.pop("schema_version")
+    (run_dir / "apply-plan.json").write_text(
+        json.dumps(apply_plan, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest"]) == 1
+
+    assert not (run_dir / "rollback-plan.json").exists()
 
 
 def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Path):

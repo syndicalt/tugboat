@@ -2406,6 +2406,7 @@ def _score_from_eval_report(eval_report: dict[str, object], field: str) -> float
 
 def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) -> Path:
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    validate_json_artifact("apply-plan.json", apply_plan)
     commit_sha = str(apply_plan["applied_commit"])
     if not commit_sha:
         raise ValueError("apply plan has no applied commit")
