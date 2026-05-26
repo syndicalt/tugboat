@@ -15,6 +15,7 @@ from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
+from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import runs_dir, sidecar_dir
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
@@ -112,12 +113,33 @@ def tugboat_status(repo: str | Path) -> dict[str, Any]:
             latest = store.connection.execute(
                 "SELECT id, stage, status FROM runs ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
+            latest_llmff = None
+            latest_failure_kind = None
+            if latest is not None:
+                latest_llmff = store.connection.execute(
+                    """
+                    SELECT id, manifest_name, status, exit_code
+                    FROM llmff_jobs
+                    WHERE run_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (latest[0],),
+                ).fetchone()
+                if latest_llmff is not None:
+                    latest_failure_kind = _latest_llmff_failure_kind(store, int(latest_llmff[0]))
             pending_candidates = int(
                 store.connection.execute(
                     "SELECT COUNT(*) FROM candidates WHERE state = 'needs_review'"
                 ).fetchone()[0]
             )
             indexed_documents = store.count("documents")
+        retention = apply_retention_policy(repo_path, policy, dry_run=True)
+        manifest_policy = (
+            f"pinned {len(policy.allowed_manifest_hashes)}"
+            if policy.allowed_manifest_hashes
+            else "unrestricted"
+        )
         return {
             "mode": policy.mode,
             "auto_apply": "enabled" if policy.auto_apply_enabled else "disabled",
@@ -127,10 +149,70 @@ def tugboat_status(repo: str | Path) -> dict[str, Any]:
                 if latest
                 else None
             ),
+            "latest_llmff_job": (
+                {"manifest_name": str(latest_llmff[1]), "status": str(latest_llmff[2])}
+                if latest_llmff
+                else None
+            ),
+            "latest_llmff_exit_code": (
+                int(latest_llmff[3])
+                if latest_llmff is not None and latest_llmff[3] is not None
+                else None
+            ),
+            "latest_llmff_failure_kind": latest_failure_kind,
             "pending_candidates": pending_candidates,
+            "retention_candidates": len(retention.candidates),
+            "manifest_policy": manifest_policy,
         }
 
     return _audit_call(repo_path, "tugboat_status", {}, read)
+
+
+def _latest_llmff_failure_kind(store: Store, job_id: int) -> str | None:
+    row = store.connection.execute(
+        """
+        SELECT payload_json
+        FROM llmff_events
+        WHERE job_id = ? AND event_type = 'run_failed'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (job_id,),
+    ).fetchone()
+    if row is not None:
+        try:
+            payload = json.loads(str(row[0]))
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            details = payload.get("run_failed")
+            if isinstance(details, dict) and details.get("failure_kind"):
+                return str(details["failure_kind"])
+            failure_kind = payload.get("failure_kind")
+            if failure_kind:
+                return str(failure_kind)
+
+    row = store.connection.execute(
+        """
+        SELECT ae.payload_json
+        FROM llmff_jobs job
+        JOIN audit_events ae ON ae.sequence = job.audit_event_sequence
+        WHERE job.id = ? AND ae.event_type = 'llmff_job.recorded'
+        """,
+        (job_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(str(row[0]))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    details = payload.get("run_failed")
+    if isinstance(details, dict) and details.get("failure_kind"):
+        return str(details["failure_kind"])
+    return None
 
 
 def tugboat_instruction_graph(repo: str | Path) -> dict[str, Any]:

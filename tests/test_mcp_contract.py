@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -15,6 +16,7 @@ import tugboat.mcp.contracts as mcp_contracts
 from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import DaemonRunConfig, run_daemon_once
 from tugboat.db import Store
+from tugboat.llmff.contracts import RunResult
 from tugboat.mcp import (
     handle_jsonrpc_request,
     list_mcp_tools,
@@ -163,9 +165,74 @@ def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
         "auto_apply": "disabled",
         "indexed_documents": 0,
         "latest_run": {"run_id": "run-1", "stage": "audit", "status": "completed"},
+        "latest_llmff_job": None,
+        "latest_llmff_exit_code": None,
+        "latest_llmff_failure_kind": None,
         "pending_candidates": 0,
+        "retention_candidates": 0,
+        "manifest_policy": "unrestricted",
     }
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_status"
+
+
+def test_status_reports_latest_llmff_job_failure_and_retention_candidates(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    lifecycle_dir = run_dir / "patch-propose"
+    lifecycle_dir.mkdir(parents=True)
+    manifest = tmp_path / "patch-propose.yaml"
+    manifest.write_text("name: patch-propose\n", encoding="utf-8")
+    events = lifecycle_dir / "llmff-events.jsonl"
+    events.write_text(
+        '{"event":"run_failed","run_failed":{"failure_kind":"provider_error"}}\n',
+        encoding="utf-8",
+    )
+    trace = lifecycle_dir / "llmff-trace.jsonl"
+    trace.write_text('{"event":"step"}\n', encoding="utf-8")
+    checkpoint = lifecycle_dir / "checkpoint.json"
+    checkpoint.write_text('{"manifest_hash":"abc"}\n', encoding="utf-8")
+    old = 0
+    os.utime(events, (old, old))
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="propose",
+            manifest_hash="abc",
+            status="failed",
+            run_dir=run_dir,
+        )
+        store.record_llmff_run(
+            run_id="run-1",
+            manifest_hash="abc",
+            result=RunResult(
+                manifest_path=manifest,
+                exit_code=1,
+                trace_path=trace,
+                events_path=events,
+                checkpoint_path=checkpoint,
+                output_paths={},
+                failure_kind="provider_error",
+            ),
+        )
+
+    result = tugboat_status(repo)
+
+    assert result["latest_run"] == {
+        "run_id": "run-1",
+        "stage": "propose",
+        "status": "failed",
+    }
+    assert result["latest_llmff_job"] == {
+        "manifest_name": "patch-propose.yaml",
+        "status": "failed",
+    }
+    assert result["latest_llmff_exit_code"] == 1
+    assert result["latest_llmff_failure_kind"] == "provider_error"
+    assert result["retention_candidates"] == 1
 
 
 def test_mcp_call_rows_are_reachable_from_append_only_audit_event(tmp_path: Path):
