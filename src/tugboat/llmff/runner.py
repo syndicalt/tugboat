@@ -246,11 +246,31 @@ def _manifest_lifecycle_dir(run_dir: Path, manifest_path: Path) -> Path:
 
 
 def _network_required(inspect_payload: dict[str, Any]) -> bool:
-    return bool(
-        inspect_payload.get("network_required")
-        or inspect_payload.get("requires_network")
-        or inspect_payload.get("network", {}).get("required", False)
-    )
+    declarations: list[bool] = []
+    for key in ("network_required", "requires_network"):
+        if key not in inspect_payload:
+            continue
+        value = inspect_payload[key]
+        if not isinstance(value, bool):
+            raise InspectPolicyError("network_required must be a boolean")
+        declarations.append(value)
+
+    if "network" in inspect_payload:
+        network = inspect_payload["network"]
+        if not isinstance(network, dict):
+            raise InspectPolicyError("network_required must be a boolean")
+        if "required" not in network:
+            raise InspectPolicyError("network_required must be declared")
+        value = network["required"]
+        if not isinstance(value, bool):
+            raise InspectPolicyError("network_required must be a boolean")
+        declarations.append(value)
+
+    if not declarations:
+        raise InspectPolicyError("network_required must be declared")
+    if any(value != declarations[0] for value in declarations):
+        raise InspectPolicyError("network_required declarations conflict")
+    return declarations[0]
 
 
 def _declared_providers(inspect_payload: dict[str, Any]) -> tuple[str, ...]:

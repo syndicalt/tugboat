@@ -58,6 +58,45 @@ def test_inspect_manifest_fails_closed_when_network_is_disallowed(tmp_path: Path
     ).exists()
 
 
+def test_inspect_manifest_rejects_missing_network_declaration(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    runner = FixtureLlmffRunner(inspect_payload={"providers": []})
+
+    with pytest.raises(InspectPolicyError, match="network_required must be declared"):
+        inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            runner=runner,
+        )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
+def test_inspect_manifest_rejects_malformed_network_declaration(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    for inspect_payload in (
+        {"network_required": "false", "providers": []},
+        {"requires_network": 0, "providers": []},
+        {"network": {"required": "false"}, "providers": []},
+        {"network": "false", "providers": []},
+    ):
+        with pytest.raises(InspectPolicyError, match="network_required must be a boolean"):
+            inspect_manifest(
+                manifest,
+                run_dir=run_dir,
+                policy=Policy(),
+                runner=FixtureLlmffRunner(inspect_payload=inspect_payload),
+            )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
 def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("name: audit\n", encoding="utf-8")
