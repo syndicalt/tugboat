@@ -194,6 +194,21 @@ def test_sidecar_observability_counts_llmff_job_failure_without_events(
     assert summary["failure_kind_counts"] == {"timeout": 1}
 
 
+def test_sidecar_observability_reports_corpus_growth_from_index_audit_events(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.append_audit_event("documents.indexed", {"repo": str(repo), "documents": 1})
+        store.append_audit_event("documents.indexed", {"repo": str(repo), "documents": 3})
+        store.append_audit_event("documents.indexed", {"repo": str(repo / "other"), "documents": 9})
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["corpus_growth"] == {"earliest_count": 1, "latest_count": 3, "delta": 2}
+
+
 def test_sidecar_observability_ignores_non_numeric_governance_regression_metric(
     tmp_path: Path,
 ):

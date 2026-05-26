@@ -55,14 +55,7 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
             for row in connection.execute("SELECT finding FROM harness_findings ORDER BY id")
         ]
         trace_events = _sidecar_trace_events(connection)
-        corpus_snapshots = [
-            {
-                "captured_at": _latest_document_mtime(connection),
-                "document_count": int(
-                    connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-                ),
-            }
-        ]
+        corpus_snapshots = _sidecar_corpus_snapshots(connection, repo)
     jobs = [*decisions, *_audit_event_jobs(audit_events)]
     return summarize_observability(
         runs=[*runs, *_audit_event_runs(audit_events)],
@@ -209,6 +202,42 @@ def _sidecar_trace_events(connection: sqlite3.Connection) -> list[dict[str, Any]
         if isinstance(payload, dict):
             events.append({"type": row["event_type"], **payload})
     return events
+
+
+def _sidecar_corpus_snapshots(connection: sqlite3.Connection, repo: Path) -> list[dict[str, Any]]:
+    repo_path = str(repo)
+    snapshots: list[dict[str, Any]] = []
+    for row in connection.execute(
+        """
+        SELECT sequence, payload_json
+        FROM audit_events
+        WHERE event_type = 'documents.indexed'
+        ORDER BY sequence
+        """
+    ):
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or str(payload.get("repo")) != repo_path:
+            continue
+        document_count = _int_metric(payload.get("documents"))
+        if document_count is None:
+            continue
+        snapshots.append(
+            {
+                "captured_at": str(row["sequence"]),
+                "document_count": document_count,
+            }
+        )
+    if snapshots:
+        return snapshots
+    return [
+        {
+            "captured_at": _latest_document_mtime(connection),
+            "document_count": int(connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]),
+        }
+    ]
 
 
 def _latest_document_mtime(connection: sqlite3.Connection) -> str:

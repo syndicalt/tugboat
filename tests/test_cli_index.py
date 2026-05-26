@@ -1,5 +1,6 @@
 from pathlib import Path
 from contextlib import closing
+import json
 import sqlite3
 
 from tugboat.cli import main
@@ -17,3 +18,8 @@ def test_index_command_writes_sidecar_db(tmp_path: Path, capsys):
         assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] == 1
+        row = connection.execute(
+            "SELECT event_type, payload_json FROM audit_events"
+        ).fetchone()
+    assert row[0] == "documents.indexed"
+    assert json.loads(row[1]) == {"documents": 1, "repo": str(tmp_path)}
