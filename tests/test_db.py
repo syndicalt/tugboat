@@ -52,6 +52,38 @@ def test_store_initializes_roadmap_extension_tables(tmp_path: Path):
         }.issubset(tables)
 
 
+def test_store_migrates_legacy_trace_events_with_source_trust_column(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    with Store.open(db_path) as store:
+        store.connection.execute("ALTER TABLE trace_events RENAME TO trace_events_legacy")
+        store.connection.execute(
+            """
+            CREATE TABLE trace_events (
+              id INTEGER PRIMARY KEY,
+              episode_id INTEGER,
+              evidence_id TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              line_number INTEGER NOT NULL,
+              payload_json TEXT NOT NULL,
+              audit_event_sequence INTEGER
+            )
+            """
+        )
+        store.connection.execute("DROP TABLE trace_events_legacy")
+        store.connection.commit()
+
+    with Store.open(db_path) as store:
+        columns = {
+            row[1]: row
+            for row in store.connection.execute("PRAGMA table_info(trace_events)").fetchall()
+        }
+
+    assert "source_trust" in columns
+    assert columns["source_trust"][2] == "TEXT"
+    assert columns["source_trust"][3] == 1
+    assert columns["source_trust"][4] == "'untrusted'"
+
+
 def test_record_llmff_run_persists_exit_code(tmp_path: Path):
     manifest = tmp_path / "patch-eval.yaml"
     manifest.write_text("name: patch-eval\n", encoding="utf-8")

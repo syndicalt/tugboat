@@ -221,7 +221,7 @@ def test_store_records_canonical_episode_and_trace_events_with_audit_reachabilit
         episode_count = store.count("episodes")
         trace_event_rows = store.connection.execute(
             """
-            SELECT t.evidence_id, t.event_type, a.event_type, a.payload_json
+            SELECT t.evidence_id, t.event_type, t.source_trust, a.event_type, a.payload_json
             FROM trace_events t
             JOIN audit_events a ON a.sequence = t.audit_event_sequence
             ORDER BY t.line_number
@@ -236,5 +236,8 @@ def test_store_records_canonical_episode_and_trace_events_with_audit_reachabilit
         "tool_call",
         "tool_result",
     ]
-    assert {row[2] for row in trace_event_rows} == {"trace_event.recorded"}
-    assert json.loads(trace_event_rows[0][3])["episode_id"] == episode_id
+    assert [row[2] for row in trace_event_rows] == ["user", "tool", "tool"]
+    assert {row[3] for row in trace_event_rows} == {"trace_event.recorded"}
+    audit_payloads = [json.loads(row[4]) for row in trace_event_rows]
+    assert audit_payloads[0]["episode_id"] == episode_id
+    assert [payload["source_trust"] for payload in audit_payloads] == ["user", "tool", "tool"]

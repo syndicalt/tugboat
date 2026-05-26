@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS trace_events (
   episode_id INTEGER,
   evidence_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
+  source_trust TEXT NOT NULL DEFAULT 'untrusted',
   line_number INTEGER NOT NULL,
   payload_json TEXT NOT NULL,
   audit_event_sequence INTEGER
@@ -290,6 +291,12 @@ class Store:
         _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "llmff_jobs", "exit_code", "INTEGER")
+        _ensure_column(
+            connection,
+            "trace_events",
+            "source_trust",
+            "TEXT NOT NULL DEFAULT 'untrusted'",
+        )
         connection.commit()
         return cls(connection)
 
@@ -538,20 +545,23 @@ class Store:
                     "episode_id": episode_id,
                     "evidence_id": event.evidence_id,
                     "event_type": event.event_type,
+                    "source_trust": event.source_trust,
                     "line_number": event.line_number,
                 },
             )
             self.connection.execute(
                 """
                 INSERT INTO trace_events(
-                  episode_id, evidence_id, event_type, line_number, payload_json, audit_event_sequence
+                  episode_id, evidence_id, event_type, source_trust, line_number, payload_json,
+                  audit_event_sequence
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     episode_id,
                     event.evidence_id,
                     event.event_type,
+                    event.source_trust,
                     event.line_number,
                     json.dumps(event.payload, sort_keys=True),
                     audit_event.sequence,
