@@ -2149,7 +2149,13 @@ def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     trace = tmp_path / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
-    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        sources=[
+            {"source_id": "trace:episode-7", "trusted": True},
+            {"source_id": "drift:cluster-1", "trusted": True},
+        ],
+    )
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
     (policy_dir / "policy.yaml").write_text(
@@ -2232,7 +2238,7 @@ llmff:
     assert json.loads(rejected_memory[2]) == {
         "rejection_reason": "reject",
         "semantic_fingerprint": rejected_memory[1],
-        "source_refs": ["audit:1"],
+        "source_refs": ["trace:episode-7", "drift:cluster-1"],
     }
     assert rejected_memory[3] is not None
 

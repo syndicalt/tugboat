@@ -318,6 +318,9 @@ def _record_rejected_candidate_memory(
     if not (run_dir / "candidate.diff").exists():
         return
     candidate = _candidate_from_artifacts(run_dir)
+    source_refs = list(dict.fromkeys(source.source_id for source in candidate.sources if source.source_id))
+    if not source_refs:
+        source_refs = [f"audit:{candidate.audit_id}"]
     for item in candidate.bounded_edit_metadata:
         operator = str(item.get("operator", "unknown"))
         target_file = str(item.get("file", candidate.base_file))
@@ -330,7 +333,7 @@ def _record_rejected_candidate_memory(
             payload={
                 "semantic_fingerprint": fingerprint,
                 "rejection_reason": reason,
-                "source_refs": [f"audit:{candidate.audit_id}"],
+                "source_refs": source_refs,
             },
         )
 
