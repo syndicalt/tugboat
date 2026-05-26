@@ -19,6 +19,7 @@ from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import runs_dir, sidecar_dir
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
+from tugboat.traces.ingest import ingest_jsonl_trace
 
 
 T = TypeVar("T")
@@ -536,7 +537,15 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
         except SecretScanError as error:
             path.unlink(missing_ok=True)
             raise ValueError("secret detected in episode payload") from error
+        try:
+            bundle = ingest_jsonl_trace(path)
+        except (json.JSONDecodeError, ValueError) as error:
+            path.unlink(missing_ok=True)
+            raise ValueError("invalid episode JSONL payload") from error
+        with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
+            episode_id = store.record_trace_episode(repo=repo_path, bundle=bundle)
         return {
+            "episode_id": episode_id,
             "trace_id": trace_id,
             "artifact_ref": _relative_ref(repo_path, path),
         }

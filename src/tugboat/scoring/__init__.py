@@ -200,7 +200,9 @@ def _score_user_correction_recurrence(events: list[dict[str, Any]]) -> tuple[Sco
     for event in events:
         if _event_type(event) != "user_correction":
             continue
-        tokens = _correction_tokens(str(_field(event, "text") or _field(event, "message") or ""))
+        tokens = _correction_tokens(
+            str(_field(event, "text") or _field(event, "message") or _field(event, "content") or "")
+        )
         if not tokens:
             continue
         evidence_id = _evidence_id(event)

@@ -955,6 +955,43 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
     ]
 
 
+def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path: Path):
+    repo = tmp_path
+
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"tool_result","tool":"pytest","exit_code":1,"output":"failed"}\n'
+        '{"type":"final_answer","content":"I fixed it."}\n',
+    )
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        episode_row = store.connection.execute(
+            """
+            SELECT id, trace_path, outcome
+            FROM episodes
+            """
+        ).fetchone()
+        trace_rows = store.connection.execute(
+            """
+            SELECT t.event_type, t.source_trust, json_extract(t.payload_json, '$.content'),
+                   a.event_type
+            FROM trace_events t
+            JOIN audit_events a ON a.sequence = t.audit_event_sequence
+            ORDER BY t.line_number
+            """
+        ).fetchall()
+
+    assert episode["episode_id"] == episode_row[0]
+    assert episode_row[1] == str(repo / episode["artifact_ref"])
+    assert episode_row[2] == "captured"
+    assert trace_rows == [
+        ("user_request", "user", "Fix bug", "trace_event.recorded"),
+        ("tool_result", "tool", None, "trace_event.recorded"),
+        ("final_answer", "agent", "I fixed it.", "trace_event.recorded"),
+    ]
+
+
 def test_record_episode_denied_when_read_only_kill_switch_enabled(tmp_path: Path):
     repo = tmp_path
     sidecar = repo / ".sidecar"

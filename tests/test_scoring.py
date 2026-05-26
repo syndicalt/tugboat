@@ -164,3 +164,25 @@ def test_scoring_uses_canonical_outcome_label_and_verifier_evidence(tmp_path):
         ("verifier", "verifier-failed", {"score_percent": 25}),
     ]
     assert all(outcome.evidence[0].startswith("ev_") for outcome in outcomes)
+
+
+def test_canonical_user_correction_content_events_count_recurrence(tmp_path):
+    trace = tmp_path / "episode.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                '{"type":"user_correction","content":"Run tests before final."}',
+                '{"type":"user_correction","content":"Please run the tests before final response."}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    episode = ingest_jsonl_trace_as_episode(trace)
+
+    outcomes = score_episode(episode)
+
+    assert [(outcome.plugin, outcome.label, outcome.metrics) for outcome in outcomes] == [
+        ("user-correction", "recurring-user-correction", {"recurrence_count": 2})
+    ]
+    assert all(outcome.evidence[0].startswith("ev_") for outcome in outcomes)
