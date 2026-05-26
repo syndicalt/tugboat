@@ -2586,7 +2586,16 @@ llmff:
     summary = json.loads((run_dir / "acceptance-summary.raw.json").read_text(encoding="utf-8"))
     inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
     assert summary["decision_recommendation"] == "needs_review"
-    assert set(inputs) == {"candidate_patch", "eval_reports", "policy_gate", "risk_class"}
+    assert set(inputs) == {
+        "audit_report",
+        "candidate_patch",
+        "eval_reports",
+        "policy_gate",
+        "proposal_rationale",
+        "risk_class",
+    }
+    assert Path(inputs["audit_report"]) == run_dir / "audit.raw.json"
+    assert Path(inputs["proposal_rationale"]) == run_dir / "proposal-rationale.raw.json"
     assert (run_dir / "acceptance-summary" / "llmff-inspect.json").exists()
     assert (run_dir / "acceptance-summary" / "llmff-trace.jsonl").exists()
     assert (run_dir / "acceptance-summary" / "llmff-events.jsonl").exists()

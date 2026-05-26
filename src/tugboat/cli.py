@@ -929,9 +929,11 @@ def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, obje
         retry_backoff_ms=policy.llmff_retry_backoff_ms,
         checkpoint_path=run_dir / "acceptance-summary" / "checkpoint.json",
         input_paths={
+            "audit_report": run_dir / "audit.raw.json",
             "candidate_patch": run_dir / "candidate.raw.json",
             "policy_gate": run_dir / "policy-gate.json",
             "eval_reports": run_dir / "eval-report.json",
+            "proposal_rationale": run_dir / "proposal-rationale.raw.json",
             "risk_class": run_dir / "candidate.json",
         },
         output_paths={"acceptance_summary": run_dir / "acceptance-summary.raw.json"},
