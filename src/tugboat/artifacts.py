@@ -746,6 +746,51 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "doc_gardening_tasks": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "sidecar-migration-report.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "artifact_kind",
+            "current_version",
+            "target_version",
+            "applied_migrations",
+            "version_marker",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "artifact_kind": {"type": "string", "const": "sidecar_migration_report"},
+            "current_version": {"type": "integer"},
+            "target_version": {"type": "integer"},
+            "applied_migrations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "migration_id",
+                        "from_version",
+                        "to_version",
+                        "description",
+                        "actions",
+                    ],
+                    "properties": {
+                        "migration_id": {"type": "string"},
+                        "from_version": {"type": "integer"},
+                        "to_version": {"type": "integer"},
+                        "description": {"type": "string"},
+                        "actions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            "version_marker": {"type": "string"},
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

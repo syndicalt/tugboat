@@ -560,6 +560,53 @@ def test_validate_harness_report_rejects_invalid_knowledge_map_entries():
         )
 
 
+def test_validate_sidecar_migration_report_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "sidecar-migration-report.json",
+        {
+            "schema_version": 1,
+            "artifact_kind": "sidecar_migration_report",
+            "current_version": 1,
+            "target_version": 3,
+            "applied_migrations": [
+                {
+                    "migration_id": "sidecar-v1-to-v2",
+                    "from_version": 1,
+                    "to_version": 2,
+                    "description": "introduce explicit sidecar schema marker",
+                    "actions": [
+                        "read legacy policy and artifact layout",
+                        "write schema marker after migration execution",
+                    ],
+                }
+            ],
+            "version_marker": ".sidecar/version.json",
+        },
+    )
+
+
+def test_validate_sidecar_migration_report_rejects_missing_step_actions():
+    with pytest.raises(ArtifactValidationError, match="applied_migrations\\[0\\].actions"):
+        validate_json_artifact(
+            "sidecar-migration-report.json",
+            {
+                "schema_version": 1,
+                "artifact_kind": "sidecar_migration_report",
+                "current_version": 1,
+                "target_version": 3,
+                "applied_migrations": [
+                    {
+                        "migration_id": "sidecar-v1-to-v2",
+                        "from_version": 1,
+                        "to_version": 2,
+                        "description": "introduce explicit sidecar schema marker",
+                    }
+                ],
+                "version_marker": ".sidecar/version.json",
+            },
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 

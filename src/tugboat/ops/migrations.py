@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+
 
 @dataclass(frozen=True)
 class SidecarMigration:
@@ -125,6 +127,7 @@ def execute_migration_plan(
     plan = dry_run_migration_plan(repo, migrations)
     if plan.current_version == 0:
         return plan
+    validate_migration_report(plan)
 
     sidecar = repo / ".sidecar"
     version_json = sidecar / "version.json"
@@ -143,39 +146,47 @@ def execute_migration_plan(
         policy_payload["version"] = plan.target_version
         policy_path.write_text(yaml.safe_dump(policy_payload, sort_keys=True), encoding="utf-8")
 
-    migrations_dir = sidecar / "migrations"
-    migrations_dir.mkdir(parents=True, exist_ok=True)
-    report_path = migrations_dir / "migration-report.json"
-    report_path.write_text(
-        json.dumps(
-            {
-                "artifact_kind": "sidecar_migration_report",
-                "current_version": plan.current_version,
-                "target_version": plan.target_version,
-                "applied_migrations": [
-                    {
-                        "migration_id": step.migration_id,
-                        "from_version": step.from_version,
-                        "to_version": step.to_version,
-                        "description": step.description,
-                        "actions": list(step.actions),
-                    }
-                    for step in plan.steps
-                ],
-                "version_marker": ".sidecar/version.json",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    report_path = write_migration_report(repo, plan)
     return MigrationPlan(
         current_version=plan.current_version,
         target_version=plan.target_version,
         steps=plan.steps,
         report_path=report_path,
     )
+
+
+def write_migration_report(repo: Path, plan: MigrationPlan) -> Path:
+    payload = migration_report_payload(plan)
+    validate_json_artifact("sidecar-migration-report.json", payload)
+    migrations_dir = repo / ".sidecar" / "migrations"
+    migrations_dir.mkdir(parents=True, exist_ok=True)
+    report_path = migrations_dir / "migration-report.json"
+    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
+
+
+def validate_migration_report(plan: MigrationPlan) -> None:
+    validate_json_artifact("sidecar-migration-report.json", migration_report_payload(plan))
+
+
+def migration_report_payload(plan: MigrationPlan) -> dict[str, object]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_kind": "sidecar_migration_report",
+        "current_version": plan.current_version,
+        "target_version": plan.target_version,
+        "applied_migrations": [
+            {
+                "migration_id": step.migration_id,
+                "from_version": step.from_version,
+                "to_version": step.to_version,
+                "description": step.description,
+                "actions": list(step.actions),
+            }
+            for step in plan.steps
+        ],
+        "version_marker": ".sidecar/version.json",
+    }
 
 
 def _validate_contiguous(

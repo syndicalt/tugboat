@@ -6,11 +6,17 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tugboat.artifacts import ArtifactValidationError
 from tugboat.ops.migrations import (
     DEFAULT_MIGRATIONS,
+    SidecarMigration,
+    MigrationPlan,
+    MigrationStep,
+    execute_migration_plan,
     current_sidecar_version,
     dry_run_migration_plan,
     ordered_migrations_after,
+    write_migration_report,
 )
 
 
@@ -137,6 +143,7 @@ def test_execute_migration_plan_persists_audit_report(tmp_path: Path) -> None:
     assert result.report_path == sidecar / "migrations" / "migration-report.json"
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report == {
+        "schema_version": 1,
         "artifact_kind": "sidecar_migration_report",
         "current_version": 1,
         "target_version": DEFAULT_MIGRATIONS[-1].to_version,
@@ -164,3 +171,54 @@ def test_execute_migration_plan_persists_audit_report(tmp_path: Path) -> None:
         ],
         "version_marker": ".sidecar/version.json",
     }
+
+
+def test_write_migration_report_validates_payload_before_writing(
+    tmp_path: Path,
+) -> None:
+    plan = MigrationPlan(
+        current_version=1,
+        target_version=3,
+        steps=(
+            MigrationStep(
+                migration_id="sidecar-v1-to-v2",
+                from_version=1,
+                to_version=2,
+                description="introduce explicit sidecar schema marker",
+                actions=(),
+            ),
+        ),
+    )
+
+    with pytest.raises(ArtifactValidationError, match="applied_migrations\\[0\\].actions"):
+        write_migration_report(tmp_path, plan)
+
+    assert not (tmp_path / ".sidecar" / "migrations" / "migration-report.json").exists()
+
+
+def test_execute_migration_plan_validates_report_before_mutating_sidecar(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    policy = sidecar / "policy.yaml"
+    policy.write_text("version: 1\nmode: proposal_only\n", encoding="utf-8")
+    invalid_migrations = (
+        SidecarMigration(
+            migration_id="sidecar-v1-to-v2",
+            from_version=1,
+            to_version=2,
+            description="invalid migration with no report actions",
+            actions=(),
+        ),
+    )
+
+    with pytest.raises(ArtifactValidationError, match="applied_migrations\\[0\\].actions"):
+        execute_migration_plan(tmp_path, invalid_migrations)
+
+    assert not (sidecar / "version.json").exists()
+    assert yaml.safe_load(policy.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "mode": "proposal_only",
+    }
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
