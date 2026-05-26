@@ -666,6 +666,30 @@ def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
     )
 
 
+def test_validate_ci_report_artifact_requires_check_results():
+    validate_json_artifact(
+        "ci-report.json",
+        {
+            "schema_version": 1,
+            "mode": "ci_check",
+            "auto_apply": False,
+            "checks": {
+                "index": {"passed": True, "indexed_documents": 1},
+                "harness": {"passed": True, "findings": []},
+            },
+        },
+    )
+    with pytest.raises(ArtifactValidationError, match="checks"):
+        validate_json_artifact(
+            "ci-report.json",
+            {
+                "schema_version": 1,
+                "mode": "ci_check",
+                "auto_apply": False,
+            },
+        )
+
+
 def test_validate_acceptance_summary_raw_artifact_requires_review_bundle():
     validate_json_artifact(
         "acceptance-summary.raw.json",

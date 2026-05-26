@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.pipeline import run_audit_pipeline
@@ -58,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     retention = subcommands.add_parser("retention")
     retention.add_argument("--repo", required=True)
     retention.add_argument("--apply", action="store_true")
+
+    ci = subcommands.add_parser("ci")
+    ci.add_argument("--repo", required=True)
+    ci.add_argument("--max-instruction-lines", type=int, default=100)
 
     index = subcommands.add_parser("index")
     index.add_argument("--repo", required=True)
@@ -238,6 +243,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         for deleted in result.deleted:
             print(f"deleted: {deleted}")
         return 0
+
+    if args.command == "ci":
+        repo = Path(args.repo)
+        report_path, payload = _write_ci_report(repo, max_instruction_lines=args.max_instruction_lines)
+        harness = payload["checks"]["harness"]
+        if harness["passed"]:
+            print("ci: ok")
+            print(f"report: {report_path}")
+            return 0
+        print("ci: failed")
+        for finding in harness["findings"]:
+            print(finding)
+        print(f"report: {report_path}")
+        return 1
 
     if args.command == "index":
         repo = Path(args.repo)
@@ -531,6 +550,40 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def console_main() -> None:
     raise SystemExit(main())
+
+
+def _write_ci_report(repo: Path, *, max_instruction_lines: int) -> tuple[Path, dict[str, Any]]:
+    policy = load_policy(repo)
+    index = index_repo(repo, policy)
+    harness = check_harness_legibility(repo, max_instruction_lines)
+    payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": "ci_check",
+        "auto_apply": False,
+        "checks": {
+            "index": {
+                "passed": True,
+                "indexed_documents": index.indexed_count,
+            },
+            "harness": {
+                "passed": harness.passed,
+                "findings": list(harness.findings),
+            },
+        },
+    }
+    validate_json_artifact("ci-report.json", payload)
+    report_path = sidecar_dir(repo) / "ci" / "ci-report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "ci.check_completed",
+            {
+                "artifact": report_path.relative_to(repo).as_posix(),
+                "passed": bool(harness.passed),
+            },
+        )
+    return report_path, payload
 
 
 def _persist_harness_report(repo: Path, report) -> Path:

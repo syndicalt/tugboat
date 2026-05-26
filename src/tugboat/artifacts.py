@@ -674,6 +674,42 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "ci-report.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "mode", "auto_apply", "checks"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "mode": {"type": "string", "enum": ["ci_check"]},
+            "auto_apply": {"type": "boolean"},
+            "checks": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["index", "harness"],
+                "properties": {
+                    "index": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["passed", "indexed_documents"],
+                        "properties": {
+                            "passed": {"type": "boolean"},
+                            "indexed_documents": {"type": "integer"},
+                        },
+                    },
+                    "harness": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["passed", "findings"],
+                        "properties": {
+                            "passed": {"type": "boolean"},
+                            "findings": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+            },
+        },
+    },
     "acceptance-summary.raw.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
