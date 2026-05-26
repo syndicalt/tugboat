@@ -209,9 +209,12 @@ def _load_discovered_traces(repo: Path) -> set[str]:
     path = repo / ".sidecar" / "discovered-traces.json"
     if not path.is_file():
         return set()
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
     if not isinstance(payload, list):
-        raise ValueError("discovered trace registry must be a JSON list")
+        return set()
     return {str(item) for item in payload}
 
 

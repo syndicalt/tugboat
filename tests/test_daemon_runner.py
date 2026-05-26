@@ -145,6 +145,38 @@ def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueu
     }
 
 
+def test_run_daemon_cycle_recovers_corrupt_discovered_trace_registry(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "configured-traces"
+    trace_dir.mkdir()
+    trace = trace_dir / "episode.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    registry = tmp_path / ".sidecar" / "discovered-traces.json"
+    registry.parent.mkdir()
+    registry.write_text('{"not":"a-list"}\n', encoding="utf-8")
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=0,
+            concurrency_limit=0,
+            lease_duration=timedelta(seconds=30),
+            trace_dirs=(trace_dir,),
+            now=_at(0),
+        ),
+    )
+
+    assert result["trace_discovery"] == {"discovered": 1, "skipped": 0}
+    assert json.loads(registry.read_text(encoding="utf-8")) == [str(trace.resolve())]
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.get_job(1)
+        assert job is not None
+        assert job.kind == "trace_audit"
+        assert job.payload == {"trace_path": str(trace)}
+
+
 def test_run_daemon_cycle_updates_main_store_job_state_for_discovered_trace(
     tmp_path: Path,
 ):
