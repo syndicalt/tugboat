@@ -18,6 +18,9 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.roadmap_learning_rate_operator_risk_limits == {}
     assert policy.risk_class_changed_line_budgets == {}
     assert policy.llmff_allow_network is False
+    assert policy.llmff_timeout_ms == 60_000
+    assert policy.llmff_retry_attempts == 0
+    assert policy.llmff_retry_backoff_ms == 0
     assert policy.raw_traces_retention_days == 14
     assert policy.checkpoints_retention_days == 7
     assert [entry.path for entry in policy.instruction_files] == [
@@ -140,6 +143,67 @@ llmff:
     policy = load_policy(tmp_path)
 
     assert policy.allowed_manifest_hashes == ("abc123", "def456")
+
+
+def test_load_policy_yaml_reads_llmff_runtime_knobs(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  timeout_ms: 12345
+  retry_attempts: 2
+  retry_backoff_ms: 250
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.llmff_timeout_ms == 12345
+    assert policy.llmff_retry_attempts == 2
+    assert policy.llmff_retry_backoff_ms == 250
+
+
+def test_load_policy_yaml_rejects_negative_llmff_runtime_knobs(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  timeout_ms: -1
+  retry_attempts: 0
+  retry_backoff_ms: 0
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="llmff.timeout_ms"):
+        load_policy(tmp_path)
+
+
+@pytest.mark.parametrize("raw_value", ["true", "1.5"])
+def test_load_policy_yaml_rejects_non_integer_llmff_runtime_knobs(
+    tmp_path: Path,
+    raw_value: str,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  timeout_ms: {raw_value}
+  retry_attempts: 0
+  retry_backoff_ms: 0
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="llmff.timeout_ms"):
+        load_policy(tmp_path)
 
 
 def test_load_policy_yaml_reads_retention_policy(tmp_path: Path):

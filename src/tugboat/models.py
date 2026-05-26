@@ -77,6 +77,9 @@ class Policy:
     llmff_binary: str = "llmff"
     llmff_require_inspect: bool = True
     llmff_allow_network: bool = False
+    llmff_timeout_ms: int = 60_000
+    llmff_retry_attempts: int = 0
+    llmff_retry_backoff_ms: int = 0
     allowed_manifest_hashes: tuple[str, ...] = field(default_factory=tuple)
     raw_traces_retention_days: int = 14
     checkpoints_retention_days: int = 7

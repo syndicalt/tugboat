@@ -138,9 +138,18 @@ if args[:1] == ["run"]:
             continue
         index += 1
     if outputs:
-        next(iter(outputs.values())).parent.joinpath("llmff-inputs.json").write_text(json.dumps({
+        output_dir = next(iter(outputs.values())).parent
+        output_dir.joinpath("llmff-inputs.json").write_text(json.dumps({
             name: str(path) for name, path in inputs.items()
         }, sort_keys=True) + "\\n", encoding="utf-8")
+        runtime_args = {
+            "manifest": manifest,
+            "retry_attempts": args[args.index("--retry-attempts") + 1],
+            "retry_backoff_ms": args[args.index("--retry-backoff-ms") + 1],
+            "timeout_ms": args[args.index("--timeout-ms") + 1],
+        }
+        with output_dir.joinpath("llmff-run-args.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(runtime_args, sort_keys=True) + "\\n")
     trace.write_text('{"event":"step","name":"episode-audit"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
@@ -1895,6 +1904,55 @@ llmff:
     assert [json.loads(row[0])["note"] for row in slow_update_notes] == [
         "successful: held_out_improved for candidate "
         f"{decision['candidate_id']} in suite held-out"
+    ]
+
+
+def test_optimize_passes_policy_llmff_runtime_knobs_to_all_manifests(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+  timeout_ms: 12345
+  retry_attempts: 2
+  retry_backoff_ms: 250
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    runtime_args = [
+        json.loads(line)
+        for line in (run_dir / "llmff-run-args.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert runtime_args == [
+        {
+            "manifest": manifest,
+            "timeout_ms": "12345",
+            "retry_attempts": "2",
+            "retry_backoff_ms": "250",
+        }
+        for manifest in [
+            "instruction-index",
+            "episode-audit",
+            "drift-detect",
+            "patch-propose",
+            "patch-eval",
+            "acceptance-summary",
+        ]
     ]
 
 

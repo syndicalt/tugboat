@@ -614,9 +614,9 @@ def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, obje
         manifest,
         run_dir=run_dir,
         policy=policy,
-        timeout_ms=60_000,
-        retry_attempts=0,
-        retry_backoff_ms=0,
+        timeout_ms=policy.llmff_timeout_ms,
+        retry_attempts=policy.llmff_retry_attempts,
+        retry_backoff_ms=policy.llmff_retry_backoff_ms,
         checkpoint_path=run_dir / "acceptance-summary" / "checkpoint.json",
         input_paths={
             "candidate_patch": run_dir / "candidate.raw.json",

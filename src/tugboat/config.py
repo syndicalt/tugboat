@@ -34,7 +34,14 @@ def _as_non_negative_days(raw: Any, field_name: str) -> int:
 
 
 def _as_non_negative_int(raw: Any, field_name: str) -> int:
-    value = int(raw)
+    if isinstance(raw, bool):
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, str) and raw.isdecimal():
+        value = int(raw)
+    else:
+        raise ValueError(f"{field_name} must be a non-negative integer")
     if value < 0:
         raise ValueError(f"{field_name} must be non-negative")
     return value
@@ -154,6 +161,18 @@ def load_policy(repo: Path) -> Policy:
         llmff_binary=str(llmff.get("binary", "llmff")),
         llmff_require_inspect=bool(llmff.get("require_inspect", True)),
         llmff_allow_network=bool(llmff.get("allow_network", False)),
+        llmff_timeout_ms=_as_non_negative_int(
+            llmff.get("timeout_ms", Policy().llmff_timeout_ms),
+            "llmff.timeout_ms",
+        ),
+        llmff_retry_attempts=_as_non_negative_int(
+            llmff.get("retry_attempts", Policy().llmff_retry_attempts),
+            "llmff.retry_attempts",
+        ),
+        llmff_retry_backoff_ms=_as_non_negative_int(
+            llmff.get("retry_backoff_ms", Policy().llmff_retry_backoff_ms),
+            "llmff.retry_backoff_ms",
+        ),
         allowed_manifest_hashes=tuple(str(item) for item in allowed_manifest_hashes),
         raw_traces_retention_days=_as_non_negative_days(
             retention.get("raw_traces_days", Policy().raw_traces_retention_days),
