@@ -27,6 +27,56 @@ from tugboat.paths import runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
+def _write_fake_audit_llmff(path: Path) -> Path:
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if args[:3] == ["inspect", "--format", "json"]:
+    print(json.dumps({"manifest": Path(args[3]).stem, "network_required": False}))
+    raise SystemExit(0)
+
+if args[:1] == ["run"]:
+    manifest = Path(args[1]).stem
+    trace = Path(args[args.index("--trace") + 1])
+    events = Path(args[args.index("--events") + 1])
+    checkpoint = Path(args[args.index("--checkpoint") + 1])
+    outputs = {}
+    index = 0
+    while index < len(args):
+        if args[index] == "--output":
+            outputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
+        index += 1
+    trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
+    events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
+    checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    if manifest == "instruction-index":
+        outputs["instruction_index"].write_text(json.dumps({
+            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "episode-audit":
+        outputs["audit_report"].write_text(json.dumps({
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_mcp_daemon"],
+        }) + "\\n", encoding="utf-8")
+    raise SystemExit(0)
+
+raise SystemExit(64)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
 def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
     repo = tmp_path
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -388,6 +438,19 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
 def test_request_audit_enqueues_daemon_executable_trace_audit(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
     episode = tugboat_record_episode(
         repo,
         '{"type":"user_request","content":"Fix bug"}\n'
@@ -409,13 +472,26 @@ def test_request_audit_enqueues_daemon_executable_trace_audit(tmp_path: Path):
     assert result["final_state"] == "waiting_review"
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
-    assert audit["failure_class"] == "daemon_trace_audit"
-    assert audit["evidence_refs"]
+    assert audit["failure_class"] == "instruction_conflict"
+    assert audit["evidence_refs"] == ["ev_mcp_daemon"]
+    assert (run_dir / "audit.raw.json").exists()
     with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
         queued = queue_store.connection.execute(
             "SELECT kind, payload_json FROM daemon_jobs"
         ).fetchone()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            ORDER BY id
+            """
+        ).fetchall()
     assert queued[0] == "trace_audit"
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+    ]
     queued_payload = json.loads(queued[1])
     assert queued_payload["trace_path"] == str(repo / episode["artifact_ref"])
     assert queued_payload["artifact_ref"].startswith(".sidecar/mcp/requests/")

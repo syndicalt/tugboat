@@ -207,7 +207,7 @@ def test_mock_audit_records_chunk_granularity_instruction_refs(tmp_path: Path, m
     trace = tmp_path / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
     monkeypatch.setattr(
-        "tugboat.cli._scored_audit_payload",
+        "tugboat.audit.pipeline._scored_audit_payload",
         lambda bundle: {
             "edit_warranted": True,
             "evidence_refs": [event.evidence_id for event in bundle.events],

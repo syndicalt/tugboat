@@ -20,6 +20,56 @@ from tugboat.daemon.service import (
 from tugboat.mcp import tugboat_daemon_status
 
 
+def _write_fake_llmff(path: Path) -> Path:
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if args[:3] == ["inspect", "--format", "json"]:
+    print(json.dumps({"manifest": Path(args[3]).stem, "network_required": False}))
+    raise SystemExit(0)
+
+if args[:1] == ["run"]:
+    manifest = Path(args[1]).stem
+    trace = Path(args[args.index("--trace") + 1])
+    events = Path(args[args.index("--events") + 1])
+    checkpoint = Path(args[args.index("--checkpoint") + 1])
+    outputs = {}
+    index = 0
+    while index < len(args):
+        if args[index] == "--output":
+            outputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
+        index += 1
+    trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
+    events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
+    checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    if manifest == "instruction-index":
+        outputs["instruction_index"].write_text(json.dumps({
+            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "episode-audit":
+        outputs["audit_report"].write_text(json.dumps({
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_daemon"],
+        }) + "\\n", encoding="utf-8")
+    raise SystemExit(0)
+
+raise SystemExit(64)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
 def test_daemon_status_summarizes_queue_and_kill_switch(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
@@ -65,6 +115,19 @@ def test_run_daemon_once_processes_one_job_through_waiting_review(tmp_path: Path
 def test_run_daemon_once_executes_trace_audit_job_through_storage_layer(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_llmff(repo / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
     trace = repo / "episode.jsonl"
     trace.write_text(
         '{"type":"user_request","content":"Fix bug"}\n'
@@ -89,13 +152,29 @@ def test_run_daemon_once_executes_trace_audit_job_through_storage_layer(tmp_path
     run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())
     assert len(run_dirs) == 1
     audit = json.loads((run_dirs[0] / "audit.json").read_text(encoding="utf-8"))
-    assert audit["failure_class"] == "daemon_trace_audit"
-    assert audit["evidence_refs"]
+    assert audit["failure_class"] == "instruction_conflict"
+    assert audit["severity"] == "high"
+    assert audit["confidence"] == 0.91
+    assert audit["evidence_refs"] == ["ev_daemon"]
+    assert (run_dirs[0] / "audit.raw.json").exists()
+    assert (run_dirs[0] / "instruction-index" / "llmff-trace.jsonl").exists()
+    assert (run_dirs[0] / "episode-audit" / "llmff-trace.jsonl").exists()
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM trace_events").fetchone()[0] == 2
         assert connection.execute("SELECT COUNT(*) FROM runs WHERE stage = 'audit'").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM audits").fetchone()[0] == 1
+        jobs = connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            ORDER BY id
+            """
+        ).fetchall()
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+    ]
 
 
 def test_run_daemon_once_respects_read_only_kill_switch(tmp_path: Path):
