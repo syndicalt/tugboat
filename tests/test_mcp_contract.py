@@ -1134,32 +1134,60 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     assert "tugboat_latest_audit" in by_name
     assert "tugboat_status" in by_name
     assert "tugboat_request_audit" in by_name
+    repo_schema = {
+        "additionalProperties": False,
+        "properties": {"repo": {"type": "string"}},
+        "required": ["repo"],
+        "type": "object",
+    }
     assert by_name["tugboat_active_instructions"] == {
+        "inputSchema": repo_schema,
         "name": "tugboat_active_instructions",
         "mutates_instructions": False,
         "write_intent": False,
     }
     assert by_name["tugboat_status"] == {
+        "inputSchema": repo_schema,
         "name": "tugboat_status",
         "mutates_instructions": False,
         "write_intent": False,
     }
     assert by_name["tugboat_index_summary"] == {
+        "inputSchema": repo_schema,
         "name": "tugboat_index_summary",
         "mutates_instructions": False,
         "write_intent": False,
     }
     assert by_name["tugboat_candidate_report"] == {
+        "inputSchema": {
+            "additionalProperties": False,
+            "properties": {
+                "repo": {"type": "string"},
+                "candidate_id": {"type": "integer"},
+            },
+            "required": ["repo", "candidate_id"],
+            "type": "object",
+        },
         "name": "tugboat_candidate_report",
         "mutates_instructions": False,
         "write_intent": False,
     }
     assert by_name["tugboat_latest_audit"] == {
+        "inputSchema": repo_schema,
         "name": "tugboat_latest_audit",
         "mutates_instructions": False,
         "write_intent": False,
     }
     assert by_name["tugboat_request_audit"] == {
+        "inputSchema": {
+            "additionalProperties": False,
+            "properties": {
+                "repo": {"type": "string"},
+                "trace_id": {"type": "string"},
+            },
+            "required": ["repo", "trace_id"],
+            "type": "object",
+        },
         "name": "tugboat_request_audit",
         "mutates_instructions": False,
         "write_intent": True,

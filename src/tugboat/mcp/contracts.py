@@ -40,6 +40,65 @@ WRITE_INTENT_TOOLS = frozenset(
 )
 
 
+def _object_schema(
+    properties: dict[str, dict[str, Any]],
+    required: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        "additionalProperties": False,
+        "properties": properties,
+        "required": list(required),
+        "type": "object",
+    }
+
+
+_REPO_SCHEMA = {"type": "string"}
+_INTEGER_ID_SCHEMA = {"type": "integer"}
+_STRING_ID_SCHEMA = {"type": "string"}
+
+MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "tugboat_active_instructions": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_candidate": _object_schema(
+        {"repo": _REPO_SCHEMA, "candidate_id": _INTEGER_ID_SCHEMA},
+        ("repo", "candidate_id"),
+    ),
+    "tugboat_candidate_report": _object_schema(
+        {"repo": _REPO_SCHEMA, "candidate_id": _INTEGER_ID_SCHEMA},
+        ("repo", "candidate_id"),
+    ),
+    "tugboat_daemon_status": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_harness_findings": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_index_summary": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_instruction_graph": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_latest_audit": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_latest_runs": _object_schema(
+        {"repo": _REPO_SCHEMA, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+        ("repo",),
+    ),
+    "tugboat_record_episode": _object_schema(
+        {"repo": _REPO_SCHEMA, "trace_jsonl": {"type": "string"}},
+        ("repo", "trace_jsonl"),
+    ),
+    "tugboat_request_audit": _object_schema(
+        {"repo": _REPO_SCHEMA, "trace_id": _STRING_ID_SCHEMA},
+        ("repo", "trace_id"),
+    ),
+    "tugboat_request_eval": _object_schema(
+        {"repo": _REPO_SCHEMA, "candidate_id": _STRING_ID_SCHEMA, "suite": {"type": "string"}},
+        ("repo", "candidate_id", "suite"),
+    ),
+    "tugboat_request_proposal": _object_schema(
+        {"repo": _REPO_SCHEMA, "audit_id": _STRING_ID_SCHEMA},
+        ("repo", "audit_id"),
+    ),
+    "tugboat_run_report": _object_schema(
+        {"repo": _REPO_SCHEMA, "run_id": _STRING_ID_SCHEMA},
+        ("repo", "run_id"),
+    ),
+    "tugboat_status": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+}
+
+
 def tugboat_status(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -439,6 +498,7 @@ def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dic
 def list_mcp_tools() -> list[dict[str, Any]]:
     return [
         {
+            "inputSchema": MCP_TOOL_INPUT_SCHEMAS[name],
             "name": name,
             "mutates_instructions": False,
             "write_intent": name in WRITE_INTENT_TOOLS,
