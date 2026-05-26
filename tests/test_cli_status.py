@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from tugboat.cli import main
@@ -161,7 +162,7 @@ def test_status_reports_unknown_exit_code_for_legacy_llmff_jobs(
     repo = tmp_path / "repo"
     db_path = sidecar_dir(repo) / "db.sqlite"
     db_path.parent.mkdir(parents=True)
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         connection.execute(
             """
             CREATE TABLE runs (
@@ -200,6 +201,7 @@ def test_status_reports_unknown_exit_code_for_legacy_llmff_jobs(
             VALUES ('run-1', 'patch-propose.yaml', 'abc', 'failed', NULL)
             """
         )
+        connection.commit()
 
     assert main(["status", "--repo", str(repo)]) == 0
 
