@@ -5,14 +5,17 @@ import json
 from tugboat.db import Store
 from tugboat.optimization import (
     BoundedEdit,
+    EpisodeOutcome,
     LearningRateBudget,
     OptimizationCandidate,
     OptimizationMemory,
     OptimizationRun,
     ReflectionArtifact,
     ScoreSet,
+    SuccessFailureMinibatch,
     ValidationBaselineRecord,
     build_minibatches,
+    build_success_failure_minibatch,
     budget_reasons_for_bounded_edit_metadata,
     evaluate_candidate,
     reflect_on_minibatch,
@@ -31,6 +34,48 @@ def test_build_minibatches_keeps_triggering_and_held_out_episodes_separate():
     assert batches.train_episodes == ("train-1", "train-2")
     assert batches.held_out_episodes == ("held-1",)
     assert batches.unseen_suites == ("governance",)
+
+
+def test_build_success_failure_minibatch_separates_outcomes_for_reflection():
+    minibatch = build_success_failure_minibatch(
+        (
+            EpisodeOutcome("ep-1", "success", "used regression tests"),
+            EpisodeOutcome("ep-2", "failure", "skipped regression tests"),
+            EpisodeOutcome("ep-1", "success", "used regression tests"),
+            EpisodeOutcome("ep-3", "failure", "skipped regression tests"),
+            EpisodeOutcome("ep-4", "success", "used TDD"),
+        )
+    )
+
+    assert minibatch == SuccessFailureMinibatch(
+        success_episodes=("ep-1", "ep-4"),
+        failure_episodes=("ep-2", "ep-3"),
+        success_patterns=("used regression tests", "used TDD"),
+        failure_patterns=("skipped regression tests",),
+    )
+
+
+def test_build_success_failure_minibatch_rejects_ambiguous_outcome_labels():
+    try:
+        build_success_failure_minibatch((EpisodeOutcome("ep-1", "unknown", "ambiguous"),))
+    except ValueError as error:
+        assert str(error) == "episode outcome must be success or failure: ep-1"
+    else:
+        raise AssertionError("ambiguous outcome label should be rejected")
+
+
+def test_build_success_failure_minibatch_rejects_conflicting_episode_outcomes():
+    try:
+        build_success_failure_minibatch(
+            (
+                EpisodeOutcome("ep-1", "success", "used regression tests"),
+                EpisodeOutcome("ep-1", "failure", "skipped regression tests"),
+            )
+        )
+    except ValueError as error:
+        assert str(error) == "episode cannot be both success and failure"
+    else:
+        raise AssertionError("conflicting episode outcomes should be rejected")
 
 
 def test_candidate_is_accepted_only_when_held_out_improves_and_governance_passes():

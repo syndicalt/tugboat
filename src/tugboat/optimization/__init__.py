@@ -72,6 +72,21 @@ class EpisodeBatches:
 
 
 @dataclass(frozen=True)
+class EpisodeOutcome:
+    episode_id: str
+    outcome: str
+    pattern: str
+
+
+@dataclass(frozen=True)
+class SuccessFailureMinibatch:
+    success_episodes: tuple[str, ...]
+    failure_episodes: tuple[str, ...]
+    success_patterns: tuple[str, ...]
+    failure_patterns: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RejectedEditRecord:
     semantic_fingerprint: str
     rejection_reason: str
@@ -242,6 +257,33 @@ def build_minibatches(
     if overlap:
         raise ValueError("train and held-out episodes must be separate")
     return EpisodeBatches(train_episodes, held_out_episodes, unseen_suites)
+
+
+def build_success_failure_minibatch(
+    outcomes: tuple[EpisodeOutcome, ...],
+) -> SuccessFailureMinibatch:
+    success_episodes: list[str] = []
+    failure_episodes: list[str] = []
+    success_patterns: list[str] = []
+    failure_patterns: list[str] = []
+    for outcome in outcomes:
+        if outcome.outcome == "success":
+            success_episodes.append(outcome.episode_id)
+            success_patterns.append(outcome.pattern)
+        elif outcome.outcome == "failure":
+            failure_episodes.append(outcome.episode_id)
+            failure_patterns.append(outcome.pattern)
+        else:
+            raise ValueError(f"episode outcome must be success or failure: {outcome.episode_id}")
+    overlap = set(success_episodes) & set(failure_episodes)
+    if overlap:
+        raise ValueError("episode cannot be both success and failure")
+    return SuccessFailureMinibatch(
+        success_episodes=_unique(tuple(success_episodes)),
+        failure_episodes=_unique(tuple(failure_episodes)),
+        success_patterns=_unique(tuple(success_patterns)),
+        failure_patterns=_unique(tuple(failure_patterns)),
+    )
 
 
 def reflect_on_minibatch(
