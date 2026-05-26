@@ -20,7 +20,7 @@ from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manif
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.paths import new_run_dir, sidecar_dir
 from tugboat.scoring import ScoreOutcome, score_episode
-from tugboat.security.redaction import redact_text
+from tugboat.security.redaction import redact_payload
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.adapters import (
     ingest_ci_failure_bundle,
@@ -74,11 +74,11 @@ def run_audit_pipeline(
             },
         )
         return AuditPipelineResult(1, run_dir, "audit blocked: secret detected")
+    bundle = _ingest_trace(trace, trace_format)
     redacted_trace = run_dir / "trace-redacted.jsonl"
-    redacted_trace.write_text(
-        redact_text((run_dir / "trace-input.jsonl").read_text(encoding="utf-8")),
-        encoding="utf-8",
-    )
+    _write_redacted_trace(bundle, redacted_trace)
+    canonical_episode_path = run_dir / "canonical-episode.json"
+    _write_canonical_episode(bundle, canonical_episode_path)
     manifests = materialize_manifests(repo)
     if not manifests_are_allowed_by_policy(manifests, policy):
         return AuditPipelineResult(1, run_dir, "manifest hash is not allowed by policy")
@@ -185,7 +185,6 @@ def run_audit_pipeline(
         if mock_llmff_inspect
         else None
     )
-    bundle = _ingest_trace(trace, trace_format)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
     audit_payload = _scored_audit_payload(bundle)
@@ -219,7 +218,7 @@ def run_audit_pipeline(
                 retry_attempts=policy.llmff_retry_attempts,
                 retry_backoff_ms=policy.llmff_retry_backoff_ms,
                 input_paths={
-                    "episode_trace": redacted_trace,
+                    "episode_trace": canonical_episode_path,
                     "instruction_index": instruction_index_path,
                     "policy": sidecar_dir(repo) / "policy.yaml",
                 },
@@ -451,6 +450,49 @@ def _ingest_trace(trace: Path, trace_format: str):
     if trace_format == "mcp":
         return ingest_mcp_session_bundle(trace)
     raise ValueError(f"unsupported trace format: {trace_format}")
+
+
+def _write_redacted_trace(bundle, path: Path) -> None:
+    episode = canonical_episode_from_bundle(bundle)
+    rows = [
+        {
+            "evidence_id": event.evidence_id,
+            "event_type": event.event_type,
+            "source_trust": event.source_trust,
+            "line_number": event.line_number,
+            "payload": event.payload,
+        }
+        for event in episode.redacted_events()
+    ]
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
+def _write_canonical_episode(bundle, path: Path) -> None:
+    episode = canonical_episode_from_bundle(bundle)
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "trace_path": bundle.trace_path.as_posix(),
+        "request": redact_payload(episode.request),
+        "final_answer": redact_payload(episode.final_answer),
+        "instruction_snapshot": redact_payload(list(episode.instruction_snapshot)),
+        "events": [
+            {
+                "evidence_id": event.evidence_id,
+                "event_type": event.event_type,
+                "source_trust": event.source_trust,
+                "line_number": event.line_number,
+                "payload": event.payload,
+            }
+            for event in episode.redacted_events()
+        ],
+        "outcome_labels": list(episode.outcome_labels),
+        "verifier_scores": episode.verifier_scores,
+    }
+    validate_json_artifact("canonical-episode.json", payload)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _scored_audit_payload(bundle) -> dict[str, object]:

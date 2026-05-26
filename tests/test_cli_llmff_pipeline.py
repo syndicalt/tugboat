@@ -577,7 +577,7 @@ llmff:
     assert (run_dir / "instruction-index.raw.json").exists()
 
 
-def test_audit_passes_redacted_trace_artifact_to_llmff(tmp_path: Path):
+def test_audit_passes_canonical_episode_artifact_to_llmff(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
@@ -601,13 +601,16 @@ llmff:
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     llmff_inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
-    assert Path(llmff_inputs["episode_trace"]) == run_dir / "trace-redacted.jsonl"
+    assert Path(llmff_inputs["episode_trace"]) == run_dir / "canonical-episode.json"
     assert (run_dir / "trace-input.jsonl").read_text(encoding="utf-8") == trace.read_text(
         encoding="utf-8"
     )
-    assert (run_dir / "trace-redacted.jsonl").read_text(encoding="utf-8") == trace.read_text(
-        encoding="utf-8"
-    )
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    assert canonical["schema_version"] == 1
+    assert canonical["request"] == "Fix bug without secrets"
+    assert canonical["events"][0]["event_type"] == "user_request"
+    assert canonical["events"][0]["source_trust"] == "user"
+    assert canonical["events"][0]["evidence_id"].startswith("ev_")
 
 
 def test_audit_rejects_trace_with_secret_before_llmff_execution(tmp_path: Path):

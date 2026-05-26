@@ -153,6 +153,30 @@ def test_validate_instruction_index_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_canonical_episode_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "canonical-episode.json",
+        {
+            "schema_version": 1,
+            "trace_path": "trace.jsonl",
+            "request": "Fix bug",
+            "final_answer": None,
+            "instruction_snapshot": [{"source": "CODEX.md", "text": "Use tests."}],
+            "events": [
+                {
+                    "evidence_id": "ev_123",
+                    "event_type": "user_request",
+                    "source_trust": "user",
+                    "line_number": 1,
+                    "payload": {"type": "user_request", "content": "Fix bug"},
+                }
+            ],
+            "outcome_labels": [],
+            "verifier_scores": {},
+        },
+    )
+
+
 def test_validate_reflection_artifact_accepts_current_schema():
     validate_json_artifact(
         "reflection.json",

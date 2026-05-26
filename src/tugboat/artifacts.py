@@ -130,6 +130,50 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "canonical-episode.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "trace_path",
+            "request",
+            "instruction_snapshot",
+            "events",
+            "outcome_labels",
+            "verifier_scores",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "trace_path": {"type": "string"},
+            "request": {"type": ["string", "null"]},
+            "final_answer": {"type": ["string", "null"]},
+            "instruction_snapshot": {"type": "array", "items": {"type": "object"}},
+            "events": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "evidence_id",
+                        "event_type",
+                        "source_trust",
+                        "line_number",
+                        "payload",
+                    ],
+                    "properties": {
+                        "evidence_id": {"type": "string"},
+                        "event_type": {"type": "string"},
+                        "source_trust": {"type": "string"},
+                        "line_number": {"type": "integer"},
+                        "payload": {"type": "object"},
+                    },
+                },
+            },
+            "outcome_labels": {"type": "array", "items": {"type": "string"}},
+            "verifier_scores": {"type": "object"},
+        },
+    },
     "candidate.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
@@ -759,7 +803,12 @@ def validate_report_markdown(text: str) -> None:
             raise ArtifactValidationError(f"report.md metadata field must not be empty: {field}")
 
 
-def _matches_json_schema_type(value: object, expected_type: str) -> bool:
+def _matches_json_schema_type(value: object, expected_type: object) -> bool:
+    if isinstance(expected_type, list):
+        return any(_matches_json_schema_type(value, item) for item in expected_type)
+    expected_type = str(expected_type)
+    if expected_type == "null":
+        return value is None
     if expected_type == "array":
         return isinstance(value, list)
     if expected_type == "boolean":
@@ -782,7 +831,7 @@ def _validate_schema_value(
     value: object,
 ) -> None:
     expected_type = schema.get("type")
-    if expected_type is not None and not _matches_json_schema_type(value, str(expected_type)):
+    if expected_type is not None and not _matches_json_schema_type(value, expected_type):
         raise ArtifactValidationError(f"{artifact_name} field has wrong type: {field_path}")
     if "const" in schema and value != schema["const"]:
         raise ArtifactValidationError(f"{artifact_name} has unsupported schema_version")

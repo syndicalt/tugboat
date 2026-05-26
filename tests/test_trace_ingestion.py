@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tugboat.audit.pipeline import _write_canonical_episode
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 from tugboat.traces.ingest import ingest_jsonl_trace, ingest_jsonl_trace_as_episode
@@ -117,6 +118,25 @@ def test_canonical_episode_exposes_redacted_events_for_model_payloads(tmp_path: 
         "type": "tool_result",
         "output": "OPENAI_API_KEY=[REDACTED:openai_api_key]",
     }
+
+
+def test_canonical_episode_artifact_redacts_top_level_summary_fields(tmp_path: Path):
+    trace_path = tmp_path / "episode.jsonl"
+    _write_jsonl(
+        trace_path,
+        [
+            {"type": "user_request", "content": "Use OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx"},
+            {"type": "final_answer", "content": "Saved sk-abcdefghijklmnopqrstuvwx"},
+        ],
+    )
+    bundle = ingest_jsonl_trace(trace_path)
+    artifact_path = tmp_path / "canonical-episode.json"
+
+    _write_canonical_episode(bundle, artifact_path)
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert payload["request"] == "Use OPENAI_API_KEY=[REDACTED:openai_api_key]"
+    assert payload["final_answer"] == "Saved [REDACTED:openai_api_key]"
 
 
 def test_store_records_canonical_episode_and_trace_events_with_audit_reachability(

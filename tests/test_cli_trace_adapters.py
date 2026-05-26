@@ -382,3 +382,93 @@ def test_audit_cli_ingests_codex_session_meta_instruction_snapshot(tmp_path: Pat
         "source": "CODEX.md",
         "text": "Use tests and cite verification.",
     }
+
+
+def test_audit_cli_writes_canonical_redacted_trace_for_llmff_input(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "claude.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "user", "message": {"role": "user", "content": "Fix bug"}}),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": "toolu_1",
+                                    "name": "Bash",
+                                    "input": {"command": "env"},
+                                }
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "toolu_1",
+                                    "content": "command output without secrets",
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "claude",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical_rows = [
+        json.loads(line)
+        for line in (run_dir / "trace-redacted.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    canonical_episode = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+
+    assert [row["event_type"] for row in canonical_rows] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+    ]
+    assert all(row["evidence_id"].startswith("ev_") for row in canonical_rows)
+    assert canonical_rows[2]["payload"] == {
+        "type": "tool_result",
+        "tool": "Bash",
+        "call_id": "toolu_1",
+        "output": "command output without secrets",
+        "is_error": False,
+    }
+    assert canonical_episode["request"] == "Fix bug"
+    assert [row["event_type"] for row in canonical_episode["events"]] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+    ]
