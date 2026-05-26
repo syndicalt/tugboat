@@ -266,6 +266,43 @@ def test_validate_optimization_summary_artifact_accepts_current_schema():
     )
 
 
+def test_validate_observability_summary_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "observability-summary.json",
+        {
+            "schema_version": 1,
+            "summary": {
+                "run_duration": {
+                    "count": 1,
+                    "total_seconds": 12,
+                    "average_seconds": 12,
+                    "max_seconds": 12,
+                },
+                "failure_kind_counts": {"provider_error": 1},
+                "edits": {"accepted": 1, "rejected": 1, "rolled_back": 0},
+                "edit_rates": {
+                    "acceptance_rate": 0.5,
+                    "rejection_rate": 0.5,
+                    "rollback_rate": 0,
+                    "reviewed_count": 2,
+                },
+                "mean_changed_lines": 4,
+                "eval_suite_trends": {"all": {"latest_score": 0.9}},
+                "corpus_growth": {"earliest_count": 1, "latest_count": 2, "delta": 1},
+                "provider_backend_failure_rate": {"failed": 1, "rate": 1, "total": 1},
+                "duplicate_rule_count": 1,
+                "user_correction_recurrence": {"correction_count": 1},
+                "recurring_incident_rate": {
+                    "incident_count": 3,
+                    "recurring_incident_count": 2,
+                    "rate": 0.666667,
+                    "unique_incident_class_count": 2,
+                },
+            },
+        },
+    )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 

@@ -5,6 +5,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from tugboat.artifacts import validate_json_artifact
 from tugboat.cli import main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
@@ -132,6 +133,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     output = capsys.readouterr().out
     output_path = sidecar / "ops" / "observability" / "summary.json"
     payload = json.loads(output_path.read_text(encoding="utf-8"))
+    validate_json_artifact("observability-summary.json", payload)
     assert f"observability summary: {output_path}" in output
     assert payload["schema_version"] == 1
     summary = payload["summary"]

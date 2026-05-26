@@ -480,6 +480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "schema_version": SCHEMA_VERSION,
             "summary": summarize_sidecar_observability(repo),
         }
+        validate_json_artifact("observability-summary.json", payload)
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
