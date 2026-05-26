@@ -78,6 +78,25 @@ def test_build_success_failure_minibatch_rejects_conflicting_episode_outcomes():
         raise AssertionError("conflicting episode outcomes should be rejected")
 
 
+def test_bounded_edit_accepts_all_roadmap_operators():
+    operators = ("add", "replace", "delete", "split", "merge", "demote", "promote", "annotate")
+
+    edits = tuple(BoundedEdit(operator, "CODEX.md", "Testing", 1, 0) for operator in operators)
+
+    assert tuple(edit.operator for edit in edits) == operators
+
+
+def test_bounded_edit_rejects_unknown_operator():
+    try:
+        BoundedEdit("rewrite_everything", "CODEX.md", "Testing", 1, 0)
+    except ValueError as error:
+        assert str(error) == (
+            "bounded edit operator must be one of: add, annotate, delete, demote, merge, promote, replace, split"
+        )
+    else:
+        raise AssertionError("unknown bounded edit operator should be rejected")
+
+
 def test_candidate_is_accepted_only_when_held_out_improves_and_governance_passes():
     candidate = OptimizationCandidate(
         candidate_id="cand-1",

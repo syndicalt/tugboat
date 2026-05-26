@@ -13,6 +13,9 @@ if TYPE_CHECKING:
 
 REJECTED_EDIT_SUPPRESSION_SIGNAL = "suppress_matching_bounded_edit_fingerprint"
 SLOW_UPDATE_CATEGORIES = frozenset(("successful", "rejected", "optimizer_guidance"))
+BOUNDED_EDIT_OPERATORS = frozenset(
+    ("add", "annotate", "delete", "demote", "merge", "promote", "replace", "split")
+)
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,11 @@ class BoundedEdit:
     section: str
     changed_lines: int
     normative_changes: int
+
+    def __post_init__(self) -> None:
+        if self.operator not in BOUNDED_EDIT_OPERATORS:
+            allowed = ", ".join(sorted(BOUNDED_EDIT_OPERATORS))
+            raise ValueError(f"bounded edit operator must be one of: {allowed}")
 
     @property
     def fingerprint(self) -> str:
