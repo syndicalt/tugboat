@@ -22,7 +22,7 @@ def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp
     assert main(["index", "--repo", str(repo)]) == 0
     assert main(["audit", "--repo", str(repo), "--trace", str(trace), "--mock-llmff-inspect"]) == 0
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
-    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "governance-regression"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
     assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
 
     run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())

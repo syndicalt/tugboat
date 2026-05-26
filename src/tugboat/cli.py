@@ -479,6 +479,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "recommendation",
                 "accept" if passed and governance_passed else "reject",
             )
+        else:
+            print(f"unsupported offline eval suite: {args.suite}")
+            return 1
         report_path = write_eval_report(
             repo,
             run_dir.name,

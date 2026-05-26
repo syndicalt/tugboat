@@ -107,6 +107,21 @@ def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path
     assert report["recommendation"] == "reject"
 
 
+def test_eval_rejects_unsupported_offline_suite_without_accepting_report(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "unknown-suite"]) == 1
+
+    assert not (run_dir / "eval-report.json").exists()
+
+
 def test_eval_provider_smoke_requires_explicit_opt_in(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE", raising=False)
     repo = tmp_path / "repo"
