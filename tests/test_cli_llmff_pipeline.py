@@ -22,6 +22,7 @@ def _write_fake_llmff(
     policy_decision: object | None = None,
     acceptance_summary: object | None = None,
     reflections: object | None = None,
+    secret_artifact: str | None = None,
 ) -> Path:
     if sources is None:
         sources = [{"source_id": "ev_fake", "trusted": True}]
@@ -104,10 +105,16 @@ EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
 ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
 REFLECTIONS = __REFLECTIONS__
+SECRET_ARTIFACT = __SECRET_ARTIFACT__
+SECRET_VALUE = "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx"
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
-    print(json.dumps({"manifest": Path(args[3]).stem, "network_required": False}))
+    manifest = Path(args[3]).stem
+    inspect_payload = {"manifest": manifest, "network_required": False}
+    if SECRET_ARTIFACT == "inspect_episode_audit" and manifest == "episode-audit":
+        inspect_payload["raw_model_payload"] = SECRET_VALUE
+    print(json.dumps(inspect_payload))
     raise SystemExit(0)
 
 if args[:1] == ["run"]:
@@ -135,6 +142,10 @@ if args[:1] == ["run"]:
     trace.write_text('{"event":"step","name":"episode-audit"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    if SECRET_ARTIFACT == "events" and manifest == "episode-audit":
+        events.write_text(json.dumps({"event": "model_output", "text": SECRET_VALUE}) + "\\n", encoding="utf-8")
+    if SECRET_ARTIFACT == "checkpoint" and manifest == "episode-audit":
+        checkpoint.write_text(json.dumps({"token": SECRET_VALUE}) + "\\n", encoding="utf-8")
     if manifest == FAIL_MANIFEST:
         events.write_text(json.dumps({
             "event": "run_failed",
@@ -147,13 +158,19 @@ if args[:1] == ["run"]:
     if manifest == "instruction-index":
         outputs["instruction_index"].write_text(json.dumps(INSTRUCTION_INDEX) + "\\n", encoding="utf-8")
     elif manifest == "episode-audit":
-        outputs["audit_report"].write_text(json.dumps(AUDIT_REPORT) + "\\n", encoding="utf-8")
+        if SECRET_ARTIFACT == "audit_report":
+            outputs["audit_report"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
+        else:
+            outputs["audit_report"].write_text(json.dumps(AUDIT_REPORT) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
         outputs["drift_clusters"].write_text(json.dumps(DRIFT_CLUSTERS) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         import hashlib
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
+        if SECRET_ARTIFACT == "candidate_patch":
+            outputs["candidate_patch"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
+            raise SystemExit(0)
         candidate_patch = {
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
@@ -170,7 +187,10 @@ if args[:1] == ["run"]:
         candidate_patch.update(CANDIDATE_OVERRIDES)
         outputs["candidate_patch"].write_text(json.dumps(candidate_patch) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
-        outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
+        if SECRET_ARTIFACT == "eval_report":
+            outputs["eval_report"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
+        else:
+            outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
     elif manifest == "acceptance-summary":
         outputs["acceptance_summary"].write_text(json.dumps(ACCEPTANCE_SUMMARY) + "\\n", encoding="utf-8")
@@ -197,6 +217,8 @@ raise SystemExit(64)
             "__ACCEPTANCE_SUMMARY__", repr(acceptance_summary)
         ).replace(
             "__REFLECTIONS__", repr(reflections)
+        ).replace(
+            "__SECRET_ARTIFACT__", repr(secret_artifact)
         ),
         encoding="utf-8",
     )
@@ -522,6 +544,133 @@ llmff:
     assert not (run_dir / "audit.raw.json").exists()
 
 
+def test_audit_rejects_llmff_events_with_secret_without_normalizing_audit(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", secret_artifact="events")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "secret_detected"
+    assert audit["edit_warranted"] is False
+    assert audit["secret_findings"][0]["path"].endswith("llmff-events.jsonl")
+    assert (run_dir / "audit.raw.json").exists()
+    assert audit["failure_class"] != "instruction_conflict"
+
+
+def test_audit_rejects_llmff_checkpoint_with_secret_without_normalizing_audit(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", secret_artifact="checkpoint")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "secret_detected"
+    assert audit["edit_warranted"] is False
+    assert audit["secret_findings"][0]["path"].endswith("checkpoint.json")
+    assert (run_dir / "audit.raw.json").exists()
+    assert audit["failure_class"] != "instruction_conflict"
+
+
+def test_audit_rejects_llmff_raw_output_with_secret_without_normalizing_audit(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", secret_artifact="audit_report")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "secret_detected"
+    assert audit["edit_warranted"] is False
+    assert audit["secret_findings"][0]["path"].endswith("audit.raw.json")
+    assert audit["failure_class"] != "instruction_conflict"
+
+
+def test_audit_rejects_llmff_inspect_artifact_with_secret_without_running_audit(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        secret_artifact="inspect_episode_audit",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "secret_detected"
+    assert audit["edit_warranted"] is False
+    assert audit["secret_findings"][0]["path"].endswith("llmff-inspect.json")
+    assert not (run_dir / "audit.raw.json").exists()
+
+
 def test_propose_requires_real_llmff_audit_output(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -537,6 +686,40 @@ def test_propose_requires_real_llmff_audit_output(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "propose requires llmff audit output" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
+def test_propose_rejects_llmff_candidate_output_with_secret(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", secret_artifact="candidate_patch")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "secret scan failed" in output
+    assert "openai_api_key" in output
+    assert (run_dir / "candidate.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
 
@@ -1168,6 +1351,40 @@ llmff:
     assert job_row[0:2] == ("failed", "run_failed")
     assert json.loads(job_row[2])["run_failed"]["failure_kind"] == "fixture_failure"
     assert candidate_count == 0
+
+
+def test_eval_rejects_llmff_eval_output_with_secret(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", secret_artifact="eval_report")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    capsys.readouterr()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "eval rejected: secret scan failed" in output
+    assert "openai_api_key" in output
+    assert (run_dir / "eval-report.raw.json").exists()
+    assert not (run_dir / "eval-report.json").exists()
 
 
 def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):

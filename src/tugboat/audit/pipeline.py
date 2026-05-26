@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass
@@ -81,21 +82,45 @@ def run_audit_pipeline(
         index_manifest = next(
             record.path for record in manifests if record.name == "instruction-index.yaml"
         )
-        index_inspect = inspect_manifest(index_manifest, run_dir=run_dir, policy=policy)
-        index_run = run_manifest(
-            index_manifest,
-            run_dir=run_dir,
-            policy=policy,
-            timeout_ms=60_000,
-            retry_attempts=0,
-            retry_backoff_ms=0,
-            checkpoint_path=run_dir / "instruction-index" / "checkpoint.json",
-            input_paths={
-                "instruction_snapshot": run_dir / "instruction-snapshot",
-                "policy": sidecar_dir(repo) / "policy.yaml",
-            },
-            output_paths={"instruction_index": run_dir / "instruction-index.raw.json"},
-        )
+        try:
+            index_inspect = inspect_manifest(index_manifest, run_dir=run_dir, policy=policy)
+        except SecretScanError as error:
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.insert_run(
+                    run_id=run_dir.name,
+                    stage="instruction_index",
+                    manifest_hash=_file_sha256(index_manifest),
+                    status="failed",
+                    run_dir=run_dir,
+                )
+            write_audit(run_dir, _secret_scan_audit_payload(error))
+            return AuditPipelineResult(1, run_dir, "instruction index blocked: secret detected")
+        try:
+            index_run = run_manifest(
+                index_manifest,
+                run_dir=run_dir,
+                policy=policy,
+                timeout_ms=60_000,
+                retry_attempts=0,
+                retry_backoff_ms=0,
+                checkpoint_path=run_dir / "instruction-index" / "checkpoint.json",
+                input_paths={
+                    "instruction_snapshot": run_dir / "instruction-snapshot",
+                    "policy": sidecar_dir(repo) / "policy.yaml",
+                },
+                output_paths={"instruction_index": run_dir / "instruction-index.raw.json"},
+            )
+        except SecretScanError as error:
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.insert_run(
+                    run_id=run_dir.name,
+                    stage="instruction_index",
+                    manifest_hash=index_inspect.manifest_hash,
+                    status="failed",
+                    run_dir=run_dir,
+                )
+            write_audit(run_dir, _secret_scan_audit_payload(error))
+            return AuditPipelineResult(1, run_dir, "instruction index blocked: secret detected")
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.record_llmff_run(
                 run_id=run_dir.name,
@@ -161,26 +186,64 @@ def run_audit_pipeline(
         if mock_llmff_inspect
         else None
     )
-    inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy, runner=runner)
     bundle = _ingest_trace(trace, trace_format)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
     audit_payload = _scored_audit_payload(bundle)
-    if not mock_llmff_inspect:
-        run = run_manifest(
-            manifest,
-            run_dir=run_dir,
-            policy=policy,
-            timeout_ms=60_000,
-            retry_attempts=0,
-            retry_backoff_ms=0,
-            input_paths={
-                "episode_trace": redacted_trace,
-                "instruction_index": instruction_index_path,
-                "policy": sidecar_dir(repo) / "policy.yaml",
-            },
-            output_paths={"audit_report": run_dir / "audit.raw.json"},
+    try:
+        inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy, runner=runner)
+    except SecretScanError as error:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash=_file_sha256(manifest),
+                status="failed",
+                run_dir=run_dir,
+                episode_id=episode_id,
+            )
+        write_audit(
+            run_dir,
+            _secret_scan_audit_payload(
+                error,
+                evidence_refs=[str(ref) for ref in audit_payload.get("evidence_refs", [])],
+            ),
         )
+        return AuditPipelineResult(1, run_dir, "audit blocked: secret detected")
+    if not mock_llmff_inspect:
+        try:
+            run = run_manifest(
+                manifest,
+                run_dir=run_dir,
+                policy=policy,
+                timeout_ms=60_000,
+                retry_attempts=0,
+                retry_backoff_ms=0,
+                input_paths={
+                    "episode_trace": redacted_trace,
+                    "instruction_index": instruction_index_path,
+                    "policy": sidecar_dir(repo) / "policy.yaml",
+                },
+                output_paths={"audit_report": run_dir / "audit.raw.json"},
+            )
+        except SecretScanError as error:
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.insert_run(
+                    run_id=run_dir.name,
+                    stage="audit",
+                    manifest_hash=inspect.manifest_hash,
+                    status="failed",
+                    run_dir=run_dir,
+                    episode_id=episode_id,
+                )
+            write_audit(
+                run_dir,
+                _secret_scan_audit_payload(
+                    error,
+                    evidence_refs=[str(ref) for ref in audit_payload.get("evidence_refs", [])],
+                ),
+            )
+            return AuditPipelineResult(1, run_dir, "audit blocked: secret detected")
         if run.exit_code != 0:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
                 store.record_llmff_run(
@@ -286,6 +349,33 @@ def _failed_audit_result(
             episode_id=episode_id,
         )
     return AuditPipelineResult(1, run_dir, message)
+
+
+def _secret_scan_audit_payload(
+    error: SecretScanError,
+    *,
+    evidence_refs: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "audit_id": 0,
+        "edit_warranted": False,
+        "evidence_refs": list(evidence_refs or []),
+        "failure_class": "secret_detected",
+        "severity": "critical",
+        "confidence": 1.0,
+        "secret_findings": [
+            {
+                "path": finding.path,
+                "line_number": finding.line_number,
+                "kind": finding.kind,
+            }
+            for finding in error.findings
+        ],
+    }
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _failed_instruction_index_result(

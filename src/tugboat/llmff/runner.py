@@ -258,6 +258,7 @@ def inspect_manifest(
         json.dumps(artifact, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
+    scan_path(artifact_path)
     return InspectResult(
         manifest_path=manifest_path,
         manifest_hash=manifest_digest,
