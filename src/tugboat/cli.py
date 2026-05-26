@@ -1099,6 +1099,15 @@ def _write_apply_plan(
                 "applied_commit": applied_commit,
             },
         )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor=review_actor,
+            policy="apply_controller",
+            decision="applied" if applied_commit else "planned",
+            reason="policy gate and eval report passed",
+            applied_commit=applied_commit,
+            rollback_ref=json.dumps(rollback_command, sort_keys=True),
+        )
         if applied_commit:
             store.append_audit_event(
                 "apply.applied",

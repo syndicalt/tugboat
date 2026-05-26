@@ -323,6 +323,39 @@ def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):
     }
 
 
+def test_apply_commit_mode_records_apply_decision_row(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT actor, policy, decision, reason, applied_commit, rollback_ref, audit_event_sequence
+            FROM decisions
+            WHERE candidate_id = 7 AND policy = 'apply_controller'
+            """
+        ).fetchone()
+        event_type = connection.execute(
+            "SELECT event_type FROM audit_events WHERE sequence = ?",
+            (row[6],),
+        ).fetchone()[0]
+
+    assert row == (
+        "tugboat",
+        "apply_controller",
+        "applied",
+        "policy gate and eval report passed",
+        apply_plan["applied_commit"],
+        json.dumps(apply_plan["rollback_command"], sort_keys=True),
+        row[6],
+    )
+    assert row[6] is not None
+    assert event_type == "decision.recorded"
+
+
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

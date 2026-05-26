@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS decisions (
   decision TEXT NOT NULL,
   reason TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  applied_commit TEXT NOT NULL DEFAULT '',
+  rollback_ref TEXT NOT NULL DEFAULT '',
   audit_event_sequence INTEGER
 );
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -266,6 +268,8 @@ class Store:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(SCHEMA)
         _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
+        _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
         connection.commit()
         return cls(connection)
 
@@ -688,15 +692,27 @@ class Store:
         policy: str,
         decision: str,
         reason: str,
+        applied_commit: str = "",
+        rollback_ref: str = "",
     ) -> int:
         cursor = self.connection.execute(
             """
             INSERT INTO decisions(
-              candidate_id, actor, policy, decision, reason, created_at, audit_event_sequence
+              candidate_id, actor, policy, decision, reason, created_at,
+              applied_commit, rollback_ref, audit_event_sequence
             )
-            VALUES (?, ?, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
             """,
-            (candidate_id, actor, policy, decision, reason, _now()),
+            (
+                candidate_id,
+                actor,
+                policy,
+                decision,
+                reason,
+                _now(),
+                applied_commit,
+                rollback_ref,
+            ),
         )
         self.connection.commit()
         decision_id = int(cursor.lastrowid)
