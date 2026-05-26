@@ -182,19 +182,47 @@ def main(argv: Sequence[str] | None = None) -> int:
         policy = load_policy(repo)
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             latest = store.connection.execute(
-                "SELECT stage, status FROM runs ORDER BY created_at DESC LIMIT 1"
+                "SELECT id, stage, status FROM runs ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
+            latest_llmff = None
+            latest_failure_kind = None
+            if latest is not None:
+                latest_llmff = store.connection.execute(
+                    """
+                    SELECT id, manifest_name, status
+                    FROM llmff_jobs
+                    WHERE run_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (latest[0],),
+                ).fetchone()
+                if latest_llmff is not None:
+                    latest_failure_kind = _latest_llmff_failure_kind(store, int(latest_llmff[0]))
             pending_candidates = int(
                 store.connection.execute(
                     "SELECT COUNT(*) FROM candidates WHERE state = 'needs_review'"
                 ).fetchone()[0]
             )
             indexed_documents = store.count("documents")
+        retention = apply_retention_policy(repo, policy, dry_run=True)
+        manifest_policy = (
+            f"pinned {len(policy.allowed_manifest_hashes)}"
+            if policy.allowed_manifest_hashes
+            else "unrestricted"
+        )
         print(f"mode: {policy.mode}")
         print(f"auto_apply: {'enabled' if policy.auto_apply_enabled else 'disabled'}")
         print(f"indexed_documents: {indexed_documents}")
-        print(f"latest_run: {latest[0]} {latest[1]}" if latest else "latest_run: none")
+        print(f"latest_run: {latest[1]} {latest[2]}" if latest else "latest_run: none")
+        if latest_llmff is None:
+            print("latest_llmff_job: none")
+        else:
+            print(f"latest_llmff_job: {latest_llmff[1]} {latest_llmff[2]}")
+        print(f"latest_llmff_failure_kind: {latest_failure_kind or 'none'}")
         print(f"pending_candidates: {pending_candidates}")
+        print(f"retention_candidates: {len(retention.candidates)}")
+        print(f"manifest_policy: {manifest_policy}")
         return 0
 
     if args.command == "retention":
@@ -647,6 +675,32 @@ def _decision_from_artifact(run_dir: Path):
 
     payload = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     return PolicyDecision(bool(payload["allowed"]), tuple(payload["reasons"]))
+
+
+def _latest_llmff_failure_kind(store: Store, job_id: int) -> str | None:
+    row = store.connection.execute(
+        """
+        SELECT payload_json
+        FROM llmff_events
+        WHERE job_id = ? AND event_type = 'run_failed'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (job_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(str(row[0]))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    details = payload.get("run_failed")
+    if isinstance(details, dict) and details.get("failure_kind"):
+        return str(details["failure_kind"])
+    failure_kind = payload.get("failure_kind")
+    return str(failure_kind) if failure_kind else None
 
 
 def _write_apply_plan(
