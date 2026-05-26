@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -70,6 +71,10 @@ raise SystemExit(64)
     )
     path.chmod(0o755)
     return path
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
@@ -559,6 +564,75 @@ def test_run_daemon_cycle_leases_checkpoint_resume_when_manifest_hash_matches(tm
         "repo": str(tmp_path),
         "run_id": "run-1",
     }
+
+
+def test_run_daemon_cycle_executes_checkpoint_resume_when_manifest_and_outputs_are_declared(
+    tmp_path: Path,
+):
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    (tmp_path / ".sidecar").mkdir()
+    (tmp_path / ".sidecar" / "policy.yaml").write_text(
+        f"version: 1\nllmff:\n  binary: {fake_llmff}\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / ".sidecar" / "manifests" / "instruction-index.yaml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("name: instruction-index\n", encoding="utf-8")
+    manifest_hash = _sha256(manifest)
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    lifecycle_dir = run_dir / "instruction-index"
+    lifecycle_dir.mkdir(parents=True)
+    checkpoint = lifecycle_dir / "checkpoint.json"
+    checkpoint.write_text(json.dumps({"manifest_hash": manifest_hash}) + "\n", encoding="utf-8")
+    output = run_dir / "instruction-index.raw.json"
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload={
+                "run_id": "run-1",
+                "manifest_hash": manifest_hash,
+                "checkpoint_path": str(checkpoint),
+                "manifest_path": str(manifest),
+                "output_paths": {"instruction_index": str(output)},
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["processed_jobs"] == [1]
+    assert result["failed_jobs"] == []
+    assert output.exists()
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        llmff_job = connection.execute(
+            """
+            SELECT manifest_name, manifest_hash, status, exit_code
+            FROM llmff_jobs
+            """
+        ).fetchone()
+        resume_event = connection.execute(
+            """
+            SELECT payload_json
+            FROM audit_events
+            WHERE event_type = 'daemon_job.resume_ready'
+            """
+        ).fetchone()
+
+    assert tuple(llmff_job) == ("instruction-index.yaml", manifest_hash, "completed", 0)
+    assert json.loads(resume_event[0])["checkpoint_path"] == (
+        ".sidecar/runs/run-1/instruction-index/checkpoint.json"
+    )
 
 
 def test_run_daemon_cycle_fails_checkpoint_resume_on_manifest_mismatch(tmp_path: Path):

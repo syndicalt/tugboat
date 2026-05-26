@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.config import load_policy
 from tugboat.daemon.queue import (
     DaemonQueue,
     FileKillSwitch,
@@ -18,6 +19,7 @@ from tugboat.daemon.queue import (
 )
 from tugboat.daemon.service import process_daemon_job
 from tugboat.db import Store
+from tugboat.llmff.runner import run_manifest as run_llmff_manifest
 from tugboat.paths import sidecar_dir
 from tugboat.security.secrets import SecretScanError, scan_path
 
@@ -133,6 +135,12 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
                 if validation.resume is not None:
                     resume_jobs.append(validation.resume)
                     _record_resume_ready(repo, validation.resume)
+                    if _resume_can_execute(validation.resume):
+                        final_job = _execute_resume(repo, queue, job.id, validation.resume, now=config.now)
+                        if final_job.state is JobState.FAILED:
+                            failed_jobs.append({"job_id": job.id, "reason": "resume_failed"})
+                            continue
+                        processed_jobs.append(job.id)
                     continue
             final_job = process_daemon_job(repo, queue, job.id, now=config.now)
             if final_job.state is JobState.FAILED:
@@ -231,14 +239,23 @@ def _resume_metadata(repo: Path, job_id: int, payload: Any) -> ResumeValidation:
         return ResumeValidation(resume=None, failure_reason="checkpoint_unreadable")
     if str(checkpoint.get("manifest_hash")) != manifest_hash:
         return ResumeValidation(resume=None, failure_reason="checkpoint_manifest_mismatch")
-    return ResumeValidation(
-        resume={
-            "job_id": job_id,
-            "run_id": run_id,
-            "checkpoint_path": str(checkpoint_path),
-            "manifest_hash": manifest_hash,
-        }
-    )
+    resume: dict[str, Any] = {
+        "job_id": job_id,
+        "run_id": run_id,
+        "checkpoint_path": str(checkpoint_path),
+        "manifest_hash": manifest_hash,
+    }
+    for key in (
+        "manifest_path",
+        "input_paths",
+        "output_paths",
+        "timeout_ms",
+        "retry_attempts",
+        "retry_backoff_ms",
+    ):
+        if key in payload:
+            resume[key] = payload[key]
+    return ResumeValidation(resume=resume)
 
 
 def _resume_payload_text(payload: dict[str, Any], key: str) -> str | None:
@@ -255,6 +272,98 @@ def _queued_count(queue: DaemonQueue) -> int:
             (JobState.QUEUED.value,),
         ).fetchone()[0]
     )
+
+
+def _resume_can_execute(resume: dict[str, Any]) -> bool:
+    return isinstance(resume.get("manifest_path"), str) and isinstance(resume.get("output_paths"), dict)
+
+
+def _execute_resume(
+    repo: Path,
+    queue: DaemonQueue,
+    job_id: int,
+    resume: dict[str, Any],
+    *,
+    now: datetime | None,
+) -> Any:
+    running = queue.transition(job_id, JobState.RUNNING, now=now)
+    _record_job_state(repo, running.id, running.state)
+    policy = load_policy(repo)
+    try:
+        result = run_llmff_manifest(
+            _resume_path(repo, resume, "manifest_path"),
+            run_dir=(repo / ".sidecar" / "runs" / str(resume["run_id"])).resolve(),
+            policy=policy,
+            timeout_ms=_resume_positive_int(resume.get("timeout_ms"), 60_000),
+            retry_attempts=_resume_non_negative_int(resume.get("retry_attempts"), 0),
+            retry_backoff_ms=_resume_non_negative_int(resume.get("retry_backoff_ms"), 0),
+            checkpoint_path=Path(str(resume["checkpoint_path"])).resolve(),
+            input_paths=_resume_paths(repo, resume.get("input_paths")),
+            output_paths=_resume_paths(repo, resume.get("output_paths")),
+        )
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.record_llmff_run(
+                run_id=str(resume["run_id"]),
+                manifest_hash=str(resume["manifest_hash"]),
+                result=result,
+            )
+    except Exception:
+        failed = queue.transition(running.id, JobState.FAILED, now=now)
+        _record_job_state(repo, failed.id, failed.state)
+        return failed
+    evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
+    _record_job_state(repo, evaluating.id, evaluating.state)
+    final_state = JobState.WAITING_REVIEW if result.exit_code == 0 else JobState.FAILED
+    final_job = queue.transition(evaluating.id, final_state, now=now)
+    _record_job_state(repo, final_job.id, final_job.state)
+    return final_job
+
+
+def _resume_path(repo: Path, resume: dict[str, Any], key: str) -> Path:
+    value = resume.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"resume {key} must be a path")
+    path = Path(value).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"resume {key} must exist")
+    if not path.is_relative_to(repo.resolve()):
+        raise ValueError(f"resume {key} must resolve inside repo")
+    return path
+
+
+def _resume_paths(repo: Path, raw_paths: object) -> dict[str, Path]:
+    if raw_paths is None:
+        return {}
+    if not isinstance(raw_paths, dict):
+        raise ValueError("resume paths must be a JSON object")
+    paths: dict[str, Path] = {}
+    repo_root = repo.resolve()
+    for name, raw_path in raw_paths.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("resume path names must be non-empty strings")
+        if not isinstance(raw_path, str):
+            raise ValueError(f"resume path for {name} must be a string")
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_relative_to(repo_root):
+            raise ValueError(f"resume path for {name} must resolve inside repo")
+        paths[name] = path
+    return paths
+
+
+def _resume_positive_int(value: object, default: int) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError("resume timeout_ms must be a positive integer")
+    return value
+
+
+def _resume_non_negative_int(value: object, default: int) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("resume retry values must be non-negative integers")
+    return value
 
 
 def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
