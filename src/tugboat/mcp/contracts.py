@@ -293,6 +293,81 @@ def tugboat_candidate(repo: str | Path, candidate_id: int) -> dict[str, Any]:
     )
 
 
+def tugboat_candidate_report(repo: str | Path, candidate_id: int) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
+            candidate_row = store.connection.execute(
+                """
+                SELECT id, audit_id, base_file, diff_path, risk_class, rationale, state
+                FROM candidates
+                WHERE id = ?
+                """,
+                (candidate_id,),
+            ).fetchone()
+            eval_row = store.connection.execute(
+                """
+                SELECT suite_id, passed, report_path
+                FROM evals
+                WHERE candidate_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (candidate_id,),
+            ).fetchone()
+            decision_row = store.connection.execute(
+                """
+                SELECT actor, policy, decision, reason
+                FROM decisions
+                WHERE candidate_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (candidate_id,),
+            ).fetchone()
+        if candidate_row is None:
+            raise ValueError(f"unknown candidate_id: {candidate_id}")
+        diff_path = _stored_path(repo_path, candidate_row[3])
+        report: dict[str, Any] = {
+            "candidate": {
+                "candidate_id": int(candidate_row[0]),
+                "audit_id": int(candidate_row[1]),
+                "base_file": str(candidate_row[2]),
+                "risk_class": str(candidate_row[4]),
+                "state": str(candidate_row[6]),
+                "rationale_summary": _summarize_text(str(candidate_row[5])),
+            },
+            "latest_eval": None,
+            "latest_decision": None,
+            "artifacts": [{"kind": "candidate_diff", "path": _relative_ref(repo_path, diff_path)}],
+        }
+        if eval_row is not None:
+            report["latest_eval"] = {
+                "suite_id": str(eval_row[0]),
+                "passed": bool(eval_row[1]),
+                "artifact": {
+                    "kind": "eval_report",
+                    "path": _relative_ref(repo_path, _stored_path(repo_path, eval_row[2])),
+                },
+            }
+        if decision_row is not None:
+            report["latest_decision"] = {
+                "actor": redact_text(str(decision_row[0])),
+                "policy": str(decision_row[1]),
+                "decision": str(decision_row[2]),
+                "reason_summary": _summarize_text(str(decision_row[3])),
+            }
+        return report
+
+    return _audit_call(
+        repo_path,
+        "tugboat_candidate_report",
+        {"candidate_id": int(candidate_id)},
+        read,
+    )
+
+
 def tugboat_daemon_status(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -403,6 +478,7 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
 MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_active_instructions": tugboat_active_instructions,
     "tugboat_candidate": tugboat_candidate,
+    "tugboat_candidate_report": tugboat_candidate_report,
     "tugboat_daemon_status": tugboat_daemon_status,
     "tugboat_harness_findings": tugboat_harness_findings,
     "tugboat_index_summary": tugboat_index_summary,

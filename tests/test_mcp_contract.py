@@ -14,6 +14,7 @@ from tugboat.mcp import (
     list_mcp_tools,
     tugboat_active_instructions,
     tugboat_candidate,
+    tugboat_candidate_report,
     tugboat_harness_findings,
     tugboat_index_summary,
     tugboat_latest_audit,
@@ -595,6 +596,167 @@ def test_candidate_returns_summary_and_diff_ref_without_raw_diff(tmp_path: Path)
     assert "sk-thissecret" not in json.dumps(result, sort_keys=True)
 
 
+def test_candidate_report_returns_eval_and_decision_refs_without_raw_payloads(tmp_path: Path):
+    repo = tmp_path
+    run_dir = runs_dir(repo) / "run-1"
+    run_dir.mkdir(parents=True)
+    (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["event:1"],
+            instruction_refs=["CODEX.md"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="CODEX.md",
+            base_hash=CandidatePatch.hash_file(repo / "CODEX.md"),
+            diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+sk-thissecretkeyvalue1234567890\n",
+            risk_class="instruction_clarification",
+            rationale="mentions sk-thissecretkeyvalue1234567890",
+            sources=(SourceRef("audit:latest", trusted=True),),
+        )
+        diff_path = run_dir / "candidate.diff"
+        diff_path.write_text(candidate.diff, encoding="utf-8")
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        eval_report = run_dir / "eval-report.json"
+        eval_report.write_text(
+            '{"model_payload":"sk-thissecretkeyvalue1234567890","passed":true}\n',
+            encoding="utf-8",
+        )
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={"held_out_score": 0.91, "secret_note": "sk-thissecretkeyvalue1234567890"},
+        )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor="reviewer",
+            policy="proposal_only",
+            decision="needs_review",
+            reason="policy passed for sk-thissecretkeyvalue1234567890",
+        )
+
+    result = tugboat_candidate_report(repo, candidate_id)
+
+    assert result == {
+        "candidate": {
+            "candidate_id": candidate_id,
+            "audit_id": audit_id,
+            "base_file": "CODEX.md",
+            "risk_class": "instruction_clarification",
+            "state": "needs_review",
+            "rationale_summary": "mentions [REDACTED:openai_api_key]",
+        },
+        "latest_eval": {
+            "suite_id": "all",
+            "passed": True,
+            "artifact": {"kind": "eval_report", "path": ".sidecar/runs/run-1/eval-report.json"},
+        },
+        "latest_decision": {
+            "actor": "reviewer",
+            "policy": "proposal_only",
+            "decision": "needs_review",
+            "reason_summary": "policy passed for [REDACTED:openai_api_key]",
+        },
+        "artifacts": [{"kind": "candidate_diff", "path": ".sidecar/runs/run-1/candidate.diff"}],
+    }
+    serialized = json.dumps(result, sort_keys=True)
+    assert "model_payload" not in serialized
+    assert "secret_note" not in serialized
+    assert "sk-thissecret" not in serialized
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_candidate_report"
+
+
+def test_candidate_report_uses_latest_eval_and_decision_rows(tmp_path: Path):
+    repo = tmp_path
+    run_dir = runs_dir(repo) / "run-1"
+    run_dir.mkdir(parents=True)
+    (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["event:1"],
+            instruction_refs=["CODEX.md"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="CODEX.md",
+            base_hash=CandidatePatch.hash_file(repo / "CODEX.md"),
+            diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+            risk_class="instruction_clarification",
+            rationale="clarify testing",
+            sources=(SourceRef("audit:latest", trusted=True),),
+        )
+        diff_path = run_dir / "candidate.diff"
+        diff_path.write_text(candidate.diff, encoding="utf-8")
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        old_eval = run_dir / "eval-old.json"
+        new_eval = run_dir / "eval-new.json"
+        old_eval.write_text("{}\n", encoding="utf-8")
+        new_eval.write_text("{}\n", encoding="utf-8")
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="smoke",
+            report_path=old_eval,
+            passed=False,
+            metrics={},
+        )
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=new_eval,
+            passed=True,
+            metrics={},
+        )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor="old-reviewer",
+            policy="proposal_only",
+            decision="rejected",
+            reason="old decision",
+        )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor="new-reviewer",
+            policy="proposal_only",
+            decision="needs_review",
+            reason="new decision",
+        )
+
+    result = tugboat_candidate_report(repo, candidate_id)
+
+    assert result["latest_eval"] == {
+        "suite_id": "all",
+        "passed": True,
+        "artifact": {"kind": "eval_report", "path": ".sidecar/runs/run-1/eval-new.json"},
+    }
+    assert result["latest_decision"] == {
+        "actor": "new-reviewer",
+        "policy": "proposal_only",
+        "decision": "needs_review",
+        "reason_summary": "new decision",
+    }
+
+
 def test_repo_must_be_local_path():
     with pytest.raises(ValueError, match="local repo path"):
         tugboat_status("https://example.com/repo.git")
@@ -967,6 +1129,7 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
 
     by_name = {tool["name"]: tool for tool in tools}
     assert "tugboat_active_instructions" in by_name
+    assert "tugboat_candidate_report" in by_name
     assert "tugboat_index_summary" in by_name
     assert "tugboat_latest_audit" in by_name
     assert "tugboat_status" in by_name
@@ -983,6 +1146,11 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     }
     assert by_name["tugboat_index_summary"] == {
         "name": "tugboat_index_summary",
+        "mutates_instructions": False,
+        "write_intent": False,
+    }
+    assert by_name["tugboat_candidate_report"] == {
+        "name": "tugboat_candidate_report",
         "mutates_instructions": False,
         "write_intent": False,
     }
