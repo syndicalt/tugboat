@@ -1462,6 +1462,8 @@ def _write_apply_plan(
     if not bool(policy_gate["allowed"]):
         raise ValueError("stored policy gate rejected candidate")
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    if int(eval_report["candidate_id"]) != candidate_id:
+        raise ValueError("eval report candidate_id does not match candidate")
     if not bool(eval_report["passed"]):
         raise ValueError("eval report did not pass")
     _assert_eval_acceptance(eval_report, policy_gate)

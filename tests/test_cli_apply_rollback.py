@@ -607,6 +607,22 @@ def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path)
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_eval_report_for_different_candidate(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["candidate_id"] = 999
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+
+
 def test_apply_rejects_equal_trigger_and_held_out_scores(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
