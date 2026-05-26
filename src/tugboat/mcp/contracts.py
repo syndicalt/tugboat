@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar
 
+from tugboat.artifacts import validate_json_artifact
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.queue import DaemonQueue
@@ -712,6 +713,7 @@ def _write_request_artifact(
             "repo_policy": repo_policy,
             **payload,
         }
+        validate_json_artifact("mcp-request.json", artifact)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         artifact_ref = _relative_ref(repo_path, path)

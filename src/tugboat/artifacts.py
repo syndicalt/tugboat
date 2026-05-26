@@ -839,6 +839,27 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "deleted": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "mcp-request.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "required": ["request_id", "kind", "state", "write_intent", "repo_policy"],
+        "properties": {
+            "request_id": {"type": "string"},
+            "kind": {"type": "string", "enum": ["audit", "proposal", "eval"]},
+            "state": {"type": "string", "const": "queued"},
+            "write_intent": {"type": "boolean", "const": True},
+            "repo_policy": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "version", "hash"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "version": {"type": "integer"},
+                    "hash": {"type": ["string", "null"]},
+                },
+            },
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

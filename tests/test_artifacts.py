@@ -688,6 +688,38 @@ def test_validate_retention_report_rejects_apply_mode_without_deleted_list():
         )
 
 
+def test_validate_mcp_request_artifact_accepts_common_write_intent_shape():
+    validate_json_artifact(
+        "mcp-request.json",
+        {
+            "request_id": "mcp-audit-20260526T000000000000Z",
+            "kind": "audit",
+            "state": "queued",
+            "write_intent": True,
+            "repo_policy": {
+                "path": ".sidecar/policy.yaml",
+                "version": 1,
+                "hash": None,
+            },
+            "trace_id": "mcp-trace-20260526T000000000000Z",
+        },
+    )
+
+
+def test_validate_mcp_request_artifact_rejects_missing_repo_policy():
+    with pytest.raises(ArtifactValidationError, match="repo_policy"):
+        validate_json_artifact(
+            "mcp-request.json",
+            {
+                "request_id": "mcp-audit-20260526T000000000000Z",
+                "kind": "audit",
+                "state": "queued",
+                "write_intent": True,
+                "trace_id": "mcp-trace-20260526T000000000000Z",
+            },
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 

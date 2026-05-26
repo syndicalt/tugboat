@@ -1074,6 +1074,34 @@ def test_request_audit_keeps_daemon_job_invisible_until_audit_record_exists(
         assert queue_store.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 1
 
 
+def test_request_audit_validates_request_artifact_before_queue_visibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"user_correction","content":"Add regression tests"}\n',
+    )
+
+    def fail_mcp_request_artifact(name, payload):
+        if name == "mcp-request.json":
+            raise ValueError("invalid mcp request artifact")
+
+    monkeypatch.setattr(
+        "tugboat.mcp.contracts.validate_json_artifact",
+        fail_mcp_request_artifact,
+    )
+
+    with pytest.raises(ValueError, match="invalid mcp request artifact"):
+        tugboat_request_audit(repo, episode["trace_id"])
+
+    assert not (sidecar_dir(repo) / "mcp" / "requests").exists()
+    assert not (sidecar_dir(repo) / "daemon.sqlite").exists()
+
+
 @pytest.mark.parametrize(
     ("request_fn", "expected_kind", "expected_payload"),
     (
