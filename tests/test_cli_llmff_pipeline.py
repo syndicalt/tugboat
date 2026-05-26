@@ -144,7 +144,12 @@ INVALID_JSON_OUTPUT = __INVALID_JSON_OUTPUT__
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
     manifest = Path(args[3]).stem
-    inspect_payload = {"manifest": manifest, "network_required": False}
+    inspect_payload = {
+        "manifest": manifest,
+        "network_required": False,
+        "providers": [],
+        "external_calls": [],
+    }
     if SECRET_ARTIFACT == "inspect_episode_audit" and manifest == "episode-audit":
         inspect_payload["raw_model_payload"] = SECRET_VALUE
     print(json.dumps(inspect_payload))

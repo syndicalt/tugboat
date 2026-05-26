@@ -99,6 +99,7 @@ def test_validate_llmff_inspect_artifact_accepts_current_schema():
             "manifest_path": ".sidecar/manifests/episode-audit.yaml",
             "manifest_hash": "abc123",
             "network_required": False,
+            "external_calls": [],
             "inspect": {"manifest": "episode-audit", "providers": []},
         },
     )

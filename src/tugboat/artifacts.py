@@ -531,6 +531,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "manifest_path",
             "manifest_hash",
             "network_required",
+            "external_calls",
             "inspect",
         ],
         "properties": {
@@ -538,6 +539,18 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "manifest_path": {"type": "string"},
             "manifest_hash": {"type": "string"},
             "network_required": {"type": "boolean"},
+            "external_calls": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["kind", "target"],
+                    "properties": {
+                        "kind": {"type": "string", "minLength": 1},
+                        "target": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
             "inspect": {"type": "object"},
         },
     },

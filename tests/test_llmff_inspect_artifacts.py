@@ -22,6 +22,7 @@ def test_inspect_manifest_writes_sidecar_artifact_with_manifest_hash(tmp_path: P
             "manifest": "audit",
             "network_required": False,
             "providers": [],
+            "external_calls": [],
         }
     )
 
@@ -36,6 +37,7 @@ def test_inspect_manifest_writes_sidecar_artifact_with_manifest_hash(tmp_path: P
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
     assert result.manifest_hash == artifact["manifest_hash"]
     assert result.network_required is False
+    assert artifact["external_calls"] == []
     assert artifact["inspect"]["network_required"] is False
     assert runner.inspect_calls == [manifest]
 
@@ -43,7 +45,12 @@ def test_inspect_manifest_writes_sidecar_artifact_with_manifest_hash(tmp_path: P
 def test_inspect_manifest_fails_closed_when_network_is_disallowed(tmp_path: Path):
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("name: audit\n", encoding="utf-8")
-    runner = FixtureLlmffRunner(inspect_payload={"network_required": True})
+    runner = FixtureLlmffRunner(
+        inspect_payload={
+            "network_required": True,
+            "external_calls": [{"kind": "http", "target": "api.example.test"}],
+        }
+    )
 
     with pytest.raises(InspectPolicyError, match="network"):
         inspect_manifest(
@@ -75,16 +82,33 @@ def test_inspect_manifest_rejects_missing_network_declaration(tmp_path: Path):
     assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
 
 
+def test_inspect_manifest_rejects_missing_external_call_declaration(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    runner = FixtureLlmffRunner(inspect_payload={"network_required": False, "providers": []})
+
+    with pytest.raises(InspectPolicyError, match="external_calls must be declared"):
+        inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            runner=runner,
+        )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
 def test_inspect_manifest_rejects_malformed_network_declaration(tmp_path: Path):
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("name: audit\n", encoding="utf-8")
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
 
     for inspect_payload in (
-        {"network_required": "false", "providers": []},
-        {"requires_network": 0, "providers": []},
-        {"network": {"required": "false"}, "providers": []},
-        {"network": "false", "providers": []},
+        {"network_required": "false", "providers": [], "external_calls": []},
+        {"requires_network": 0, "providers": [], "external_calls": []},
+        {"network": {"required": "false"}, "providers": [], "external_calls": []},
+        {"network": "false", "providers": [], "external_calls": []},
     ):
         with pytest.raises(InspectPolicyError, match="network_required must be a boolean"):
             inspect_manifest(
@@ -97,10 +121,83 @@ def test_inspect_manifest_rejects_malformed_network_declaration(tmp_path: Path):
     assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
 
 
+def test_inspect_manifest_rejects_malformed_external_call_declarations(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    for inspect_payload in (
+        {"network_required": False, "providers": [], "external_calls": "none"},
+        {"network_required": False, "providers": [], "external_calls": [123]},
+        {"network_required": False, "providers": [], "external_calls": [{}]},
+        {
+            "network_required": False,
+            "providers": [],
+            "external_calls": [{"kind": "", "target": "openai"}],
+        },
+        {
+            "network_required": False,
+            "providers": [],
+            "external_calls": [{"kind": "model_provider", "target": ""}],
+        },
+    ):
+        with pytest.raises(InspectPolicyError, match="external_calls"):
+            inspect_manifest(
+                manifest,
+                run_dir=run_dir,
+                policy=Policy(),
+                runner=FixtureLlmffRunner(inspect_payload=inspect_payload),
+            )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
+def test_inspect_manifest_rejects_external_calls_when_network_is_false(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    runner = FixtureLlmffRunner(
+        inspect_payload={
+            "network_required": False,
+            "providers": [],
+            "external_calls": [{"kind": "http", "target": "api.openai.com"}],
+        }
+    )
+
+    with pytest.raises(InspectPolicyError, match="external_calls conflict with network_required"):
+        inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            runner=runner,
+        )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
+def test_inspect_manifest_rejects_network_true_without_external_calls(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    runner = FixtureLlmffRunner(
+        inspect_payload={"network_required": True, "providers": [], "external_calls": []}
+    )
+
+    with pytest.raises(InspectPolicyError, match="external_calls must declare at least one call"):
+        inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_allow_network=True),
+            runner=runner,
+        )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
 def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("name: audit\n", encoding="utf-8")
-    runner = FixtureLlmffRunner(inspect_payload={"network_required": False})
+    runner = FixtureLlmffRunner(inspect_payload={"network_required": False, "external_calls": []})
 
     with pytest.raises(InspectPolicyError, match="manifest hash"):
         inspect_manifest(
@@ -119,14 +216,42 @@ def test_inspect_manifest_rejects_unallowlisted_declared_provider(tmp_path: Path
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("name: audit\n", encoding="utf-8")
     runner = FixtureLlmffRunner(
-        inspect_payload={"network_required": False, "providers": ["openai"]}
+        inspect_payload={
+            "network_required": True,
+            "providers": ["openai"],
+            "external_calls": [{"kind": "model_provider", "target": "openai"}],
+        }
     )
 
     with pytest.raises(InspectPolicyError, match="provider is not allowed"):
         inspect_manifest(
             manifest,
             run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
-            policy=Policy(),
+            policy=Policy(llmff_allow_network=True),
+            runner=runner,
+        )
+
+    assert not (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "manifest" / "llmff-inspect.json"
+    ).exists()
+
+
+def test_inspect_manifest_rejects_provider_missing_from_external_calls(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    runner = FixtureLlmffRunner(
+        inspect_payload={
+            "network_required": True,
+            "providers": ["openai"],
+            "external_calls": [{"kind": "http", "target": "api.openai.com"}],
+        }
+    )
+
+    with pytest.raises(InspectPolicyError, match="provider missing from external_calls"):
+        inspect_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(llmff_allow_network=True, llmff_allowed_providers=("openai",)),
             runner=runner,
         )
 
@@ -141,18 +266,23 @@ def test_inspect_manifest_allows_declared_provider_when_policy_allowlisted(
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("name: audit\n", encoding="utf-8")
     runner = FixtureLlmffRunner(
-        inspect_payload={"network_required": False, "providers": ["openai"]}
+        inspect_payload={
+            "network_required": True,
+            "providers": ["openai"],
+            "external_calls": [{"kind": "model_provider", "target": "openai"}],
+        }
     )
 
     result = inspect_manifest(
         manifest,
         run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
-        policy=Policy(llmff_allowed_providers=("openai",)),
+        policy=Policy(llmff_allow_network=True, llmff_allowed_providers=("openai",)),
         runner=runner,
     )
 
     artifact = json.loads(result.artifact_path.read_text(encoding="utf-8"))
     assert artifact["inspect"]["providers"] == ["openai"]
+    assert artifact["external_calls"] == [{"kind": "model_provider", "target": "openai"}]
 
 
 def test_inspect_manifest_rejects_malformed_provider_declarations(tmp_path: Path):
@@ -160,9 +290,9 @@ def test_inspect_manifest_rejects_malformed_provider_declarations(tmp_path: Path
     manifest.write_text("name: audit\n", encoding="utf-8")
 
     for inspect_payload in (
-        {"network_required": False, "providers": "openai"},
-        {"network_required": False, "providers": [123]},
-        {"network_required": False, "providers": [""]},
+        {"network_required": False, "providers": "openai", "external_calls": []},
+        {"network_required": False, "providers": [123], "external_calls": []},
+        {"network_required": False, "providers": [""], "external_calls": []},
     ):
         with pytest.raises(InspectPolicyError, match="providers must be a list of non-empty strings"):
             inspect_manifest(
@@ -184,6 +314,7 @@ def test_inspect_manifest_removes_secret_bearing_artifact(tmp_path: Path):
         inspect_payload={
             "network_required": False,
             "providers": [],
+            "external_calls": [],
             "example_token": "ghp_abcdefghijklmnopqrstuvwx",
         }
     )

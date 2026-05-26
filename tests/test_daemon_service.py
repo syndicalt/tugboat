@@ -34,7 +34,12 @@ from pathlib import Path
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
-    print(json.dumps({"manifest": Path(args[3]).stem, "network_required": False}))
+    print(json.dumps({
+        "manifest": Path(args[3]).stem,
+        "network_required": False,
+        "providers": [],
+        "external_calls": [],
+    }))
     raise SystemExit(0)
 
 if args[:1] == ["run"]:

@@ -180,6 +180,7 @@ def run_audit_pipeline(
                 "manifest": "episode-audit",
                 "network_required": False,
                 "providers": [],
+                "external_calls": [],
             }
         )
         if mock_llmff_inspect

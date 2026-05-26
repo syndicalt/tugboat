@@ -289,6 +289,45 @@ def _declared_providers(inspect_payload: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(provider.strip() for provider in providers if provider.strip()))
 
 
+def _external_calls(
+    inspect_payload: dict[str, Any],
+    *,
+    network_required: bool,
+    declared_providers: tuple[str, ...],
+) -> tuple[dict[str, str], ...]:
+    if "external_calls" not in inspect_payload:
+        raise InspectPolicyError("external_calls must be declared")
+    raw_calls = inspect_payload["external_calls"]
+    if not isinstance(raw_calls, list):
+        raise InspectPolicyError("external_calls must be a list")
+    calls: list[dict[str, str]] = []
+    for raw_call in raw_calls:
+        if not isinstance(raw_call, dict):
+            raise InspectPolicyError("external_calls entries must be objects")
+        kind = raw_call.get("kind")
+        target = raw_call.get("target")
+        if not isinstance(kind, str) or not kind.strip():
+            raise InspectPolicyError("external_calls entries require non-empty kind")
+        if not isinstance(target, str) or not target.strip():
+            raise InspectPolicyError("external_calls entries require non-empty target")
+        calls.append({"kind": kind.strip(), "target": target.strip()})
+
+    if network_required and not calls:
+        raise InspectPolicyError("external_calls must declare at least one call")
+    if not network_required and calls:
+        raise InspectPolicyError("external_calls conflict with network_required")
+
+    provider_targets = {
+        call["target"]
+        for call in calls
+        if call["kind"] in {"model_provider", "provider"}
+    }
+    for provider in declared_providers:
+        if provider not in provider_targets:
+            raise InspectPolicyError(f"provider missing from external_calls: {provider}")
+    return tuple(calls)
+
+
 def inspect_manifest(
     manifest_path: Path,
     *,
@@ -302,6 +341,11 @@ def inspect_manifest(
     if network_required and not policy.llmff_allow_network:
         raise InspectPolicyError("llmff inspect requires network but policy disallows network")
     declared_providers = _declared_providers(inspect_payload)
+    external_calls = _external_calls(
+        inspect_payload,
+        network_required=network_required,
+        declared_providers=declared_providers,
+    )
     allowed_providers = set(policy.llmff_allowed_providers)
     if declared_providers and not allowed_providers.issuperset(declared_providers):
         provider = next(provider for provider in declared_providers if provider not in allowed_providers)
@@ -317,6 +361,7 @@ def inspect_manifest(
         "manifest_path": str(manifest_path),
         "manifest_hash": manifest_digest,
         "network_required": network_required,
+        "external_calls": list(external_calls),
         "inspect": inspect_payload,
     }
     validate_json_artifact("llmff-inspect.json", artifact)
@@ -331,6 +376,7 @@ def inspect_manifest(
         artifact_path=artifact_path,
         inspect=inspect_payload,
         network_required=network_required,
+        external_calls=external_calls,
     )
 
 

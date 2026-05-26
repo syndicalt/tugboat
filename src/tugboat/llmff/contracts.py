@@ -33,3 +33,4 @@ class InspectResult:
     artifact_path: Path
     inspect: dict[str, Any]
     network_required: bool
+    external_calls: tuple[dict[str, str], ...]
