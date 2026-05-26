@@ -99,6 +99,16 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--rejection-rate", type=float, default=1.0)
     apply.add_argument("--rollback-rate", type=float, default=1.0)
 
+    auto_apply = subcommands.add_parser("auto-apply")
+    auto_apply.add_argument("--repo", required=True)
+    auto_apply.add_argument("--candidate", required=True)
+    auto_apply.add_argument("--confirm-auto-apply", action="store_true")
+    auto_apply.add_argument("--auto-apply-policy-version", type=int)
+    auto_apply.add_argument("--actor", required=True)
+    auto_apply.add_argument("--burn-in-days", type=int, default=0)
+    auto_apply.add_argument("--rejection-rate", type=float, default=1.0)
+    auto_apply.add_argument("--rollback-rate", type=float, default=1.0)
+
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("--repo", required=True)
     rollback.add_argument("--decision", required=True)
@@ -506,6 +516,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"apply blocked: {error}")
             return 1
         print(f"apply plan: {apply_path}")
+        return 0
+
+    if args.command == "auto-apply":
+        repo = Path(args.repo)
+        run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
+        try:
+            apply_path = _write_apply_plan(
+                repo,
+                run_dir,
+                mode="commit",
+                review_actor=args.actor,
+                human_review=False,
+                auto_apply=True,
+                confirm_auto_apply=args.confirm_auto_apply,
+                auto_apply_policy_version=args.auto_apply_policy_version,
+                burn_in_days=args.burn_in_days,
+                rejection_rate=args.rejection_rate,
+                rollback_rate=args.rollback_rate,
+            )
+        except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+            print(f"auto-apply blocked: {error}")
+            return 1
+        print(f"auto-apply plan: {apply_path}")
         return 0
 
     if args.command == "rollback":

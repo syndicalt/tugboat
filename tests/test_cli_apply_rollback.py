@@ -530,6 +530,51 @@ auto_apply:
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    (repo / ".sidecar" / "policy.yaml").write_text(
+        f"""
+version: 3
+auto_apply:
+  enabled: true
+  allowed_repositories:
+    - {repo}
+""",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "3",
+                "--actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 0
+    )
+
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    approval = json.loads((run_dir / "auto-apply-approval.json").read_text(encoding="utf-8"))
+    assert apply_plan["mode"] == "commit"
+    assert apply_plan["auto_apply"] is True
+    assert approval["actor"] == "operator@example.com"
+
+
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
