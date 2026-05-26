@@ -114,6 +114,16 @@ CREATE TABLE IF NOT EXISTS audit_events (
   previous_hash TEXT NOT NULL,
   event_hash TEXT NOT NULL
 );
+CREATE TRIGGER IF NOT EXISTS audit_events_no_update
+BEFORE UPDATE ON audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'audit_events are append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS audit_events_no_delete
+BEFORE DELETE ON audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'audit_events are append-only');
+END;
 CREATE TABLE IF NOT EXISTS trace_events (
   id INTEGER PRIMARY KEY,
   episode_id INTEGER,

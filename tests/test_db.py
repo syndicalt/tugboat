@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -493,6 +494,28 @@ def test_audit_event_update_is_not_supported(tmp_path: Path):
 
         with pytest.raises(PermissionError):
             store.update_audit_event(event.sequence, {"event_type": "tampered"})
+
+
+def test_audit_event_rows_cannot_be_updated_directly(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        event = store.append_audit_event("run.created", {"run_id": "run-1"})
+
+        with pytest.raises(sqlite3.IntegrityError, match="audit_events are append-only"):
+            store.connection.execute(
+                "UPDATE audit_events SET event_type = ? WHERE sequence = ?",
+                ("tampered", event.sequence),
+            )
+
+
+def test_audit_event_rows_cannot_be_deleted_directly(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        event = store.append_audit_event("run.created", {"run_id": "run-1"})
+
+        with pytest.raises(sqlite3.IntegrityError, match="audit_events are append-only"):
+            store.connection.execute(
+                "DELETE FROM audit_events WHERE sequence = ?",
+                (event.sequence,),
+            )
 
 
 def test_insert_decision_stores_audit_event_sequence(tmp_path: Path):
