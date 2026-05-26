@@ -150,6 +150,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     payload = json.loads(run.output_paths["candidate_patch"].read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("llmff candidate_patch output must be a JSON object")
+    _validate_reflections_from_payload(payload)
     return _candidate_from_payload(payload, audit_id=audit_id)
 
 
@@ -219,6 +220,16 @@ def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> Can
         sources=_source_refs_from_payload(payload),
         bounded_edit_metadata=_bounded_edit_metadata_from_payload(payload),
     )
+
+
+def _validate_reflections_from_payload(payload: dict[str, object]) -> None:
+    reflections = payload.get("reflections", [])
+    if not isinstance(reflections, list):
+        raise ValueError("reflections must be a JSON list")
+    for index, reflection in enumerate(reflections):
+        if not isinstance(reflection, dict):
+            raise ValueError(f"reflections[{index}] must be a JSON object")
+        validate_json_artifact("reflection.json", reflection)
 
 
 def _source_refs_from_payload(payload: dict[str, object]) -> tuple[SourceRef, ...]:
@@ -350,6 +361,7 @@ def _record_candidate_provenance(
     for index, reflection in enumerate(reflections, start=1):
         if not isinstance(reflection, dict):
             continue
+        validate_json_artifact("reflection.json", reflection)
         artifact_path = run_dir / f"reflection-{index:03d}.json"
         artifact_path.write_text(json.dumps(reflection, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         store.record_reflection(

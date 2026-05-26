@@ -129,6 +129,16 @@ def test_validate_instruction_graph_artifact_accepts_current_schema():
     )
 
 
+def test_validate_reflection_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "reflection.json",
+        {
+            "source_ref": "audit:latest",
+            "summary": "Tests were skipped because regression guidance was missing.",
+        },
+    )
+
+
 def test_validate_eval_suite_artifact_accepts_current_schema():
     validate_json_artifact(
         "eval-suite.json",

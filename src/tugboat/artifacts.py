@@ -288,6 +288,20 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "reflection.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["source_ref", "summary"],
+        "properties": {
+            "source_ref": {"type": "string"},
+            "summary": {"type": "string"},
+            "recurring_failure_patterns": {"type": "array", "items": {"type": "string"}},
+            "preserved_success_patterns": {"type": "array", "items": {"type": "string"}},
+            "affected_instruction_chunks": {"type": "array", "items": {"type": "string"}},
+            "proposed_root_cause": {"type": "string"},
+        },
+    },
     "eval-suite.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

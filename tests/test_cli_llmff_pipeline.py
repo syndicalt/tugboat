@@ -19,6 +19,7 @@ def _write_fake_llmff(
     eval_report: object | None = None,
     policy_decision: object | None = None,
     acceptance_summary: object | None = None,
+    reflections: object | None = None,
 ) -> Path:
     if sources is None:
         sources = [{"source_id": "ev_fake", "trusted": True}]
@@ -72,6 +73,13 @@ def _write_fake_llmff(
             "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         }
+    if reflections is None:
+        reflections = [
+            {
+                "source_ref": "audit:latest",
+                "summary": "Tests were skipped because regression guidance was missing.",
+            }
+        ]
     path.write_text(
         """#!/usr/bin/env python3
 import json
@@ -87,6 +95,7 @@ AUDIT_REPORT = __AUDIT_REPORT__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
 ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
+REFLECTIONS = __REFLECTIONS__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -148,10 +157,7 @@ if args[:1] == ["run"]:
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
             "sources": SOURCES,
-            "reflections": [{
-                "source_ref": "audit:latest",
-                "summary": "Tests were skipped because regression guidance was missing."
-            }],
+            "reflections": REFLECTIONS,
             "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
         }
         candidate_patch.update(CANDIDATE_OVERRIDES)
@@ -178,6 +184,8 @@ raise SystemExit(64)
             "__POLICY_DECISION__", repr(policy_decision)
         ).replace(
             "__ACCEPTANCE_SUMMARY__", repr(acceptance_summary)
+        ).replace(
+            "__REFLECTIONS__", repr(reflections)
         ),
         encoding="utf-8",
     )
@@ -755,6 +763,47 @@ llmff:
             "SELECT COUNT(*) FROM candidates"
         ).fetchone()[0]
     assert candidate_count == 0
+
+
+def test_propose_rejects_malformed_llmff_reflection_artifact(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        reflections=[{"source_ref": "audit:latest", "raw_model_payload": "nope"}],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "reflection.json missing required field: summary" in output
+    assert not (run_dir / "reflection-001.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        reflection_count = store.connection.execute(
+            "SELECT COUNT(*) FROM reflections"
+        ).fetchone()[0]
+    assert reflection_count == 0
 
 
 def test_propose_passes_persisted_optimizer_memory_to_llmff(tmp_path: Path):
