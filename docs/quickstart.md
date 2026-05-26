@@ -7,7 +7,19 @@ verification_status: verified
 
 ## Install
 
-Install the package in the repository environment, then verify the CLI:
+Install the current release into the repository environment, then verify the CLI:
+
+```bash
+python -m pip install tugboat
+```
+
+For a local wheel release, install the retained wheel artifact instead:
+
+```bash
+python -m pip install dist/tugboat-0.1.0-py3-none-any.whl
+```
+
+Verify the installed command:
 
 ```bash
 tugboat doctor
