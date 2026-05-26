@@ -328,6 +328,29 @@ def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
     )
 
 
+def test_validate_acceptance_summary_raw_artifact_requires_review_bundle():
+    validate_json_artifact(
+        "acceptance-summary.raw.json",
+        {
+            "decision_recommendation": "needs_review",
+            "reasons": ["policy gate and eval report passed"],
+            "evidence": ["audit:1"],
+            "reviewer_checklist": ["Review candidate diff"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+        },
+    )
+    with pytest.raises(ArtifactValidationError, match="reviewer_checklist"):
+        validate_json_artifact(
+            "acceptance-summary.raw.json",
+            {
+                "decision_recommendation": "needs_review",
+                "reasons": ["policy gate and eval report passed"],
+                "evidence": ["audit:1"],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+            },
+        )
+
+
 def test_validate_auto_apply_approval_requires_readiness_metrics():
     with pytest.raises(ArtifactValidationError, match="readiness_metrics"):
         validate_json_artifact(

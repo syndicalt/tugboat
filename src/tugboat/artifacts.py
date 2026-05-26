@@ -293,6 +293,25 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "trigger_score": {"type": "number"},
         },
     },
+    "acceptance-summary.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "decision_recommendation",
+            "reasons",
+            "evidence",
+            "reviewer_checklist",
+            "rollback_command",
+        ],
+        "properties": {
+            "decision_recommendation": {"type": "string"},
+            "reasons": {"type": "array", "items": {"type": "string"}},
+            "evidence": {"type": "array", "items": {"type": "string"}},
+            "reviewer_checklist": {"type": "array", "items": {"type": "string"}},
+            "rollback_command": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "decision.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

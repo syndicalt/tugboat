@@ -1191,6 +1191,7 @@ def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, obje
     payload = json.loads(run.output_paths["acceptance_summary"].read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("llmff acceptance_summary output must be a JSON object")
+    validate_json_artifact("acceptance-summary.raw.json", payload)
     return payload
 
 

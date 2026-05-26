@@ -17,6 +17,7 @@ def _write_fake_llmff(
     candidate_overrides: dict[str, object] | None = None,
     eval_report: object | None = None,
     policy_decision: object | None = None,
+    acceptance_summary: object | None = None,
 ) -> Path:
     if sources is None:
         sources = [{"source_id": "ev_fake", "trusted": True}]
@@ -54,6 +55,14 @@ def _write_fake_llmff(
         )
     if candidate_overrides is None:
         candidate_overrides = {}
+    if acceptance_summary is None:
+        acceptance_summary = {
+            "decision_recommendation": "needs_review",
+            "reasons": ["policy gate and eval report passed"],
+            "evidence": ["audit:1"],
+            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+        }
     path.write_text(
         """#!/usr/bin/env python3
 import json
@@ -67,6 +76,7 @@ BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
+ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -146,13 +156,7 @@ if args[:1] == ["run"]:
         outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
     elif manifest == "acceptance-summary":
-        outputs["acceptance_summary"].write_text(json.dumps({
-            "decision_recommendation": "needs_review",
-            "reasons": ["policy gate and eval report passed"],
-            "evidence": ["audit:1"],
-            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
-            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
-        }) + "\\n", encoding="utf-8")
+        outputs["acceptance_summary"].write_text(json.dumps(ACCEPTANCE_SUMMARY) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
@@ -166,6 +170,8 @@ raise SystemExit(64)
             "__CANDIDATE_OVERRIDES__", repr(candidate_overrides)
         ).replace("__EVAL_REPORT__", repr(eval_report)).replace(
             "__POLICY_DECISION__", repr(policy_decision)
+        ).replace(
+            "__ACCEPTANCE_SUMMARY__", repr(acceptance_summary)
         ),
         encoding="utf-8",
     )
@@ -1385,3 +1391,41 @@ llmff:
         ("patch-propose.yaml", "completed"),
         ("patch-eval.yaml", "completed"),
     ]
+
+
+def test_optimize_rejects_malformed_acceptance_summary_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        acceptance_summary={
+            "decision_recommendation": "needs_review",
+            "reasons": ["policy gate and eval report passed"],
+            "evidence": ["audit:1"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "reviewer_checklist" in output
+    assert (run_dir / "acceptance-summary.raw.json").exists()
+    assert not (run_dir / "optimization-summary.json").exists()
