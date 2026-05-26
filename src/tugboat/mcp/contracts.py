@@ -98,7 +98,10 @@ def tugboat_harness_findings(repo: str | Path) -> dict[str, Any]:
 
     def read() -> dict[str, Any]:
         result = check_harness_legibility(repo_path)
-        return {"passed": result.passed, "findings": list(result.findings)}
+        return {
+            "passed": result.passed,
+            "findings": [_sanitize_harness_finding(finding) for finding in result.findings],
+        }
 
     return _audit_call(repo_path, "tugboat_harness_findings", {}, read)
 
@@ -229,11 +232,17 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
 
 
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+    trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
+    if not trace_path.is_file():
+        raise ValueError(f"unknown trace_id: {trace_id}")
     return _write_request_artifact(
-        repo,
+        repo_path,
         tool="tugboat_request_audit",
         kind="audit",
         payload={"trace_id": trace_id},
+        queue_kind="trace_audit",
+        queue_payload={"trace_path": str(trace_path)},
     )
 
 
@@ -379,6 +388,8 @@ def _write_request_artifact(
     tool: str,
     kind: str,
     payload: dict[str, Any],
+    queue_kind: str | None = None,
+    queue_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -399,11 +410,11 @@ def _write_request_artifact(
         artifact_ref = _relative_ref(repo_path, path)
         with DaemonQueue.open_sidecar(repo_path) as queue:
             queue.enqueue(
-                kind=kind,
+                kind=queue_kind or kind,
                 payload={
                     "request_id": request_id,
                     "artifact_ref": artifact_ref,
-                    **payload,
+                    **(queue_payload or payload),
                 },
             )
         return {
@@ -527,6 +538,24 @@ def _summarize_text(text: str, max_length: int = 240) -> str:
     if len(redacted) <= max_length:
         return redacted
     return redacted[: max_length - 3].rstrip() + "..."
+
+
+def _sanitize_harness_finding(finding: str) -> str:
+    redacted = redact_text(finding)
+    duplicate_prefix = "Duplicate instruction rule appears "
+    conflict_prefix = "Conflicting instruction rules: "
+    if redacted.startswith(duplicate_prefix):
+        return _redact_after_delimiter(redacted, ": ")
+    if redacted.startswith(conflict_prefix):
+        return f"{conflict_prefix}[REDACTED:harness_rule_text]"
+    return redacted
+
+
+def _redact_after_delimiter(value: str, delimiter: str) -> str:
+    if delimiter not in value:
+        return value
+    prefix, _ = value.split(delimiter, 1)
+    return f"{prefix}{delimiter}[REDACTED:harness_rule_text]"
 
 
 def _stamp() -> str:

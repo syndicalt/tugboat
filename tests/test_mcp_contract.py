@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from tugboat.daemon.service import DaemonRunConfig, run_daemon_once
 from tugboat.db import Store
 from tugboat.mcp import (
     handle_jsonrpc_request,
@@ -114,6 +116,28 @@ def test_harness_findings_are_plain_contract_and_audited(tmp_path: Path):
         "findings": ["AGENTS.md references missing repo-local markdown file docs/MISSING.md."],
     }
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_harness_findings"
+
+
+def test_harness_findings_redact_raw_instruction_rule_text(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\n"
+        "MUST keep private customer prompt alpha internal.\n"
+        "MUST keep private customer prompt alpha internal.\n"
+        "See [Runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text("# Runbook\n\nCurrent.\n", encoding="utf-8")
+
+    result = tugboat_harness_findings(repo)
+
+    serialized = json.dumps(result, sort_keys=True)
+    assert result["passed"] is False
+    assert "private customer prompt alpha" not in serialized
+    assert "Duplicate instruction rule appears 2 times" in serialized
+    assert "[REDACTED:harness_rule_text]" in serialized
 
 
 def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
@@ -321,6 +345,42 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
     ]
 
 
+def test_request_audit_enqueues_daemon_executable_trace_audit(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"user_correction","content":"Add regression tests"}\n',
+    )
+
+    request = tugboat_request_audit(repo, episode["trace_id"])
+    result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert request["kind"] == "audit"
+    assert result["processed"] is True
+    assert result["final_state"] == "waiting_review"
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "daemon_trace_audit"
+    assert audit["evidence_refs"]
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        queued = queue_store.connection.execute(
+            "SELECT kind, payload_json FROM daemon_jobs"
+        ).fetchone()
+    assert queued[0] == "trace_audit"
+    queued_payload = json.loads(queued[1])
+    assert queued_payload["trace_path"] == str(repo / episode["artifact_ref"])
+    assert queued_payload["artifact_ref"].startswith(".sidecar/mcp/requests/")
+
+
 def test_request_audit_records_policy_tied_write_intent_without_mutating_instructions(
     tmp_path: Path,
 ):
@@ -337,10 +397,11 @@ mcp:
     - {repo.resolve().as_posix()}
   tool_policy:
     tugboat_request_audit: allow
-""".lstrip()
+    """.lstrip()
     (policy_dir / "policy.yaml").write_text(policy_text, encoding="utf-8")
 
-    result = tugboat_request_audit(repo, "trace-42")
+    episode = tugboat_record_episode(repo, '{"type":"user_request","content":"Fix"}\n')
+    result = tugboat_request_audit(repo, episode["trace_id"])
 
     artifact = json.loads((repo / result["artifact_ref"]).read_text(encoding="utf-8"))
     assert result["state"] == "queued"
@@ -349,7 +410,7 @@ mcp:
         "kind": "audit",
         "state": "queued",
         "write_intent": True,
-        "trace_id": "trace-42",
+        "trace_id": episode["trace_id"],
         "repo_policy": {
             "path": ".sidecar/policy.yaml",
             "version": 7,
