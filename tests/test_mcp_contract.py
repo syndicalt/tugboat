@@ -90,6 +90,19 @@ if args[:1] == ["run"]:
                 "normative_changes": 0
             }],
         }) + "\\n", encoding="utf-8")
+    elif manifest == "patch-eval":
+        outputs["eval_report"].write_text(json.dumps({
+            "passed": True,
+            "trigger_score": 0.72,
+            "held_out_score": 0.91,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+        }) + "\\n", encoding="utf-8")
+        outputs["policy_decision"].write_text(json.dumps({
+            "allowed": True,
+            "reasons": [],
+        }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
@@ -586,6 +599,93 @@ llmff:
         ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
     ]
+
+
+def test_request_eval_enqueues_daemon_executable_patch_eval(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"user_correction","content":"Add regression tests"}\n',
+    )
+    tugboat_request_audit(repo, episode["trace_id"])
+    assert run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+    )["final_state"] == "waiting_review"
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        audit_id = int(store.connection.execute("SELECT id FROM audits").fetchone()[0])
+    tugboat_request_proposal(repo, str(audit_id))
+    assert run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc),
+        ),
+    )["final_state"] == "waiting_review"
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate_id = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))[
+        "candidate_id"
+    ]
+
+    request = tugboat_request_eval(repo, str(candidate_id), "all")
+    eval_result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert request["kind"] == "eval"
+    assert eval_result["processed"] is True
+    assert eval_result["final_state"] == "waiting_review"
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    assert eval_report["candidate_id"] == candidate_id
+    assert eval_report["suite_id"] == "all"
+    assert eval_report["passed"] is True
+    assert eval_report["held_out_score"] == 0.91
+    assert policy_gate == {"schema_version": 1, "allowed": True, "reasons": []}
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            ORDER BY id
+            """
+        ).fetchall()
+        eval_run = store.connection.execute(
+            "SELECT candidate_id, suite_id, status FROM eval_runs"
+        ).fetchone()
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+        ("patch-eval.yaml", "completed"),
+    ]
+    assert eval_run == (candidate_id, "all", "passed")
 
 
 def test_request_audit_records_policy_tied_write_intent_without_mutating_instructions(

@@ -10,6 +10,7 @@ from typing import Any
 from tugboat.audit.pipeline import AuditPipelineResult, run_audit_pipeline
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
 from tugboat.db import Store
+from tugboat.eval.pipeline import EvalPipelineResult, run_eval_pipeline
 from tugboat.paths import sidecar_dir
 from tugboat.propose.pipeline import ProposePipelineResult, run_propose_pipeline
 
@@ -154,6 +155,12 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
             failed = queue.transition(running.id, JobState.FAILED, now=now)
             _record_job_state(repo, failed.id, failed.state)
             return failed
+    elif running.kind == "eval":
+        result = _execute_eval(repo, running.payload)
+        if result.exit_code != 0:
+            failed = queue.transition(running.id, JobState.FAILED, now=now)
+            _record_job_state(repo, failed.id, failed.state)
+            return failed
     evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
     _record_job_state(repo, evaluating.id, evaluating.state)
     waiting_review = queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
@@ -168,6 +175,10 @@ def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> AuditPipelineRe
 
 def _execute_proposal(repo: Path, payload: dict[str, Any]) -> ProposePipelineResult:
     return run_propose_pipeline(repo, str(payload["audit_id"]))
+
+
+def _execute_eval(repo: Path, payload: dict[str, Any]) -> EvalPipelineResult:
+    return run_eval_pipeline(repo, str(payload["candidate_id"]), str(payload["suite"]))
 
 
 def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
