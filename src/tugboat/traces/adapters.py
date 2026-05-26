@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tugboat.traces.ingest import _evidence_id, canonical_episode_from_bundle
+from tugboat.traces.ingest import _evidence_id, canonical_episode_from_bundle, source_trust_for_event_type
 from tugboat.traces.schema import CanonicalEpisode, TraceBundle, TraceEvent
 
 
@@ -14,6 +14,7 @@ def ingest_codex_session(path: Path) -> CanonicalEpisode:
 
 def ingest_codex_session_bundle(path: Path) -> TraceBundle:
     events: list[dict[str, Any]] = []
+    tool_names_by_call_id: dict[str, str] = {}
     for row in _read_jsonl(path):
         role = row.get("role")
         if role == "user":
@@ -21,7 +22,11 @@ def ingest_codex_session_bundle(path: Path) -> TraceBundle:
         elif role == "assistant":
             events.append({"type": "final_answer", "content": row.get("content", "")})
         elif row.get("type") in {"tool_call", "tool_result", "diff", "test_result"}:
-            events.append(dict(row))
+            events.append(_normalize_codex_event(row))
+        elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
+            event = _normalize_codex_response_item(row["payload"], tool_names_by_call_id)
+            if event is not None:
+                events.append(event)
     return _bundle_from_payloads(path, events)
 
 
@@ -111,27 +116,68 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _normalize_codex_event(row: dict[str, Any]) -> dict[str, Any]:
+    event = dict(row)
+    if event.get("type") == "tool_result" and "output" not in event and "content" in event:
+        event["output"] = str(event["content"])
+    return event
+
+
+def _normalize_codex_response_item(
+    payload: dict[str, Any],
+    tool_names_by_call_id: dict[str, str],
+) -> dict[str, Any] | None:
+    item_type = payload.get("type")
+    if item_type == "message":
+        role = payload.get("role")
+        content = _codex_content_text(payload.get("content"))
+        if role == "user":
+            return {"type": "user_request", "content": content}
+        if role == "assistant":
+            return {"type": "final_answer", "content": content}
+    if item_type == "function_call":
+        call_id = str(payload.get("call_id", ""))
+        tool = str(payload.get("name", "unknown"))
+        if call_id:
+            tool_names_by_call_id[call_id] = tool
+        return {
+            "type": "tool_call",
+            "tool": tool,
+            "call_id": call_id,
+            "arguments": str(payload.get("arguments", "")),
+        }
+    if item_type == "function_call_output":
+        call_id = str(payload.get("call_id", ""))
+        return {
+            "type": "tool_result",
+            "tool": tool_names_by_call_id.get(call_id, "unknown"),
+            "call_id": call_id,
+            "output": str(payload.get("output", "")),
+        }
+    return None
+
+
+def _codex_content_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                parts.append(str(item["text"]))
+        return "\n".join(parts)
+    return ""
+
+
 def _bundle_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> TraceBundle:
     events = tuple(
         TraceEvent(
             evidence_id=_evidence_id(index, payload),
             event_type=str(payload.get("type", "unknown")),
-            source_trust=_source_trust(str(payload.get("type", "unknown"))),
+            source_trust=source_trust_for_event_type(str(payload.get("type", "unknown"))),
             line_number=index,
             payload=payload,
         )
         for index, payload in enumerate(payloads, start=1)
     )
     return TraceBundle(trace_path=path, events=events)
-
-
-def _source_trust(event_type: str) -> str:
-    if event_type in {"user_request", "user_correction"}:
-        return "user"
-    if event_type in {"tool_call", "tool_result"}:
-        return "tool"
-    if event_type in {"diff", "test_result"}:
-        return "artifact"
-    if event_type == "final_answer":
-        return "agent"
-    return "untrusted"

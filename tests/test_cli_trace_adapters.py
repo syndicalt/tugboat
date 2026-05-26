@@ -74,7 +74,7 @@ def test_audit_cli_ingests_codex_trace_format_without_collapsing_tool_events(tmp
             [
                 json.dumps({"role": "user", "content": "Fix bug"}),
                 json.dumps({"type": "tool_call", "tool": "pytest", "args": ["-q"]}),
-                json.dumps({"type": "tool_result", "tool": "pytest", "exit_code": 0}),
+                json.dumps({"type": "tool_result", "tool": "pytest", "exit_code": 0, "content": "2 passed"}),
                 json.dumps({"role": "assistant", "content": "Done"}),
             ]
         )
@@ -107,3 +107,86 @@ def test_audit_cli_ingests_codex_trace_format_without_collapsing_tool_events(tmp
     ]
     assert json.loads(rows[1][1])["tool"] == "pytest"
     assert json.loads(rows[2][1])["exit_code"] == 0
+    assert json.loads(rows[2][1])["output"] == "2 passed"
+
+
+def test_audit_cli_ingests_codex_response_item_envelopes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "codex.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix bug"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-1",
+                            "output": "1 failed",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Done"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "codex",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+        "final_answer",
+    ]
+    assert json.loads(rows[1][1])["tool"] == "exec_command"
+    assert json.loads(rows[2][1])["output"] == "1 failed"

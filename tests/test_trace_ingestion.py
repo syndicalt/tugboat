@@ -25,6 +25,9 @@ def test_ingest_jsonl_trace_assigns_stable_evidence_ids_and_trust(tmp_path: Path
         {"type": "test_result", "suite": "unit", "passed": True},
         {"type": "final_answer", "content": "Done"},
         {"type": "user_correction", "content": "Use memory first"},
+        {"type": "policy_violation", "policy": "secrets", "status": "failed"},
+        {"type": "outcome_label", "label": "accepted"},
+        {"type": "verifier_score", "name": "quality", "score": 0.9},
         {"type": "mystery", "content": "unclassified"},
     ]
     _write_jsonl(trace_path, rows)
@@ -44,6 +47,9 @@ def test_ingest_jsonl_trace_assigns_stable_evidence_ids_and_trust(tmp_path: Path
         "artifact",
         "agent",
         "user",
+        "policy",
+        "verifier",
+        "verifier",
         "untrusted",
     ]
     assert all(event.evidence_id.startswith("ev_") for event in first.events)

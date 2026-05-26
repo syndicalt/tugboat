@@ -15,7 +15,13 @@ TRUST_BY_EVENT_TYPE = {
     "tool_result": "tool",
     "diff": "artifact",
     "test_result": "artifact",
+    "instruction_snapshot": "artifact",
     "final_answer": "agent",
+    "outcome_label": "verifier",
+    "verifier_score": "verifier",
+    "policy_violation": "policy",
+    "policy_denial": "policy",
+    "policy_failure": "policy",
 }
 
 
@@ -44,12 +50,16 @@ def ingest_jsonl_trace(path: Path) -> TraceBundle:
                 TraceEvent(
                     evidence_id=_evidence_id(line_number, payload),
                     event_type=event_type,
-                    source_trust=TRUST_BY_EVENT_TYPE.get(event_type, "untrusted"),
+                    source_trust=source_trust_for_event_type(event_type),
                     line_number=line_number,
                     payload=payload,
                 )
             )
     return TraceBundle(trace_path=path, events=tuple(events))
+
+
+def source_trust_for_event_type(event_type: str) -> str:
+    return TRUST_BY_EVENT_TYPE.get(event_type, "untrusted")
 
 
 def ingest_jsonl_trace_as_episode(path: Path) -> CanonicalEpisode:

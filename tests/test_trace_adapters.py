@@ -34,6 +34,76 @@ def test_ingest_codex_session_maps_tool_events_to_canonical_episode(tmp_path: Pa
     assert episode.final_answer == "Done"
 
 
+def test_ingest_codex_session_maps_response_item_envelopes(tmp_path: Path):
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix bug"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-1",
+                            "output": "1 failed",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Done"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_codex_session(session)
+
+    assert episode.request == "Fix bug"
+    assert episode.tool_calls[0].payload == {
+        "type": "tool_call",
+        "tool": "exec_command",
+        "call_id": "call-1",
+        "arguments": '{"cmd":"pytest -q"}',
+    }
+    assert episode.command_outputs[0].payload == {
+        "type": "tool_result",
+        "tool": "exec_command",
+        "call_id": "call-1",
+        "output": "1 failed",
+    }
+    assert episode.final_answer == "Done"
+
+
 def test_ingest_claude_transcript_maps_corrections_and_subagents(tmp_path: Path):
     transcript = tmp_path / "claude.json"
     transcript.write_text(
