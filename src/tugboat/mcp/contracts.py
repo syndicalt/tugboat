@@ -558,10 +558,22 @@ def run_stdio_server(input_stream, output_stream) -> int:
     for line in input_stream:
         if not line.strip():
             continue
-        response = handle_jsonrpc_request(json.loads(line))
+        try:
+            request = json.loads(line, parse_constant=_reject_json_constant)
+        except (json.JSONDecodeError, ValueError):
+            response = _jsonrpc_error(None, -32700, "parse error")
+        else:
+            if not isinstance(request, dict):
+                response = _jsonrpc_error(None, -32600, "request must be an object")
+            else:
+                response = handle_jsonrpc_request(request)
         output_stream.write(json.dumps(response, sort_keys=True) + "\n")
         output_stream.flush()
     return 0
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def _audit_call(

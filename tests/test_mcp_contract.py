@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from tugboat.db import Store
 from tugboat.mcp import (
     handle_jsonrpc_request,
     list_mcp_tools,
+    run_stdio_server,
     tugboat_active_instructions,
     tugboat_candidate,
     tugboat_candidate_report,
@@ -1287,6 +1289,38 @@ def test_mcp_jsonrpc_redacts_secret_bearing_error_messages(tmp_path: Path):
     assert response["error"]["code"] == -32000
     assert "sk-thissecret" not in response["error"]["message"]
     assert "[REDACTED:openai_api_key]" in response["error"]["message"]
+
+
+def test_mcp_stdio_returns_parse_error_for_malformed_json():
+    output = io.StringIO()
+
+    assert run_stdio_server(io.StringIO("{not-json\nNaN\n"), output) == 0
+
+    responses = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert responses == [
+        {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32700, "message": "parse error"},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32700, "message": "parse error"},
+        },
+    ]
+
+
+def test_mcp_stdio_returns_invalid_request_for_valid_json_non_object():
+    output = io.StringIO()
+
+    assert run_stdio_server(io.StringIO("7\n"), output) == 0
+
+    assert json.loads(output.getvalue()) == {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {"code": -32600, "message": "request must be an object"},
+    }
 
 
 def _mcp_events(repo: Path) -> list[dict[str, object]]:
