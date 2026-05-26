@@ -401,3 +401,52 @@ def test_cleanup_candidates_include_recurring_failure_doc_tasks(tmp_path: Path):
             "required_eval_suites": ["structural"],
         }
     ]
+
+
+def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path, capsys):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text("# Runbook\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+
+    assert main(["harness", "cleanup", "--repo", str(repo)]) == 0
+
+    output = capsys.readouterr().out
+    bundle_path = repo / ".sidecar" / "harness-cleanup-candidates.json"
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    assert f"cleanup candidates: {bundle_path}" in output
+    assert payload == {
+        "schema_version": 1,
+        "candidates": [
+            {
+                "candidate_id": "harness-cleanup-1",
+                "risk_class": "review_required",
+                "auto_apply": False,
+                "task": "Add ownership metadata to docs/runbook.md.",
+                "source_findings": ["docs/runbook.md is missing ownership metadata."],
+                "required_eval_suites": ["structural"],
+            },
+            {
+                "candidate_id": "harness-cleanup-2",
+                "risk_class": "review_required",
+                "auto_apply": False,
+                "task": "Add verification-status metadata to docs/runbook.md.",
+                "source_findings": [
+                    "docs/runbook.md is missing verification-status metadata.",
+                ],
+                "required_eval_suites": ["structural"],
+            },
+        ],
+    }
+    assert not (repo / "CODEX.md").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM harness_findings
+            WHERE severity = 'cleanup_candidate'
+            """
+        ).fetchone()[0] == 2

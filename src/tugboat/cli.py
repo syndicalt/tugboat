@@ -33,7 +33,11 @@ from tugboat.daemon.service import (
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
-from tugboat.harness.checks import check_harness_legibility, generate_harness_report
+from tugboat.harness.checks import (
+    check_harness_legibility,
+    generate_cleanup_candidates,
+    generate_harness_report,
+)
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
@@ -152,6 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     harness_check.add_argument("--max-instruction-lines", type=int, default=100)
     harness_report = harness_subcommands.add_parser("report")
     harness_report.add_argument("--repo", required=True)
+    harness_cleanup = harness_subcommands.add_parser("cleanup")
+    harness_cleanup.add_argument("--repo", required=True)
     return parser
 
 
@@ -680,6 +686,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("## Doc Gardening Tasks")
         for item in report.doc_gardening_tasks:
             print(f"- {item}")
+        return 0
+
+    if args.command == "harness" and args.harness_command == "cleanup":
+        repo = Path(args.repo)
+        report = generate_harness_report(repo)
+        _persist_harness_report(repo, report)
+        candidates = generate_cleanup_candidates(repo)
+        path = sidecar_dir(repo) / "harness-cleanup-candidates.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "candidates": [candidate.to_json_dict() for candidate in candidates],
+        }
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            for candidate in candidates:
+                store.record_harness_finding(
+                    repo_path=repo,
+                    finding=json.dumps(candidate.to_json_dict(), sort_keys=True),
+                    severity="cleanup_candidate",
+                )
+        print(f"cleanup candidates: {path}")
         return 0
 
     parser.error(f"unknown command: {args.command}")
