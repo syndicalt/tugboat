@@ -572,8 +572,9 @@ def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path,
     docs = repo / "docs"
     docs.mkdir()
     (docs / "runbook.md").write_text("# Runbook\n", encoding="utf-8")
+    original_agents = "# Agent Map\n\nSee [runbook](docs/runbook.md).\n"
     (repo / "AGENTS.md").write_text(
-        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        original_agents,
         encoding="utf-8",
     )
 
@@ -630,10 +631,35 @@ def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path,
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert connection.execute(
             """
-            SELECT COUNT(*) FROM harness_findings
-            WHERE severity = 'cleanup_candidate'
-            """
+        SELECT COUNT(*) FROM harness_findings
+        WHERE severity = 'cleanup_candidate'
+        """
         ).fetchone()[0] == 2
+    proposal_paths = sorted((repo / ".sidecar" / "harness-cleanup-proposals").glob("*.json"))
+    assert [path.stem for path in proposal_paths] == [
+        "harness-cleanup-1",
+        "harness-cleanup-2",
+    ]
+    proposal = json.loads(proposal_paths[0].read_text(encoding="utf-8"))
+    assert proposal == {
+        "schema_version": 1,
+        "kind": "cleanup_proposal",
+        "candidate_id": "harness-cleanup-1",
+        "state": "waiting_review",
+        "auto_apply": False,
+        "risk_class": "review_required",
+        "task": "Add ownership metadata to docs/runbook.md.",
+        "source_findings": ["docs/runbook.md is missing ownership metadata."],
+        "required_eval_suites": ["structural"],
+        "structural_eval": {
+            "bundle": ".sidecar/harness-cleanup-candidates.json",
+            "candidate_hash": payload["structural_eval"]["candidate_hashes"][
+                "harness-cleanup-1"
+            ],
+            "suite_id": "structural",
+        },
+    }
+    assert (repo / "AGENTS.md").read_text(encoding="utf-8") == original_agents
 
 
 def test_harness_cleanup_cli_validates_candidate_bundle_before_writing(

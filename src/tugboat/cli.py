@@ -704,6 +704,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"cleanup candidates invalid: {error}")
             return 1
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            _write_harness_cleanup_proposals(
+                repo,
+                candidates,
+                structural_eval=structural_eval,
+                bundle_path=path,
+            )
+        except ArtifactValidationError as error:
+            print(f"cleanup proposals invalid: {error}")
+            return 1
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             for candidate in candidates:
                 store.record_harness_finding(
@@ -821,6 +831,44 @@ def run_cleanup_structural_eval(repo: Path, candidates: Sequence[object]) -> dic
         "candidate_hashes": candidate_hashes,
         "findings": findings,
     }
+
+
+def _write_harness_cleanup_proposals(
+    repo: Path,
+    candidates: Sequence[object],
+    *,
+    structural_eval: dict[str, object],
+    bundle_path: Path,
+) -> None:
+    proposal_dir = sidecar_dir(repo) / "harness-cleanup-proposals"
+    proposal_dir.mkdir(parents=True, exist_ok=True)
+    candidate_hashes = structural_eval.get("candidate_hashes", {})
+    if not isinstance(candidate_hashes, dict):
+        candidate_hashes = {}
+    for index, candidate in enumerate(candidates):
+        candidate_payload = candidate.to_json_dict()
+        candidate_id = str(candidate_payload.get("candidate_id", f"candidate-{index + 1}"))
+        proposal = {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "cleanup_proposal",
+            "candidate_id": candidate_id,
+            "state": "waiting_review",
+            "auto_apply": candidate_payload.get("auto_apply"),
+            "risk_class": candidate_payload.get("risk_class"),
+            "task": candidate_payload.get("task"),
+            "source_findings": candidate_payload.get("source_findings"),
+            "required_eval_suites": candidate_payload.get("required_eval_suites"),
+            "structural_eval": {
+                "bundle": _relative_repo_path(repo, bundle_path),
+                "candidate_hash": str(candidate_hashes.get(candidate_id, "")),
+                "suite_id": structural_eval.get("suite_id", "structural"),
+            },
+        }
+        validate_json_artifact("harness-cleanup-proposal.json", proposal)
+        (proposal_dir / f"{candidate_id}.json").write_text(
+            json.dumps(proposal, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _write_ops_command_bundle(path: Path, bundle: dict[str, object]) -> None:

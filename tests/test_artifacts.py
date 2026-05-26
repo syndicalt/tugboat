@@ -653,6 +653,28 @@ def test_validate_harness_cleanup_candidates_rejects_auto_apply_candidate():
         )
 
 
+def test_validate_harness_cleanup_proposal_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "harness-cleanup-proposal.json",
+        {
+            "schema_version": 1,
+            "kind": "cleanup_proposal",
+            "candidate_id": "harness-cleanup-1",
+            "state": "waiting_review",
+            "auto_apply": False,
+            "risk_class": "review_required",
+            "task": "Add ownership metadata to docs/runbook.md.",
+            "source_findings": ["docs/runbook.md is missing ownership metadata."],
+            "required_eval_suites": ["structural"],
+            "structural_eval": {
+                "bundle": ".sidecar/harness-cleanup-candidates.json",
+                "candidate_hash": "a" * 64,
+                "suite_id": "structural",
+            },
+        },
+    )
+
+
 def test_validate_harness_report_artifact_accepts_current_schema():
     validate_json_artifact(
         "harness-report.json",
