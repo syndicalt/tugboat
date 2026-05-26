@@ -5,7 +5,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.artifacts import SCHEMA_VERSION
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
@@ -243,36 +243,33 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     graph_path = run_dir / "instruction-graph.json"
-    graph_path.write_text(
-        json.dumps(
+    graph_payload = {
+        "schema_version": SCHEMA_VERSION,
+        "documents": [
             {
-                "schema_version": SCHEMA_VERSION,
-                "documents": [
+                "path": document.path,
+                "kind": document.kind,
+                "precedence": document.precedence,
+                "protected": document.protected,
+                "hash": document.hash,
+                "parser_version": document.parser_version,
+                "chunks": [
                     {
-                        "path": document.path,
-                        "kind": document.kind,
-                        "precedence": document.precedence,
-                        "protected": document.protected,
-                        "hash": document.hash,
-                        "parser_version": document.parser_version,
-                        "chunks": [
-                            {
-                                "heading_path": list(chunk.heading_path),
-                                "anchor": chunk.anchor,
-                                "byte_start": chunk.byte_start,
-                                "byte_end": chunk.byte_end,
-                                "text_hash": chunk.text_hash,
-                            }
-                            for chunk in document.chunks
-                        ],
+                        "heading_path": list(chunk.heading_path),
+                        "anchor": chunk.anchor,
+                        "byte_start": chunk.byte_start,
+                        "byte_end": chunk.byte_end,
+                        "text_hash": chunk.text_hash,
                     }
-                    for document in result.documents
+                    for chunk in document.chunks
                 ],
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+            }
+            for document in result.documents
+        ],
+    }
+    validate_json_artifact("instruction-graph.json", graph_payload)
+    graph_path.write_text(
+        json.dumps(graph_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

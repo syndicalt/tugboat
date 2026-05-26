@@ -101,6 +101,34 @@ def test_validate_llmff_inspect_artifact_accepts_current_schema():
     )
 
 
+def test_validate_instruction_graph_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "instruction-graph.json",
+        {
+            "schema_version": 1,
+            "documents": [
+                {
+                    "path": "CODEX.md",
+                    "kind": "codex",
+                    "precedence": 90,
+                    "protected": True,
+                    "hash": "abc123",
+                    "parser_version": "markdown-v1",
+                    "chunks": [
+                        {
+                            "heading_path": ["Rules"],
+                            "anchor": "rules",
+                            "byte_start": 0,
+                            "byte_end": 12,
+                            "text_hash": "def456",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+
 def test_validate_eval_suite_artifact_accepts_current_schema():
     validate_json_artifact(
         "eval-suite.json",

@@ -231,6 +231,63 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "inspect": {"type": "object"},
         },
     },
+    "instruction-graph.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "documents"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "path",
+                        "kind",
+                        "precedence",
+                        "protected",
+                        "hash",
+                        "parser_version",
+                        "chunks",
+                    ],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "kind": {"type": "string"},
+                        "precedence": {"type": "integer"},
+                        "protected": {"type": "boolean"},
+                        "hash": {"type": "string"},
+                        "parser_version": {"type": "string"},
+                        "chunks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [
+                                    "heading_path",
+                                    "anchor",
+                                    "byte_start",
+                                    "byte_end",
+                                    "text_hash",
+                                ],
+                                "properties": {
+                                    "heading_path": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "anchor": {"type": "string"},
+                                    "byte_start": {"type": "integer"},
+                                    "byte_end": {"type": "integer"},
+                                    "text_hash": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     "eval-suite.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
