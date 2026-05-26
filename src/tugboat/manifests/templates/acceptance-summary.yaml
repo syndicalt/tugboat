@@ -9,3 +9,5 @@ inputs:
   - risk_class
 outputs:
   - acceptance_summary
+output_artifacts:
+  acceptance_summary: acceptance-summary.raw.json

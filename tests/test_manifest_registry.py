@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from tugboat.artifacts import JSON_ARTIFACT_JSON_SCHEMAS
 from tugboat.manifests import (
     REQUIRED_MANIFEST_NAMES,
     ManifestRecord,
@@ -11,6 +12,30 @@ from tugboat.manifests import (
     materialize_manifests,
 )
 from tugboat.models import Policy
+
+
+EXPECTED_OUTPUT_ARTIFACTS = {
+    "instruction-index.yaml": {"instruction_index": "instruction-index.raw.json"},
+    "episode-audit.yaml": {
+        "audit_report": "audit.raw.json",
+        "evidence_ids": "evidence-ids.raw.json",
+    },
+    "drift-detect.yaml": {
+        "drift_clusters": "drift.raw.json",
+        "optimizer_notes": "optimizer-notes.raw.json",
+    },
+    "patch-propose.yaml": {
+        "candidate_patch": "candidate.raw.json",
+        "proposal_rationale": "proposal-rationale.raw.json",
+    },
+    "patch-eval.yaml": {
+        "eval_report": "eval-report.raw.json",
+        "policy_decision": "policy-decision.raw.json",
+    },
+    "acceptance-summary.yaml": {
+        "acceptance_summary": "acceptance-summary.raw.json",
+    },
+}
 
 
 def test_materialize_manifests_writes_required_templates(tmp_path: Path):
@@ -29,6 +54,19 @@ def test_materialize_manifests_writes_required_templates(tmp_path: Path):
         assert manifest["purpose"]
         assert manifest["inputs"]
         assert manifest["outputs"]
+        assert manifest["output_artifacts"] == EXPECTED_OUTPUT_ARTIFACTS[record.name]
+
+
+def test_manifest_templates_bind_outputs_to_json_artifact_schemas(tmp_path: Path):
+    records = materialize_manifests(tmp_path, overwrite=True)
+
+    for record in records:
+        manifest = yaml.safe_load(record.path.read_text(encoding="utf-8"))
+        output_artifacts = manifest["output_artifacts"]
+
+        assert output_artifacts == EXPECTED_OUTPUT_ARTIFACTS[record.name]
+        assert set(output_artifacts) == set(manifest["outputs"])
+        assert set(output_artifacts.values()).issubset(JSON_ARTIFACT_JSON_SCHEMAS)
 
 
 def test_patch_propose_manifest_declares_optimizer_memory_input(tmp_path: Path):

@@ -7,3 +7,6 @@ inputs:
 outputs:
   - eval_report
   - policy_decision
+output_artifacts:
+  eval_report: eval-report.raw.json
+  policy_decision: policy-decision.raw.json

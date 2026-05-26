@@ -7,3 +7,6 @@ inputs:
 outputs:
   - audit_report
   - evidence_ids
+output_artifacts:
+  audit_report: audit.raw.json
+  evidence_ids: evidence-ids.raw.json

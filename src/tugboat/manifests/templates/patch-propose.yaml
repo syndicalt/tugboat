@@ -10,3 +10,6 @@ inputs:
 outputs:
   - candidate_patch
   - proposal_rationale
+output_artifacts:
+  candidate_patch: candidate.raw.json
+  proposal_rationale: proposal-rationale.raw.json

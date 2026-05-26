@@ -5,3 +5,5 @@ inputs:
   - policy
 outputs:
   - instruction_index
+output_artifacts:
+  instruction_index: instruction-index.raw.json
