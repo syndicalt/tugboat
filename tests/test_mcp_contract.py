@@ -539,6 +539,27 @@ def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):
     assert "unknown MCP tool" in response["error"]["message"]
 
 
+def test_mcp_jsonrpc_redacts_secret_bearing_error_messages(tmp_path: Path):
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_request_audit",
+                "arguments": {
+                    "repo": str(tmp_path),
+                    "trace_id": "sk-thissecretkeyvalue1234567890",
+                },
+            },
+        }
+    )
+
+    assert response["error"]["code"] == -32000
+    assert "sk-thissecret" not in response["error"]["message"]
+    assert "[REDACTED:openai_api_key]" in response["error"]["message"]
+
+
 def _mcp_events(repo: Path) -> list[dict[str, object]]:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         rows = store.connection.execute(

@@ -577,4 +577,8 @@ def _stamp() -> str:
 
 
 def _jsonrpc_error(request_id: object, code: int, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": redact_text(message)},
+    }
