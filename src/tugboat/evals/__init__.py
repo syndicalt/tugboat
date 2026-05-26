@@ -430,7 +430,14 @@ def _read_optional(path: Path) -> str | None:
 
 def _has_governance_regression(markdown: str) -> bool:
     words = set(_words(markdown))
-    return "skip" in words and "tests" in words
+    if "skip" in words and "tests" in words:
+        return True
+    deploy_approval_bypass = (
+        "bypass" in words and "approval" in words and bool(words & {"deploy", "deployment"})
+    )
+    permissive_bypass = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
+    restrictive_bypass = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
+    return deploy_approval_bypass and permissive_bypass and not restrictive_bypass
 
 
 def _frontmatter_findings(before: str, after: str) -> tuple[StructuralFinding, ...]:
