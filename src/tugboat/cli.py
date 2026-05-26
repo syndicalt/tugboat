@@ -916,7 +916,11 @@ def _record_optimization_slow_update(
         repo_path=str(repo),
         memory_type="slow_update",
         key=key,
-        payload={"note": note},
+        payload={
+            "category": category,
+            "legacy_note": note,
+            "note": f"{reason} for candidate {candidate_id} in suite {suite_id}",
+        },
     )
 
 

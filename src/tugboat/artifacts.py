@@ -582,7 +582,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "rejected_edits", "slow_update_notes"],
+        "required": ["schema_version", "rejected_edits", "slow_update_notes", "slow_update_records"],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
             "rejected_edits": {
@@ -608,6 +608,21 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
             },
             "slow_update_notes": {"type": "array", "items": {"type": "string"}},
+            "slow_update_records": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["category", "note"],
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["successful", "rejected", "optimizer_guidance"],
+                        },
+                        "note": {"type": "string"},
+                    },
+                },
+            },
             "validation_baselines": {
                 "type": "array",
                 "items": {

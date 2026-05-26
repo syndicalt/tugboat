@@ -1854,6 +1854,7 @@ llmff:
             }
         ],
         "slow_update_notes": [],
+        "slow_update_records": [],
         "validation_baselines": [
             {
                 "candidate_id": 7,
@@ -2441,9 +2442,14 @@ llmff:
         "needs_review",
         "held_out_improved",
     )
-    assert [json.loads(row[0])["note"] for row in slow_update_notes] == [
-        "successful: held_out_improved for candidate "
-        f"{decision['candidate_id']} in suite held-out"
+    assert [json.loads(row[0]) for row in slow_update_notes] == [
+        {
+            "category": "successful",
+            "legacy_note": "successful: held_out_improved for candidate "
+            f"{decision['candidate_id']} in suite held-out",
+            "note": "held_out_improved for candidate "
+            f"{decision['candidate_id']} in suite held-out",
+        }
     ]
 
 
@@ -2731,9 +2737,14 @@ llmff:
         "rejected",
         "eval report recommendation was reject",
     )
-    assert [json.loads(row[0])["note"] for row in slow_update_notes] == [
-        "rejected: eval report recommendation was reject for candidate "
-        f"{decision['candidate_id']} in suite held-out"
+    assert [json.loads(row[0]) for row in slow_update_notes] == [
+        {
+            "category": "rejected",
+            "legacy_note": "rejected: eval report recommendation was reject for candidate "
+            f"{decision['candidate_id']} in suite held-out",
+            "note": "eval report recommendation was reject for candidate "
+            f"{decision['candidate_id']} in suite held-out",
+        }
     ]
 
 

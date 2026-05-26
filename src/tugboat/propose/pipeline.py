@@ -324,6 +324,13 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
             for _, record in sorted(memory.rejected_edits.items())
         ],
         "slow_update_notes": list(memory.slow_update_notes),
+        "slow_update_records": [
+            {
+                "category": record.category,
+                "note": record.note,
+            }
+            for record in memory.slow_update_records
+        ],
         "validation_baselines": [
             {
                 "candidate_id": record.candidate_id,

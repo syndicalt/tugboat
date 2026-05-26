@@ -380,6 +380,12 @@ def test_validate_optimizer_memory_artifact_accepts_current_schema():
                 }
             ],
             "slow_update_notes": ["Prefer smaller edits."],
+            "slow_update_records": [
+                {
+                    "category": "optimizer_guidance",
+                    "note": "Prefer smaller edits.",
+                }
+            ],
             "validation_baselines": [
                 {
                     "candidate_id": 7,
@@ -405,6 +411,19 @@ def test_validate_optimizer_memory_artifact_rejects_unknown_suppression_signal()
                         "source_refs": ["audit:1"],
                     }
                 ],
+                "slow_update_notes": [],
+                "slow_update_records": [],
+            },
+        )
+
+
+def test_validate_optimizer_memory_artifact_requires_structured_slow_update_records():
+    with pytest.raises(ArtifactValidationError, match="slow_update_records"):
+        validate_json_artifact(
+            "optimizer-memory.json",
+            {
+                "schema_version": 1,
+                "rejected_edits": [],
                 "slow_update_notes": [],
             },
         )

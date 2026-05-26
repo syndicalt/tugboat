@@ -288,10 +288,22 @@ def test_slow_update_memory_records_successful_and_rejected_directions():
     memory = OptimizationMemory()
     memory.record_slow_update("successful", "Specific regression-test wording improved held-out cases")
     memory.record_slow_update("rejected", "Do not weaken approval requirements")
+    memory.record_slow_update("optimizer_guidance", "Prefer annotate before replace")
 
     assert memory.slow_update_notes == [
         "successful: Specific regression-test wording improved held-out cases",
         "rejected: Do not weaken approval requirements",
+        "optimizer_guidance: Prefer annotate before replace",
+    ]
+    assert [record.category for record in memory.slow_update_records] == [
+        "successful",
+        "rejected",
+        "optimizer_guidance",
+    ]
+    assert [record.note for record in memory.slow_update_records] == [
+        "Specific regression-test wording improved held-out cases",
+        "Do not weaken approval requirements",
+        "Prefer annotate before replace",
     ]
 
 
@@ -329,6 +341,64 @@ def test_validation_baseline_memory_persists_to_optimizer_memory_table(tmp_path)
         held_out_score=0.82,
         candidate_id=7,
     )
+
+
+def test_slow_update_memory_persists_structured_records_to_optimizer_memory_table(tmp_path):
+    repo = tmp_path
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory()
+        memory.record_slow_update("optimizer_guidance", "Prefer annotate before replace")
+        memory.persist(store, repo=repo)
+        loaded = OptimizationMemory.load(store, repo=repo)
+        row = store.connection.execute(
+            """
+            SELECT o.memory_type, o.payload_json, a.event_type
+            FROM optimizer_memory o
+            JOIN audit_events a ON a.sequence = o.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "slow_update"
+    assert json.loads(row[1]) == {
+        "category": "optimizer_guidance",
+        "legacy_note": "optimizer_guidance: Prefer annotate before replace",
+        "note": "Prefer annotate before replace",
+    }
+    assert row[2] == "optimizer_memory.recorded"
+    assert loaded.slow_update_notes == ["optimizer_guidance: Prefer annotate before replace"]
+    assert [(record.category, record.note) for record in loaded.slow_update_records] == [
+        ("optimizer_guidance", "Prefer annotate before replace")
+    ]
+
+
+def test_legacy_slow_update_memory_rows_load_as_structured_records(tmp_path):
+    repo = tmp_path
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="slow_update",
+            key="slow_update:legacy-success",
+            payload={"note": "successful: Specific regression-test wording improved held-out cases"},
+        )
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="slow_update",
+            key="slow_update:legacy-freeform",
+            payload={"note": "Prefer smaller edits"},
+        )
+        loaded = OptimizationMemory.load(store, repo=repo)
+
+    assert loaded.slow_update_notes == [
+        "successful: Specific regression-test wording improved held-out cases",
+        "optimizer_guidance: Prefer smaller edits",
+    ]
+    assert [(record.category, record.note) for record in loaded.slow_update_records] == [
+        ("successful", "Specific regression-test wording improved held-out cases"),
+        ("optimizer_guidance", "Prefer smaller edits"),
+    ]
 
 
 def test_rejected_edit_memory_persists_to_optimizer_memory_table_with_audit_link(tmp_path):

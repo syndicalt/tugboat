@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 
 REJECTED_EDIT_SUPPRESSION_SIGNAL = "suppress_matching_bounded_edit_fingerprint"
+SLOW_UPDATE_CATEGORIES = frozenset(("successful", "rejected", "optimizer_guidance"))
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,16 @@ class ValidationBaselineRecord:
 
 
 @dataclass(frozen=True)
+class SlowUpdateRecord:
+    category: str
+    note: str
+
+    @property
+    def legacy_note(self) -> str:
+        return f"{self.category}: {self.note}"
+
+
+@dataclass(frozen=True)
 class ReflectionArtifact:
     recurring_failure_patterns: tuple[str, ...]
     preserved_success_patterns: tuple[str, ...]
@@ -97,6 +108,7 @@ class ReflectionArtifact:
 class OptimizationMemory:
     rejected_edits: dict[str, RejectedEditRecord] = field(default_factory=dict)
     slow_update_notes: list[str] = field(default_factory=list)
+    slow_update_records: list[SlowUpdateRecord] = field(default_factory=list)
     validation_baselines: dict[str, ValidationBaselineRecord] = field(default_factory=dict)
 
     def record_rejection(
@@ -118,7 +130,11 @@ class OptimizationMemory:
         return any(edit.fingerprint in self.rejected_edits for edit in candidate.edits)
 
     def record_slow_update(self, category: str, note: str) -> None:
-        self.slow_update_notes.append(f"{category}: {note}")
+        if category not in SLOW_UPDATE_CATEGORIES:
+            raise ValueError(f"unsupported slow update category: {category}")
+        record = SlowUpdateRecord(category=category, note=note)
+        self.slow_update_records.append(record)
+        self.slow_update_notes.append(record.legacy_note)
 
     def persist(self, store: "Store", *, repo: Path) -> None:
         repo_path = str(repo)
@@ -135,12 +151,17 @@ class OptimizationMemory:
                 key=fingerprint,
                 payload=payload,
             )
-        for index, note in enumerate(self.slow_update_notes):
+        for index, record in enumerate(self.slow_update_records):
+            note = record.legacy_note
             store.record_optimizer_memory(
                 repo_path=repo_path,
                 memory_type="slow_update",
                 key=f"slow_update:{index}:{hashlib.sha256(note.encode('utf-8')).hexdigest()}",
-                payload={"note": note},
+                payload={
+                    "category": record.category,
+                    "note": record.note,
+                    "legacy_note": note,
+                },
             )
         for suite_id, record in sorted(self.validation_baselines.items()):
             store.record_optimizer_memory(
@@ -184,7 +205,9 @@ class OptimizationMemory:
                     ),
                 )
             elif memory_type == "slow_update":
-                memory.slow_update_notes.append(str(payload["note"]))
+                record = _slow_update_record_from_payload(payload)
+                memory.slow_update_records.append(record)
+                memory.slow_update_notes.append(record.legacy_note)
             elif memory_type == "validation_baseline":
                 raw_candidate_id = payload.get("candidate_id")
                 candidate_id = (
@@ -380,6 +403,18 @@ def _decision_from_group(candidates: list[OptimizationCandidate]) -> Optimizatio
         reasons,
         tuple(edit.metadata() for edit in edits),
     )
+
+
+def _slow_update_record_from_payload(payload: dict[str, object]) -> SlowUpdateRecord:
+    raw_category = payload.get("category")
+    raw_note = payload.get("note")
+    if isinstance(raw_category, str) and raw_category in SLOW_UPDATE_CATEGORIES and isinstance(raw_note, str):
+        return SlowUpdateRecord(category=raw_category, note=raw_note)
+    legacy_note = str(payload["note"])
+    category, separator, note = legacy_note.partition(": ")
+    if separator and category in SLOW_UPDATE_CATEGORIES:
+        return SlowUpdateRecord(category=category, note=note)
+    return SlowUpdateRecord(category="optimizer_guidance", note=legacy_note)
 
 
 def _unique(values: tuple[str, ...]) -> tuple[str, ...]:
