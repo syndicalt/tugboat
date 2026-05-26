@@ -1160,7 +1160,7 @@ def _assert_auto_apply_precheck(
             candidate_id=str(candidate_id),
             repository=str(repo.resolve()),
             change_class=candidate.risk_class,
-            categories=(candidate.risk_class,),
+            categories=_auto_apply_candidate_categories(candidate),
             held_out_eval_passed=True,
             governance_regression_passed=True,
             rejection_rate=float(metrics["rejection_rate"]),
@@ -1216,7 +1216,7 @@ def _assert_auto_apply_final(
             candidate_id=str(candidate_id),
             repository=str(repo.resolve()),
             change_class=candidate.risk_class,
-            categories=(candidate.risk_class,),
+            categories=_auto_apply_candidate_categories(candidate),
             held_out_eval_passed=True,
             governance_regression_passed=True,
             rejection_rate=float(metrics["rejection_rate"]),
@@ -1348,6 +1348,15 @@ def _auto_apply_rollback_command(repo: Path, run_dir: Path) -> tuple[str, ...]:
         run_dir.name,
         "--execute",
     )
+
+
+def _auto_apply_candidate_categories(candidate: CandidatePatch) -> tuple[str, ...]:
+    categories = [candidate.risk_class]
+    for metadata in candidate.bounded_edit_metadata:
+        section = metadata.get("section")
+        if isinstance(section, str) and section.strip():
+            categories.append(section.strip().lower().replace("-", "_").replace(" ", "_"))
+    return tuple(categories)
 
 
 def _record_auto_apply_decision(

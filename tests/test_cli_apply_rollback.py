@@ -631,6 +631,73 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
     )
 
 
+def test_auto_apply_rejects_class_a_candidate_touching_forbidden_policy_domain(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    candidate_path = run_dir / "candidate.json"
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["bounded_edit_metadata"] = [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Provider Routing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+    candidate_path.write_text(json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.decided'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert event is not None
+    event_payload = json.loads(event[0])
+    assert event_payload["eligible"] is False
+    assert "forbidden_category:provider_routing" in event_payload["reasons"]
+
+
 def test_auto_apply_confirmation_requires_matching_policy_version(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
