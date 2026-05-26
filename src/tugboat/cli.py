@@ -6,7 +6,7 @@ import json
 import shutil
 import sys
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
@@ -1336,6 +1336,7 @@ def _assert_auto_apply_precheck(
     rollback_rate: float,
 ) -> None:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
+    metrics = _auto_apply_ledger_metrics(repo)
     decision = evaluate_auto_apply(
         candidate=AutoApplyCandidate(
             candidate_id=str(candidate_id),
@@ -1344,8 +1345,8 @@ def _assert_auto_apply_precheck(
             categories=(candidate.risk_class,),
             held_out_eval_passed=True,
             governance_regression_passed=True,
-            rejection_rate=rejection_rate,
-            rollback_rate=rollback_rate,
+            rejection_rate=float(metrics["rejection_rate"]),
+            rollback_rate=float(metrics["rollback_rate"]),
             vcs_proof=VcsProof(
                 mode=mode,
                 commit_sha="pending",
@@ -1358,7 +1359,7 @@ def _assert_auto_apply_precheck(
             review_actor=review_actor,
             confirmed=confirmed,
             policy_version=policy_version,
-            burn_in_days=burn_in_days,
+            burn_in_days=int(metrics["burn_in_days"]),
         ),
     )
     _record_auto_apply_decision(repo, candidate_id, run_dir.name, decision.reasons, review_actor)
@@ -1391,6 +1392,7 @@ def _assert_auto_apply_final(
     rollback_rate: float,
 ) -> dict[str, object]:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
+    metrics = _auto_apply_ledger_metrics(repo)
     decision = evaluate_auto_apply(
         candidate=AutoApplyCandidate(
             candidate_id=str(candidate_id),
@@ -1399,8 +1401,8 @@ def _assert_auto_apply_final(
             categories=(candidate.risk_class,),
             held_out_eval_passed=True,
             governance_regression_passed=True,
-            rejection_rate=rejection_rate,
-            rollback_rate=rollback_rate,
+            rejection_rate=float(metrics["rejection_rate"]),
+            rollback_rate=float(metrics["rollback_rate"]),
             vcs_proof=VcsProof(
                 mode=mode,
                 commit_sha=applied_commit,
@@ -1413,13 +1415,82 @@ def _assert_auto_apply_final(
             review_actor=review_actor,
             confirmed=confirmed,
             policy_version=policy_version,
-            burn_in_days=burn_in_days,
+            burn_in_days=int(metrics["burn_in_days"]),
         ),
     )
     _record_auto_apply_decision(repo, candidate_id, run_dir.name, decision.reasons, review_actor)
     if not decision.eligible or decision.approval_bundle is None:
         raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
-    return decision.approval_bundle.to_json_dict()
+    bundle = decision.approval_bundle.to_json_dict()
+    bundle["readiness_metrics"] = metrics
+    return bundle
+
+
+def _auto_apply_ledger_metrics(repo: Path) -> dict[str, object]:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        reviewed_row = store.connection.execute(
+            """
+            SELECT COUNT(*),
+                   SUM(CASE WHEN decision = 'rejected' THEN 1 ELSE 0 END),
+                   MIN(created_at),
+                   MIN(audit_event_sequence),
+                   MAX(audit_event_sequence)
+            FROM decisions
+            WHERE policy = 'deterministic_policy_gate'
+              AND decision IN ('needs_review', 'rejected')
+            """
+        ).fetchone()
+        applied_row = store.connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM decisions
+            WHERE decision = 'applied'
+              AND policy IN ('apply_controller', 'auto_apply_controller')
+            """
+        ).fetchone()
+        rollback_row = store.connection.execute(
+            """
+            SELECT COUNT(*), MIN(sequence), MAX(sequence)
+            FROM audit_events
+            WHERE event_type = 'rollback.applied'
+            """
+        ).fetchone()
+
+    reviewed_count = int(reviewed_row[0] or 0)
+    rejected_count = int(reviewed_row[1] or 0)
+    applied_count = int(applied_row[0] or 0)
+    rollback_count = int(rollback_row[0] or 0)
+    burn_in_days = _burn_in_days(str(reviewed_row[2])) if reviewed_row[2] else 0
+    source_sequences = [
+        value
+        for value in (
+            reviewed_row[3],
+            reviewed_row[4],
+            rollback_row[1],
+            rollback_row[2],
+        )
+        if value is not None
+    ]
+    return {
+        "applied_count": applied_count,
+        "burn_in_days": burn_in_days,
+        "rejected_count": rejected_count,
+        "rejection_rate": rejected_count / reviewed_count if reviewed_count else 1.0,
+        "reviewed_count": reviewed_count,
+        "rollback_count": rollback_count,
+        "rollback_rate": rollback_count / applied_count if applied_count else 1.0,
+        "source_audit_range": {
+            "first_sequence": min(source_sequences) if source_sequences else None,
+            "last_sequence": max(source_sequences) if source_sequences else None,
+        },
+    }
+
+
+def _burn_in_days(created_at: str) -> int:
+    started = datetime.fromisoformat(created_at)
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - started).days)
 
 
 def _auto_apply_readiness(

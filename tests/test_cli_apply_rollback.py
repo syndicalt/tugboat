@@ -5,9 +5,12 @@ import json
 import sqlite3
 import subprocess
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tugboat.cli import main
+from tugboat.db import Store
+from tugboat.paths import sidecar_dir
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -90,6 +93,72 @@ def _candidate_run(repo: Path, *, risk_class: str = "instruction_clarification")
         encoding="utf-8",
     )
     return run_dir
+
+
+def _write_auto_apply_policy(repo: Path, *, version: int = 9) -> None:
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(
+        f"""
+version: {version}
+auto_apply:
+  enabled: true
+  allowed_repositories:
+    - {repo}
+  minimum_burn_in_days: 30
+  maximum_rejection_rate: 0.05
+  maximum_rollback_rate: 0.01
+""",
+        encoding="utf-8",
+    )
+
+
+def _seed_auto_apply_history(
+    repo: Path,
+    *,
+    days_ago: int = 31,
+    reviewed: int = 20,
+    rejected: int = 0,
+    applied: int = 20,
+    rollbacks: int = 0,
+) -> None:
+    created_at = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    db_path = repo / ".sidecar" / "db.sqlite"
+    with Store.open(sidecar_dir(repo) / "db.sqlite"):
+        pass
+    with closing(sqlite3.connect(db_path)) as connection:
+        for index in range(reviewed):
+            decision = "rejected" if index < rejected else "needs_review"
+            connection.execute(
+                """
+                INSERT INTO decisions(
+                  candidate_id, actor, policy, decision, reason, created_at,
+                  applied_commit, rollback_ref, audit_event_sequence
+                )
+                VALUES (?, 'tugboat', 'deterministic_policy_gate', ?, 'seeded', ?, '', '', NULL)
+                """,
+                (1000 + index, decision, created_at),
+            )
+        for index in range(applied):
+            connection.execute(
+                """
+                INSERT INTO decisions(
+                  candidate_id, actor, policy, decision, reason, created_at,
+                  applied_commit, rollback_ref, audit_event_sequence
+                )
+                VALUES (?, 'tugboat', 'apply_controller', 'applied', 'seeded', ?, 'abc', '[]', NULL)
+                """,
+                (2000 + index, created_at),
+            )
+        for index in range(rollbacks):
+            connection.execute(
+                """
+                INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+                VALUES ('rollback.applied', ?, '', ?)
+                """,
+                (json.dumps({"seed": index}, sort_keys=True), f"rollback-{index}"),
+            )
+        connection.commit()
 
 
 def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_path: Path):
@@ -389,21 +458,8 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
 ):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
-    policy_path = repo / ".sidecar" / "policy.yaml"
-    policy_path.parent.mkdir(parents=True, exist_ok=True)
-    policy_path.write_text(
-        f"""
-version: 9
-auto_apply:
-  enabled: true
-  allowed_repositories:
-    - {repo}
-  minimum_burn_in_days: 30
-  maximum_rejection_rate: 0.05
-  maximum_rollback_rate: 0.01
-""",
-        encoding="utf-8",
-    )
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
 
     assert (
         main(
@@ -457,7 +513,18 @@ auto_apply:
             "commit_sha": apply_plan["applied_commit"],
             "mode": "commit",
         },
+        "readiness_metrics": {
+            "applied_count": 20,
+            "burn_in_days": approval["readiness_metrics"]["burn_in_days"],
+            "rejected_count": 0,
+            "rejection_rate": 0.0,
+            "reviewed_count": 20,
+            "rollback_count": 0,
+            "rollback_rate": 0.0,
+            "source_audit_range": approval["readiness_metrics"]["source_audit_range"],
+        },
     }
+    assert approval["readiness_metrics"]["burn_in_days"] >= 30
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         event = connection.execute(
             """
@@ -533,16 +600,8 @@ auto_apply:
 def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
-    (repo / ".sidecar" / "policy.yaml").write_text(
-        f"""
-version: 3
-auto_apply:
-  enabled: true
-  allowed_repositories:
-    - {repo}
-""",
-        encoding="utf-8",
-    )
+    _write_auto_apply_policy(repo, version=3)
+    _seed_auto_apply_history(repo)
 
     assert (
         main(
@@ -573,6 +632,73 @@ auto_apply:
     assert apply_plan["mode"] == "commit"
     assert apply_plan["auto_apply"] is True
     assert approval["actor"] == "operator@example.com"
+
+
+def test_auto_apply_uses_ledger_burn_in_instead_of_favorable_cli_value(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    _write_auto_apply_policy(repo, version=4)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "4",
+                "--actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "999",
+                "--rejection-rate",
+                "0",
+                "--rollback-rate",
+                "0",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_auto_apply_uses_ledger_rejection_and_rollback_rates_instead_of_cli_values(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A")
+    _write_auto_apply_policy(repo, version=5)
+    _seed_auto_apply_history(repo, reviewed=20, rejected=2, applied=20, rollbacks=1)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "5",
+                "--actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "999",
+                "--rejection-rate",
+                "0",
+                "--rollback-rate",
+                "0",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
 
 
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
