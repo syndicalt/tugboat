@@ -9,6 +9,7 @@ from typing import Any
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.llmff.contracts import InspectPolicyError, InspectResult, LlmffRunner, RunResult
 from tugboat.models import Policy
+from tugboat.paths import ensure_private_dir, mark_private_file
 from tugboat.security.secrets import SecretFinding, SecretScanError, scan_path
 
 
@@ -78,13 +79,13 @@ class LlmffRunSupervisor:
         events_path = lifecycle_dir / "llmff-events.jsonl"
         actual_checkpoint_path = checkpoint_path or lifecycle_dir / "checkpoint.json"
         outputs = dict(output_paths or {})
-        run_dir.mkdir(parents=True, exist_ok=True)
-        lifecycle_dir.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(run_dir)
+        ensure_private_dir(lifecycle_dir)
         _validate_checkpoint_path(run_dir, actual_checkpoint_path)
         _reject_checkpoint_mismatch(actual_checkpoint_path, manifest_path)
         _validate_output_paths(run_dir, outputs)
         for path in outputs.values():
-            path.parent.mkdir(parents=True, exist_ok=True)
+            ensure_private_dir(path.parent)
 
         command = [
             self.binary,
@@ -129,6 +130,7 @@ class LlmffRunSupervisor:
             _validate_declared_outputs_exist(outputs)
         for path in (trace_path, events_path, actual_checkpoint_path, *outputs.values()):
             if path.exists():
+                mark_private_file(path)
                 _scan_path_or_remove_secret_bearing_files(path)
         failure_kind, failure_message = (None, None)
         if boundary_timeout:
@@ -355,7 +357,7 @@ def inspect_manifest(
     if policy.allowed_manifest_hashes and manifest_digest not in policy.allowed_manifest_hashes:
         raise InspectPolicyError("manifest hash is not allowed by policy")
     artifact_path = _manifest_lifecycle_dir(run_dir, manifest_path) / "llmff-inspect.json"
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(artifact_path.parent)
     artifact = {
         "schema_version": SCHEMA_VERSION,
         "manifest_path": str(manifest_path),
@@ -369,6 +371,7 @@ def inspect_manifest(
         json.dumps(artifact, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
+    mark_private_file(artifact_path)
     _scan_path_or_remove_secret_bearing_files(artifact_path)
     return InspectResult(
         manifest_path=manifest_path,

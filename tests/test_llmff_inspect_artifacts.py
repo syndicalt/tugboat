@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
+from stat import S_IMODE
 
 import pytest
 
@@ -35,11 +37,41 @@ def test_inspect_manifest_writes_sidecar_artifact_with_manifest_hash(tmp_path: P
 
     artifact_path = run_dir / "manifest" / "llmff-inspect.json"
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert S_IMODE(artifact_path.parent.stat().st_mode) == 0o700
+    assert S_IMODE(artifact_path.stat().st_mode) == 0o600
     assert result.manifest_hash == artifact["manifest_hash"]
     assert result.network_required is False
     assert artifact["external_calls"] == []
     assert artifact["inspect"]["network_required"] is False
     assert runner.inspect_calls == [manifest]
+
+
+def test_inspect_manifest_enforces_private_modes_under_permissive_umask(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\nsteps: []\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    runner = FixtureLlmffRunner(
+        inspect_payload={
+            "manifest": "audit",
+            "network_required": False,
+            "providers": [],
+            "external_calls": [],
+        }
+    )
+
+    previous_umask = os.umask(0o022)
+    try:
+        result = inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_allow_network=False),
+            runner=runner,
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert S_IMODE(result.artifact_path.parent.stat().st_mode) == 0o700
+    assert S_IMODE(result.artifact_path.stat().st_mode) == 0o600
 
 
 def test_inspect_manifest_fails_closed_when_network_is_disallowed(tmp_path: Path):

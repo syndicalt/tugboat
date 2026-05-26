@@ -1,7 +1,9 @@
 import json
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from stat import S_IMODE
 
 from tugboat.cli import main
 
@@ -170,18 +172,31 @@ llmff:
         encoding="utf-8",
     )
 
-    assert main(["index", "--repo", str(repo)]) == 0
-    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
-    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
-    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
-    assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
-    assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
+    previous_umask = os.umask(0o022)
+    try:
+        assert main(["index", "--repo", str(repo)]) == 0
+        assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+        assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+        assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+        assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
+        assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
+    finally:
+        os.umask(previous_umask)
 
     run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())
     assert run_dirs
     run_dir = run_dirs[-1]
     assert (run_dir / "trace-input.jsonl").exists()
+    assert S_IMODE((run_dir / "trace-input.jsonl").stat().st_mode) == 0o600
+    assert S_IMODE((run_dir / "trace-redacted.jsonl").stat().st_mode) == 0o600
+    assert S_IMODE((run_dir / "patch-eval" / "llmff-trace.jsonl").stat().st_mode) == 0o600
+    assert S_IMODE((run_dir / "patch-eval" / "llmff-events.jsonl").stat().st_mode) == 0o600
+    assert S_IMODE((run_dir / "patch-eval" / "checkpoint.json").stat().st_mode) == 0o600
     assert (run_dir / "instruction-snapshot").is_dir()
+    assert S_IMODE((run_dir / "audit.json").stat().st_mode) == 0o600
+    assert S_IMODE((run_dir / "instruction-graph.json").stat().st_mode) == 0o600
+    assert S_IMODE((run_dir / "instruction-snapshot").stat().st_mode) == 0o700
+    assert S_IMODE((run_dir / "instruction-snapshot" / "CODEX.md").stat().st_mode) == 0o600
     manifest_dir = repo / ".sidecar" / "manifests"
     assert sorted(path.name for path in manifest_dir.glob("*.yaml")) == [
         "acceptance-summary.yaml",

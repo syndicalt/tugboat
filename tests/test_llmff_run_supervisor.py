@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
+from stat import S_IMODE
 
 import pytest
 
@@ -103,6 +105,52 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
         str(run_dir / "audit.raw.json"),
     ]
     assert result.output_paths == {"audit_report": run_dir / "audit.raw.json"}
+
+
+def test_run_manifest_marks_lifecycle_artifacts_private_under_permissive_umask(
+    monkeypatch,
+    tmp_path: Path,
+):
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            '{"manifest_hash":"fake"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--output") + 2]).write_text("{}\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    output_path = run_dir / "audit.raw.json"
+
+    previous_umask = os.umask(0o022)
+    try:
+        result = run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            output_paths={"audit_report": output_path},
+        )
+    finally:
+        os.umask(previous_umask)
+
+    lifecycle_dir = run_dir / "episode-audit"
+    assert S_IMODE(lifecycle_dir.stat().st_mode) == 0o700
+    assert S_IMODE(result.trace_path.stat().st_mode) == 0o600
+    assert S_IMODE(result.events_path.stat().st_mode) == 0o600
+    assert S_IMODE(result.checkpoint_path.stat().st_mode) == 0o600
+    assert S_IMODE(output_path.stat().st_mode) == 0o600
 
 
 def test_successful_run_returns_exit_code_and_artifact_paths(monkeypatch, tmp_path: Path):

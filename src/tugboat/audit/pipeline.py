@@ -18,7 +18,7 @@ from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
 from tugboat.db import Store
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
-from tugboat.paths import new_run_dir, sidecar_dir
+from tugboat.paths import ensure_private_dir, mark_private_file, new_run_dir, sidecar_dir
 from tugboat.scoring import ScoreOutcome, score_episode
 from tugboat.security.redaction import redact_payload
 from tugboat.security.secrets import SecretScanError, scan_path
@@ -49,6 +49,7 @@ def run_audit_pipeline(
     policy = load_policy(repo)
     run_dir = new_run_dir(repo)
     shutil.copyfile(trace, run_dir / "trace-input.jsonl")
+    mark_private_file(run_dir / "trace-input.jsonl")
     _write_instruction_snapshot(repo, run_dir)
     try:
         scan_path(run_dir / "trace-input.jsonl")
@@ -423,13 +424,14 @@ def _failed_instruction_index_result(
 
 def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
     snapshot = run_dir / "instruction-snapshot"
-    snapshot.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(snapshot)
     result = index_repo(repo, load_policy(repo))
     for document in result.documents:
         source = repo / document.path
         target = snapshot / document.path
-        target.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(target.parent)
         shutil.copyfile(source, target)
+        mark_private_file(target)
     graph_path = run_dir / "instruction-graph.json"
     graph_payload = {
         "schema_version": SCHEMA_VERSION,
@@ -460,6 +462,7 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
         json.dumps(graph_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    mark_private_file(graph_path)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         for document in result.documents:
             store.record_instruction_snapshot(
@@ -500,6 +503,7 @@ def _write_redacted_trace(bundle, path: Path) -> None:
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
     )
+    mark_private_file(path)
 
 
 def _write_canonical_episode(bundle, path: Path) -> None:
@@ -523,6 +527,7 @@ def _write_canonical_episode(bundle, path: Path) -> None:
     }
     validate_json_artifact("canonical-episode.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    mark_private_file(path)
 
 
 def _event_group_json(events) -> list[dict[str, object]]:
