@@ -105,3 +105,58 @@ def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path
     assert report["passed"] is False
     assert report["metrics"]["governance_regressions"] == 1
     assert report["recommendation"] == "reject"
+
+
+def test_eval_provider_smoke_requires_explicit_opt_in(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["suite_id"] == "provider-smoke"
+    assert report["live_provider_required"] is True
+    assert report["recommendation"] == "skip"
+    assert report["metrics"] == {
+        "provider_smoke_cases": 0,
+        "provider_smoke_failures": 0,
+        "provider_smoke_skipped": 1,
+        "provider_smoke_opted_in": 0,
+    }
+
+
+def test_eval_provider_smoke_opt_in_reports_missing_provider_credentials(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE", "1")
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["suite_id"] == "provider-smoke"
+    assert report["live_provider_required"] is True
+    assert report["recommendation"] == "reject"
+    assert report["metrics"] == {
+        "provider_smoke_cases": 1,
+        "provider_smoke_failures": 1,
+        "provider_smoke_skipped": 0,
+        "provider_smoke_opted_in": 1,
+        "provider_smoke_configured": 0,
+        "provider_smoke_missing_credentials": 1,
+    }

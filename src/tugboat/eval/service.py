@@ -20,6 +20,7 @@ def write_eval_report(
     held_out_score: float,
     governance_passed: bool,
     recommendation: str,
+    live_provider_required: bool = False,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +35,7 @@ def write_eval_report(
         "recommendation": recommendation,
         "suite_id": suite_id,
         "trigger_score": trigger_score,
+        "live_provider_required": live_provider_required,
     }
     validate_json_artifact("eval-report.json", payload)
     report_path.write_text(

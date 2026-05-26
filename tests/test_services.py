@@ -93,6 +93,7 @@ def test_write_eval_report_writes_json_report(tmp_path: Path):
         "candidate_id": 5,
         "governance_passed": True,
         "held_out_score": 1.0,
+        "live_provider_required": False,
         "metrics": {"duration_seconds": 1.25, "failures": 0},
         "passed": True,
         "recommendation": "accept",
@@ -103,12 +104,32 @@ def test_write_eval_report_writes_json_report(tmp_path: Path):
 
 
 def test_write_report_writes_markdown_summary(tmp_path: Path):
+    eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    eval_report_path.parent.mkdir(parents=True)
+    eval_report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 5,
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "live_provider_required": True,
+                "metrics": {"provider_smoke_cases": 1},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "provider-smoke",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     report_path = write_report(
         tmp_path,
         "run-1",
         candidate=_candidate(),
         decision=PolicyDecision(False, ("modal_weakening", "new_external_endpoint")),
-        eval_report_path=tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json",
+        eval_report_path=eval_report_path,
     )
 
     assert report_path == tmp_path / ".sidecar" / "runs" / "run-1" / "report.md"
@@ -122,6 +143,11 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- policy_allowed: false",
             "- policy_reasons: modal_weakening,new_external_endpoint",
             "- eval_report: .sidecar/runs/run-1/eval-report.json",
+            "- trigger_score: 0.84",
+            "- held_out_score: 0.92",
+            "- governance_passed: true",
+            "- recommendation: accept",
+            "- live_provider_required: true",
             "",
             "## Rationale",
             "",

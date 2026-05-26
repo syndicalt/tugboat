@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from tugboat.artifacts import validate_report_markdown
 from tugboat.paths import runs_dir
@@ -19,6 +21,7 @@ def write_report(
     run_dir = _repo_local_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     report_path = run_dir / "report.md"
+    eval_summary = _eval_summary_lines(eval_report_path)
     text = "\n".join(
         [
             "# Tugboat Report",
@@ -29,6 +32,7 @@ def write_report(
             f"- policy_allowed: {str(decision.allowed).lower()}",
             f"- policy_reasons: {','.join(decision.reasons)}",
             f"- eval_report: {eval_report_path.relative_to(repo)}",
+            *eval_summary,
             "",
             "## Rationale",
             "",
@@ -42,6 +46,28 @@ def write_report(
         raise SecretScanError(findings)
     report_path.write_text(text, encoding="utf-8")
     return report_path
+
+
+def _eval_summary_lines(eval_report_path: Path) -> list[str]:
+    if not eval_report_path.exists():
+        return []
+    payload: Any = json.loads(eval_report_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("eval report must be a JSON object")
+    fields = (
+        "trigger_score",
+        "held_out_score",
+        "governance_passed",
+        "recommendation",
+        "live_provider_required",
+    )
+    return [f"- {field}: {_report_scalar(payload[field])}" for field in fields if field in payload]
+
+
+def _report_scalar(value: object) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
 
 
 def _repo_local_run_dir(repo: Path, run_id: str) -> Path:

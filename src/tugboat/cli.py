@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 from collections.abc import Sequence
@@ -31,7 +32,7 @@ from tugboat.daemon.service import (
 )
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
-from tugboat.evals import run_offline_eval_suite
+from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.harness.checks import check_harness_legibility, generate_harness_report
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
@@ -403,9 +404,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         held_out_score = 1.0
         governance_passed = True
         recommendation = "accept"
+        live_provider_required = False
         policy_decision_payload: dict[str, object] | None = None
         offline_report = None
-        if args.suite == "all" and not (run_dir / "candidate.raw.json").exists():
+        if args.suite == "provider-smoke" and not (run_dir / "candidate.raw.json").exists():
+            offline_report = run_provider_smoke_suite(
+                opted_in=os.environ.get("TUGBOAT_PROVIDER_SMOKE") == "1",
+                provider=os.environ.get("TUGBOAT_PROVIDER_SMOKE_PROVIDER"),
+            )
+            passed = offline_report.passed
+            metrics = offline_report.metrics
+            trigger_score = offline_report.trigger_score
+            held_out_score = offline_report.held_out_score
+            governance_passed = offline_report.governance_passed
+            recommendation = offline_report.recommendation
+            live_provider_required = offline_report.live_provider_required
+        elif args.suite == "all" and not (run_dir / "candidate.raw.json").exists():
             offline_report = run_offline_eval_suite(repo, suite_id=args.suite)
             passed = offline_report.passed
             metrics = offline_report.metrics
@@ -413,6 +427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             held_out_score = offline_report.held_out_score
             governance_passed = offline_report.governance_passed
             recommendation = offline_report.recommendation
+            live_provider_required = offline_report.live_provider_required
         elif (run_dir / "candidate.raw.json").exists():
             eval_payload, policy_decision_payload = _run_patch_eval(
                 repo,
@@ -450,6 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             held_out_score=held_out_score,
             governance_passed=governance_passed,
             recommendation=recommendation,
+            live_provider_required=live_provider_required,
         )
         if policy_decision_payload is not None:
             (run_dir / "policy-gate.json").write_text(
@@ -479,12 +495,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         case_id=case.case_id,
                         case_hash=case.case_hash,
                     )
-                for split_name, case_ids in offline_report.validation_splits.items():
-                    store.record_validation_split(
-                        suite_id=args.suite,
-                        split_name=split_name,
-                        case_ids=case_ids,
-                    )
+                if offline_report.validation_splits is not None:
+                    for split_name, case_ids in offline_report.validation_splits.items():
+                        store.record_validation_split(
+                            suite_id=args.suite,
+                            split_name=split_name,
+                            case_ids=case_ids,
+                        )
             if not passed or recommendation == "reject":
                 _record_rejected_candidate_memory(
                     store,

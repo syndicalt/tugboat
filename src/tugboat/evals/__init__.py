@@ -175,6 +175,60 @@ def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
     )
 
 
+def run_provider_smoke_suite(*, opted_in: bool, provider: str | None = None) -> OfflineEvalReport:
+    if not opted_in:
+        return OfflineEvalReport(
+            suite_id="provider-smoke",
+            passed=False,
+            metrics={
+                "provider_smoke_cases": 0,
+                "provider_smoke_failures": 0,
+                "provider_smoke_skipped": 1,
+                "provider_smoke_opted_in": 0,
+            },
+            trigger_score=0.0,
+            held_out_score=0.0,
+            governance_passed=True,
+            recommendation="skip",
+            live_provider_required=True,
+        )
+    if provider is None:
+        return OfflineEvalReport(
+            suite_id="provider-smoke",
+            passed=False,
+            metrics={
+                "provider_smoke_cases": 1,
+                "provider_smoke_failures": 1,
+                "provider_smoke_skipped": 0,
+                "provider_smoke_opted_in": 1,
+                "provider_smoke_configured": 0,
+                "provider_smoke_missing_credentials": 1,
+            },
+            trigger_score=0.0,
+            held_out_score=0.0,
+            governance_passed=True,
+            recommendation="reject",
+            live_provider_required=True,
+        )
+    return OfflineEvalReport(
+        suite_id="provider-smoke",
+        passed=False,
+        metrics={
+            "provider_smoke_cases": 1,
+            "provider_smoke_failures": 1,
+            "provider_smoke_skipped": 0,
+            "provider_smoke_opted_in": 1,
+            "provider_smoke_configured": 1,
+            "provider_smoke_missing_credentials": 0,
+        },
+        trigger_score=0.0,
+        held_out_score=0.0,
+        governance_passed=True,
+        recommendation="reject",
+        live_provider_required=True,
+    )
+
+
 def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord, ...]]:
     metrics = {
         "incident_replay_cases": 0,

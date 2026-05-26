@@ -37,6 +37,14 @@ tugboat report --repo . --run latest
 
 This is designed to work under 15 minutes for an existing repo and does not require provider credentials in proposal-only mode.
 
+Live provider smoke checks are opt-in. Without opt-in, the suite records a skipped live-provider report instead of making a provider call:
+
+```bash
+tugboat eval --repo . --candidate latest --suite provider-smoke
+```
+
+To enable the smoke preflight, set `TUGBOAT_PROVIDER_SMOKE=1` and provide the provider selection through `TUGBOAT_PROVIDER_SMOKE_PROVIDER`.
+
 ## Next Checks
 
 Before applying any generated diff, run:
