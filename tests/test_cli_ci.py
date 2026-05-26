@@ -66,7 +66,11 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
             "SELECT event_type, payload_json FROM audit_events ORDER BY sequence DESC LIMIT 1"
         ).fetchone()
     assert event[0] == "ci.check_completed"
-    assert json.loads(event[1])["artifact"] == ".sidecar/ci/ci-report.json"
+    payload = json.loads(event[1])
+    assert payload["artifact"] == ".sidecar/ci/ci-report.json"
+    assert payload["artifact_sha256"] == hashlib.sha256(
+        (sidecar_dir(repo) / "ci" / "ci-report.json").read_bytes()
+    ).hexdigest()
 
 
 def test_ci_check_returns_nonzero_and_reports_harness_findings(tmp_path: Path, capsys):

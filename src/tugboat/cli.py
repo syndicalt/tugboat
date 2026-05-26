@@ -764,6 +764,7 @@ def _write_ci_report(
             "ci.check_completed",
             {
                 "artifact": report_path.relative_to(repo).as_posix(),
+                "artifact_sha256": CandidatePatch.hash_file(report_path),
                 "passed": _ci_payload_passed(payload),
             },
         )
