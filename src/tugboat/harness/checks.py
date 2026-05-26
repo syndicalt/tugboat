@@ -141,6 +141,12 @@ def generate_harness_report(repo: Path) -> HarnessReport:
                     doc_gardening_tasks.append(f"Add ownership metadata to {ref}.")
                 if "verification-status metadata" in finding:
                     doc_gardening_tasks.append(f"Add verification-status metadata to {ref}.")
+                missing_link_match = re.match(
+                    r"(.+) references missing repo-local markdown file (.+)\.", finding
+                )
+                if missing_link_match:
+                    doc_path, missing_ref = missing_link_match.groups()
+                    doc_gardening_tasks.append(f"Add or fix {missing_ref} referenced by {doc_path}.")
                 freshness_match = re.match(r"(.+) is older than source file (.+)\.", finding)
                 if freshness_match:
                     doc_path, source_ref = freshness_match.groups()
@@ -213,7 +219,8 @@ def _link_destination(raw_target: str) -> str | None:
 
 def _metadata_findings(repo: Path, path: Path) -> list[str]:
     relative_path = path.relative_to(repo).as_posix()
-    frontmatter = _frontmatter(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    frontmatter = _frontmatter(text)
     findings: list[str] = []
     if "owner" not in frontmatter:
         findings.append(f"{relative_path} is missing ownership metadata.")
@@ -226,6 +233,17 @@ def _metadata_findings(repo: Path, path: Path) -> list[str]:
             continue
         if path.stat().st_mtime < source_path.stat().st_mtime:
             findings.append(f"{relative_path} is older than source file {source_ref}.")
+    for ref in _repo_local_markdown_refs(text):
+        target = (path.parent / ref).resolve()
+        if not _is_relative_to(target, repo.resolve()):
+            findings.append(
+                f"{relative_path} references markdown file outside the repo: {ref.as_posix()}."
+            )
+            continue
+        if not target.is_file():
+            findings.append(
+                f"{relative_path} references missing repo-local markdown file {ref.as_posix()}."
+            )
     return findings
 
 
@@ -328,6 +346,12 @@ def _finding_by_cleanup_task(report: HarnessReport) -> dict[str, list[str]]:
         if freshness_match:
             doc_path, source_ref = freshness_match.groups()
             mapping[f"Refresh {doc_path} from {source_ref}."] = [finding]
+        missing_link_match = re.match(
+            r"(.+) references missing repo-local markdown file (.+)\.", finding
+        )
+        if missing_link_match:
+            doc_path, missing_ref = missing_link_match.groups()
+            mapping[f"Add or fix {missing_ref} referenced by {doc_path}."] = [finding]
     for orphan in report.orphaned_runbooks:
         task = f"Either reference {orphan} from an instruction map or remove/archive it."
         mapping[task] = [f"{orphan} is not referenced by any instruction map."]
