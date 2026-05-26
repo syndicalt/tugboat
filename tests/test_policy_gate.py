@@ -57,6 +57,37 @@ def test_policy_gate_rejects_diff_target_that_does_not_match_candidate_base_file
     assert "diff_target_mismatch" in decision.reasons
 
 
+def test_policy_gate_rejects_bounded_edit_metadata_targeting_different_file(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " Keep this instruction.\n"
+            "+Clarify tests.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "SKILL.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("bounded_edit_target_mismatch",)
+
+
 def test_policy_gate_allows_create_diff_when_new_path_matches_candidate_base_file(
     tmp_path: Path,
 ):

@@ -16,6 +16,7 @@ DENIAL_REASON_ORDER = (
     "base_hash_mismatch",
     "base_file_outside_repo",
     "base_file_not_allowed",
+    "bounded_edit_target_mismatch",
     "pending_eval_definition_edit",
     "approval_policy_self_apply",
     "audit_history_edit",
@@ -209,6 +210,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
     touched_paths = _diff_touched_paths(candidate.diff)
     if touched_paths and touched_paths != {candidate.base_file}:
         found_reasons.add("diff_target_mismatch")
+    if _has_bounded_edit_target_mismatch(candidate):
+        found_reasons.add("bounded_edit_target_mismatch")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
         found_reasons.add("base_hash_mismatch")
     changed_line_count = _changed_line_count(candidate.diff)
@@ -287,6 +290,14 @@ def _diff_touched_paths(diff: str) -> set[str]:
                 touched.add(pending_old_path)
             pending_old_path = None
     return touched
+
+
+def _has_bounded_edit_target_mismatch(candidate: CandidatePatch) -> bool:
+    normalized_base = _repo_relative_posix(candidate.base_file)
+    return any(
+        _repo_relative_posix(str(metadata.get("file", ""))) != normalized_base
+        for metadata in candidate.bounded_edit_metadata
+    )
 
 
 def _normalize_diff_path(value: str) -> str | None:
