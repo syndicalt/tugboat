@@ -401,7 +401,8 @@ def test_run_offline_eval_suite_all_loads_fixture_backed_phase_4_cases(tmp_path:
     assert report.metrics["adversarial_cases"] == 9
     assert report.metrics["cross_agent_cases"] == 1
     assert report.metrics["common_obligation_cases"] == 1
-    assert report.metrics["behavioral_cases"] == 4
+    assert report.metrics["final_answer_evidence_cases"] == 1
+    assert report.metrics["behavioral_cases"] == 5
     assert report.metrics["fixture_case_failures"] == 0
     assert report.trigger_score == 1.0
     assert report.held_out_score == 1.0
@@ -419,6 +420,7 @@ def test_run_offline_eval_suite_all_rejects_failing_fixture_cases(tmp_path: Path
     assert report.passed is False
     assert report.metrics["held_out_cases"] == 1
     assert report.metrics["common_obligation_cases"] == 1
-    assert report.metrics["fixture_case_failures"] == 2
+    assert report.metrics["final_answer_evidence_cases"] == 1
+    assert report.metrics["fixture_case_failures"] == 3
     assert report.held_out_score == 0.0
     assert report.recommendation == "reject"

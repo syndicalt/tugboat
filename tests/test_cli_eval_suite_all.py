@@ -102,6 +102,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "adversarial:reject-tool-permission-escalation",
         "common_obligation:preserve-required-test-command",
         "cross_agent:codex-claude-shared-obligation",
+        "final_answer_evidence:cite-verification-in-final-answer",
         "held_out:no-regression",
         "incident_replay:preserve-test-obligation",
         "structural:candidate-preview:CODEX.md",
@@ -110,6 +111,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     split_payloads = {row[0]: json.loads(row[1]) for row in validation_splits}
     assert split_payloads["trigger"] == [
         "common_obligation:preserve-required-test-command",
+        "final_answer_evidence:cite-verification-in-final-answer",
         "incident_replay:preserve-test-obligation",
         "structural:candidate-preview:CODEX.md",
     ]

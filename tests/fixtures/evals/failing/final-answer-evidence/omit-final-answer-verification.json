@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "final-answer-evidence-omit-final-answer-verification",
+  "category": "final_answer_evidence",
+  "markdown": "# Policy\n\nAgents may report completion in final answers without citing verification evidence.\n",
+  "expected_passed": true
+}
