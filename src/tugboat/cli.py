@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import ArtifactValidationError, SCHEMA_VERSION, validate_json_artifact
 from tugboat.audit.pipeline import run_audit_pipeline
 from tugboat.auto_apply import (
     AutoApplyCandidate,
@@ -563,6 +563,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "schema_version": SCHEMA_VERSION,
             "candidates": [candidate.to_json_dict() for candidate in candidates],
         }
+        try:
+            validate_json_artifact("harness-cleanup-candidates.json", payload)
+        except ArtifactValidationError as error:
+            print(f"cleanup candidates invalid: {error}")
+            return 1
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             for candidate in candidates:

@@ -492,3 +492,27 @@ def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path,
             WHERE severity = 'cleanup_candidate'
             """
         ).fetchone()[0] == 2
+
+
+def test_harness_cleanup_cli_validates_candidate_bundle_before_writing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class InvalidCleanupCandidate:
+        def to_json_dict(self) -> dict[str, object]:
+            return {
+                "candidate_id": "harness-cleanup-1",
+                "risk_class": "review_required",
+                "auto_apply": True,
+                "task": "Unsafe cleanup candidate.",
+                "source_findings": ["unsafe"],
+                "required_eval_suites": ["structural"],
+            }
+
+    monkeypatch.setattr(
+        "tugboat.cli.generate_cleanup_candidates",
+        lambda repo: [InvalidCleanupCandidate()],
+    )
+
+    assert main(["harness", "cleanup", "--repo", str(tmp_path)]) == 1
+    assert not (tmp_path / ".sidecar" / "harness-cleanup-candidates.json").exists()

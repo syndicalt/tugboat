@@ -472,6 +472,45 @@ def test_validate_observability_summary_artifact_accepts_current_schema():
     )
 
 
+def test_validate_harness_cleanup_candidates_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "harness-cleanup-candidates.json",
+        {
+            "schema_version": 1,
+            "candidates": [
+                {
+                    "candidate_id": "harness-cleanup-1",
+                    "risk_class": "review_required",
+                    "auto_apply": False,
+                    "task": "Add ownership metadata to docs/runbook.md.",
+                    "source_findings": ["docs/runbook.md is missing ownership metadata."],
+                    "required_eval_suites": ["structural"],
+                }
+            ],
+        },
+    )
+
+
+def test_validate_harness_cleanup_candidates_rejects_auto_apply_candidate():
+    with pytest.raises(ArtifactValidationError, match="auto_apply"):
+        validate_json_artifact(
+            "harness-cleanup-candidates.json",
+            {
+                "schema_version": 1,
+                "candidates": [
+                    {
+                        "candidate_id": "harness-cleanup-1",
+                        "risk_class": "review_required",
+                        "auto_apply": True,
+                        "task": "Add ownership metadata to docs/runbook.md.",
+                        "source_findings": ["docs/runbook.md is missing ownership metadata."],
+                        "required_eval_suites": ["structural"],
+                    }
+                ],
+            },
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 

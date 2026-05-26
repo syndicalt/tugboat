@@ -674,6 +674,46 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "harness-cleanup-candidates.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "candidates"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "candidate_id",
+                        "risk_class",
+                        "auto_apply",
+                        "task",
+                        "source_findings",
+                        "required_eval_suites",
+                    ],
+                    "properties": {
+                        "candidate_id": {"type": "string"},
+                        "risk_class": {"type": "string", "enum": ["review_required"]},
+                        "auto_apply": {"type": "boolean", "enum": [False]},
+                        "task": {"type": "string"},
+                        "source_findings": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                        "required_eval_suites": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
