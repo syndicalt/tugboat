@@ -168,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_serve.add_argument("--lease-seconds", type=int, default=300)
     daemon_serve.add_argument("--socket")
     daemon_serve.add_argument("--max-requests", type=int)
+    daemon_read_only = daemon_subcommands.add_parser("read-only")
+    daemon_read_only.add_argument("--repo", required=True)
+    read_only_action = daemon_read_only.add_mutually_exclusive_group(required=True)
+    read_only_action.add_argument("--enable", action="store_true")
+    read_only_action.add_argument("--disable", action="store_true")
+    read_only_action.add_argument("--status", action="store_true")
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -533,6 +539,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"daemon serve blocked: {error}")
             return 1
         print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "daemon" and args.daemon_command == "read-only":
+        repo = Path(args.repo)
+        kill_switch = default_kill_switch(repo)
+        if args.enable:
+            kill_switch.path.parent.mkdir(parents=True, exist_ok=True)
+            kill_switch.path.write_text("enabled\n", encoding="utf-8")
+        if args.disable:
+            kill_switch.path.unlink(missing_ok=True)
+        print(f"kill_switch_path: {kill_switch.path.relative_to(repo).as_posix()}")
+        print(f"kill_switch_enabled: {str(kill_switch.is_enabled()).lower()}")
         return 0
 
     if args.command == "report":

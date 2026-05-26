@@ -413,6 +413,33 @@ def test_daemon_status_cli_and_mcp_read_queue_state(tmp_path: Path, capsys):
     assert tugboat_daemon_status(tmp_path)["jobs_by_state"] == {"queued": 1}
 
 
+def test_daemon_read_only_cli_enables_and_disables_global_kill_switch(
+    tmp_path: Path,
+    capsys,
+):
+    kill_switch = tmp_path / ".sidecar" / "read-only.kill"
+
+    assert main(["daemon", "read-only", "--repo", str(tmp_path), "--enable"]) == 0
+
+    assert kill_switch.read_text(encoding="utf-8") == "enabled\n"
+    assert "kill_switch_enabled: true" in capsys.readouterr().out
+    assert daemon_status(tmp_path, kill_switch=FileKillSwitch(kill_switch))[
+        "kill_switch_enabled"
+    ] is True
+
+    assert main(["daemon", "read-only", "--repo", str(tmp_path), "--disable"]) == 0
+
+    assert not kill_switch.exists()
+    assert "kill_switch_enabled: false" in capsys.readouterr().out
+
+
+def test_daemon_read_only_status_does_not_initialize_sidecar(tmp_path: Path, capsys):
+    assert main(["daemon", "read-only", "--repo", str(tmp_path), "--status"]) == 0
+
+    assert "kill_switch_enabled: false" in capsys.readouterr().out
+    assert not (tmp_path / ".sidecar").exists()
+
+
 def test_daemon_run_once_cli_returns_processed_summary(tmp_path: Path, capsys):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
