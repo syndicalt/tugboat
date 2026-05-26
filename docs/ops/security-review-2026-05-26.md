@@ -9,7 +9,7 @@ verification_status: verified
 
 Release: Tugboat 0.1.0 proposal-only MVP.
 
-Commit reviewed: `d62c430`.
+Commit reviewed: `57179f0`.
 
 Wheel reviewed: `dist/tugboat-0.1.0-py3-none-any.whl`.
 
@@ -21,7 +21,7 @@ PYTHONPATH=src python -m tugboat index --repo . --check
 PYTHONPATH=src python -m tugboat harness check --repo .
 PYTHONPATH=src pytest --cov=src --cov-report=term-missing -q
 python -m build --wheel
-PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit d62c430 --ci-url local://release-smoke/2026-05-26 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
+PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit 57179f0 --ci-url local://release-smoke/2026-05-26 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
 ```
 
 ## Findings
