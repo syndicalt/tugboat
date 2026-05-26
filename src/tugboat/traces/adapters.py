@@ -39,9 +39,16 @@ def ingest_claude_transcript(path: Path) -> CanonicalEpisode:
 
 
 def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
+    events: list[dict[str, Any]] = []
+    tool_names_by_id: dict[str, str] = {}
+    if path.suffix == ".jsonl":
+        for row in _read_jsonl(path):
+            if isinstance(row.get("message"), dict):
+                events.extend(_normalize_claude_message(row["message"], tool_names_by_id))
+        return _bundle_from_payloads(path, events)
+
     payload = json.loads(path.read_text(encoding="utf-8"))
     messages = payload.get("messages", [])
-    events: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
@@ -175,6 +182,89 @@ def _normalize_codex_session_meta(payload: dict[str, Any]) -> dict[str, Any] | N
     }
 
 
+def _normalize_claude_message(
+    message: dict[str, Any],
+    tool_names_by_id: dict[str, str],
+) -> list[dict[str, Any]]:
+    role = message.get("role")
+    content = message.get("content")
+    if role == "user" and isinstance(content, str):
+        return [{"type": "user_request", "content": content}]
+    if role == "assistant":
+        return _normalize_claude_assistant_content(content, tool_names_by_id)
+    if role == "user" and isinstance(content, list):
+        return _normalize_claude_user_content_blocks(content, tool_names_by_id)
+    return []
+
+
+def _normalize_claude_assistant_content(
+    content: object,
+    tool_names_by_id: dict[str, str],
+) -> list[dict[str, Any]]:
+    if isinstance(content, str):
+        return [{"type": "final_answer", "content": content}]
+    if not isinstance(content, list):
+        return []
+    events: list[dict[str, Any]] = []
+    text_parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "text" and "text" in block:
+            text_parts.append(str(block["text"]))
+        elif block_type == "tool_use":
+            tool_id = str(block.get("id", ""))
+            tool = str(block.get("name", "unknown"))
+            if tool_id:
+                tool_names_by_id[tool_id] = tool
+            events.append(
+                {
+                    "type": "tool_call",
+                    "tool": tool,
+                    "call_id": tool_id,
+                    "arguments": _compact_json(block.get("input", {})),
+                }
+            )
+    if text_parts:
+        events.insert(0, {"type": "final_answer", "content": "\n".join(text_parts)})
+    return events
+
+
+def _normalize_claude_user_content_blocks(
+    content: list[object],
+    tool_names_by_id: dict[str, str],
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_result":
+            call_id = str(block.get("tool_use_id", ""))
+            events.append(
+                {
+                    "type": "tool_result",
+                    "tool": tool_names_by_id.get(call_id, "unknown"),
+                    "call_id": call_id,
+                    "output": _claude_tool_result_text(block.get("content", "")),
+                    "is_error": bool(block.get("is_error", False)),
+                }
+            )
+    return events
+
+
+def _claude_tool_result_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(block["text"])
+            for block in content
+            if isinstance(block, dict) and "text" in block
+        )
+    return ""
+
+
 def _codex_content_text(content: object) -> str:
     if isinstance(content, str):
         return content
@@ -185,6 +275,10 @@ def _codex_content_text(content: object) -> str:
                 parts.append(str(item["text"]))
         return "\n".join(parts)
     return ""
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _bundle_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> TraceBundle:

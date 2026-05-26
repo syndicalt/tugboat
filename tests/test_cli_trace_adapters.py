@@ -64,6 +64,81 @@ def test_audit_cli_ingests_claude_trace_format_as_normalized_events(tmp_path: Pa
     assert json.loads(rows[2][1])["agent"] == "reviewer"
 
 
+def test_audit_cli_ingests_claude_jsonl_content_blocks(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "claude.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "user", "message": {"role": "user", "content": "Fix bug"}}),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "I'll inspect."},
+                                {
+                                    "type": "tool_use",
+                                    "id": "toolu_1",
+                                    "name": "Bash",
+                                    "input": {"command": "pytest -q"},
+                                },
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "toolu_1",
+                                    "content": "1 failed",
+                                    "is_error": True,
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "claude",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == [
+        "user_request",
+        "final_answer",
+        "tool_call",
+        "tool_result",
+    ]
+    assert json.loads(rows[2][1])["tool"] == "Bash"
+    assert json.loads(rows[3][1])["output"] == "1 failed"
+
+
 def test_audit_cli_ingests_codex_trace_format_without_collapsing_tool_events(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

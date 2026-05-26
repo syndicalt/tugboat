@@ -171,6 +171,70 @@ def test_ingest_claude_transcript_maps_corrections_and_subagents(tmp_path: Path)
     assert episode.final_answer == "Implemented"
 
 
+def test_ingest_claude_transcript_maps_jsonl_content_blocks(tmp_path: Path):
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "user", "message": {"role": "user", "content": "Fix bug"}}),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "I'll inspect."},
+                                {
+                                    "type": "tool_use",
+                                    "id": "toolu_1",
+                                    "name": "Bash",
+                                    "input": {"command": "pytest -q"},
+                                },
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "toolu_1",
+                                    "content": "1 failed",
+                                    "is_error": True,
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_claude_transcript(transcript)
+
+    assert episode.request == "Fix bug"
+    assert episode.final_answer == "I'll inspect."
+    assert episode.tool_calls[0].payload == {
+        "type": "tool_call",
+        "tool": "Bash",
+        "call_id": "toolu_1",
+        "arguments": '{"command":"pytest -q"}',
+    }
+    assert episode.command_outputs[0].payload == {
+        "type": "tool_result",
+        "tool": "Bash",
+        "call_id": "toolu_1",
+        "output": "1 failed",
+        "is_error": True,
+    }
+
+
 def test_ingest_ci_failure_maps_failed_suite_and_outcome(tmp_path: Path):
     failure = tmp_path / "ci-failure.json"
     failure.write_text(
