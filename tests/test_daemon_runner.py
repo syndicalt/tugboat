@@ -313,6 +313,146 @@ def test_run_daemon_cycle_fails_checkpoint_resume_on_manifest_mismatch(tmp_path:
         assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
 
 
+def test_run_daemon_cycle_fails_checkpoint_resume_outside_run_dir_without_reading(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    outside_checkpoint = tmp_path / ".sidecar" / "checkpoint.json"
+    outside_checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    outside_checkpoint.write_text(json.dumps({"manifest_hash": "abc123"}) + "\n", encoding="utf-8")
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload={
+                "run_id": "run-1",
+                "manifest_hash": "abc123",
+                "checkpoint_path": str(outside_checkpoint),
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "checkpoint_path_outside_run"}]
+    assert result["resume_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_cycle_fails_checkpoint_resume_with_traversal_run_id(tmp_path: Path):
+    escaped_dir = tmp_path / ".sidecar" / "escape"
+    escaped_dir.mkdir(parents=True)
+    escaped_checkpoint = escaped_dir / "checkpoint.json"
+    escaped_checkpoint.write_text(json.dumps({"manifest_hash": "abc123"}) + "\n", encoding="utf-8")
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload={
+                "run_id": "../escape",
+                "manifest_hash": "abc123",
+                "checkpoint_path": str(escaped_checkpoint),
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "invalid_run_id"}]
+    assert result["resume_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_cycle_fails_malformed_checkpoint_resume_without_crashing(tmp_path: Path):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    checkpoint = run_dir / "checkpoint.json"
+    checkpoint.write_text("{not-json\n", encoding="utf-8")
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload={
+                "run_id": "run-1",
+                "manifest_hash": "abc123",
+                "checkpoint_path": str(checkpoint),
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "checkpoint_unreadable"}]
+    assert result["resume_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_cycle_fails_checkpoint_resume_when_run_dir_symlink_escapes(
+    tmp_path: Path,
+):
+    runs_root = tmp_path / ".sidecar" / "runs"
+    runs_root.mkdir(parents=True)
+    escaped_dir = tmp_path / ".sidecar" / "escaped-run"
+    escaped_dir.mkdir()
+    escaped_checkpoint = escaped_dir / "checkpoint.json"
+    escaped_checkpoint.write_text(json.dumps({"manifest_hash": "abc123"}) + "\n", encoding="utf-8")
+    (runs_root / "run-1").symlink_to("../escaped-run")
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload={
+                "run_id": "run-1",
+                "manifest_hash": "abc123",
+                "checkpoint_path": str(escaped_checkpoint),
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "run_dir_outside_runs"}]
+    assert result["resume_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+
+
 def test_write_worktree_profile_records_local_observability_refs(tmp_path: Path):
     profile_path = write_worktree_profile(
         tmp_path,

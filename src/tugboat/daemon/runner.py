@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,6 +11,9 @@ from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwit
 from tugboat.daemon.service import process_daemon_job
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+
+
+_SAFE_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,12 @@ class DaemonLoopConfig:
     kill_switch: KillSwitch | None = None
     now: datetime | None = None
     max_attempts: int = 3
+
+
+@dataclass(frozen=True)
+class ResumeValidation:
+    resume: dict[str, Any] | None
+    failure_reason: str | None = None
 
 
 def discover_trace_jobs(
@@ -77,15 +87,14 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
                 break
             _record_job_state(repo, job.id, job.state)
             if job.kind == "llmff_resume":
-                resume = _resume_metadata(job.id, job.payload)
-                if resume is None:
+                validation = _resume_metadata(repo, job.id, job.payload)
+                if validation.failure_reason is not None:
                     failed = queue.transition(job.id, JobState.FAILED, now=config.now)
                     _record_job_state(repo, failed.id, failed.state)
-                    failed_jobs.append(
-                        {"job_id": job.id, "reason": "checkpoint_manifest_mismatch"}
-                    )
+                    failed_jobs.append({"job_id": job.id, "reason": validation.failure_reason})
                     continue
-                resume_jobs.append(resume)
+                if validation.resume is not None:
+                    resume_jobs.append(validation.resume)
             final_job = process_daemon_job(repo, queue, job.id, now=config.now)
             if final_job.state is JobState.FAILED:
                 failed_jobs.append({"job_id": job.id, "reason": "job_failed"})
@@ -136,18 +145,34 @@ def default_runner_kill_switch(repo: Path) -> FileKillSwitch:
     return FileKillSwitch(repo / ".sidecar" / "read-only.kill")
 
 
-def _resume_metadata(job_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
-    checkpoint_path = Path(str(payload["checkpoint_path"]))
-    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+def _resume_metadata(repo: Path, job_id: int, payload: dict[str, Any]) -> ResumeValidation:
+    run_id = str(payload["run_id"])
+    if not run_id or run_id in {".", ".."} or _SAFE_RUN_ID_PATTERN.fullmatch(run_id) is None:
+        return ResumeValidation(resume=None, failure_reason="invalid_run_id")
+    runs_root = (repo / ".sidecar" / "runs").resolve()
+    run_dir = (runs_root / run_id).resolve()
+    if not run_dir.is_relative_to(runs_root):
+        return ResumeValidation(resume=None, failure_reason="run_dir_outside_runs")
+    checkpoint_path = Path(str(payload["checkpoint_path"])).expanduser().resolve()
+    if not checkpoint_path.is_relative_to(run_dir):
+        return ResumeValidation(resume=None, failure_reason="checkpoint_path_outside_run")
+    try:
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ResumeValidation(resume=None, failure_reason="checkpoint_unreadable")
+    if not isinstance(checkpoint, dict):
+        return ResumeValidation(resume=None, failure_reason="checkpoint_unreadable")
     manifest_hash = str(payload["manifest_hash"])
     if str(checkpoint.get("manifest_hash")) != manifest_hash:
-        return None
-    return {
-        "job_id": job_id,
-        "run_id": str(payload["run_id"]),
-        "checkpoint_path": str(checkpoint_path),
-        "manifest_hash": manifest_hash,
-    }
+        return ResumeValidation(resume=None, failure_reason="checkpoint_manifest_mismatch")
+    return ResumeValidation(
+        resume={
+            "job_id": job_id,
+            "run_id": run_id,
+            "checkpoint_path": str(checkpoint_path),
+            "manifest_hash": manifest_hash,
+        }
+    )
 
 
 def _queued_count(queue: DaemonQueue) -> int:
