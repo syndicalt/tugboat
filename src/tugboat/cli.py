@@ -1359,7 +1359,7 @@ def _write_apply_plan(
 
     adapter = VcsAdapter(repo)
     if auto_apply:
-        _assert_auto_apply_user_worktree_clean(adapter)
+        _assert_user_worktree_clean(adapter)
     elif mode in {"branch", "commit", "pr"}:
         adapter.assert_clean_worktree()
     adapter.assert_target_files_clean(target_files)
@@ -1666,7 +1666,7 @@ def _assert_auto_apply_precheck(
         raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
 
 
-def _assert_auto_apply_user_worktree_clean(adapter: VcsAdapter) -> None:
+def _assert_user_worktree_clean(adapter: VcsAdapter) -> None:
     dirty_paths = tuple(
         path for path in adapter.check_clean_worktree().dirty_paths if not path.startswith(".sidecar/")
     )
@@ -2139,6 +2139,8 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
         raise ValueError("apply plan has no applied commit")
     target_files = tuple(str(path) for path in apply_plan["target_files"])
     adapter = VcsAdapter(repo)
+    if execute:
+        _assert_user_worktree_clean(adapter)
     metadata = adapter.rollback_metadata(
         commit_sha=commit_sha,
         branch_name=str(apply_plan["branch_name"]),
