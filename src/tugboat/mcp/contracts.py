@@ -545,20 +545,36 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
         except SecretScanError as error:
             path.unlink(missing_ok=True)
             raise ValueError("secret detected in episode payload") from error
+        trace_format = _detect_episode_trace_format(path)
         try:
             bundle = (
                 ingest_mcp_session_bundle(path)
-                if _looks_like_mcp_live_event_jsonl(path)
+                if trace_format == "mcp"
                 else ingest_jsonl_trace(path)
             )
         except (json.JSONDecodeError, ValueError) as error:
             path.unlink(missing_ok=True)
             raise ValueError("invalid episode JSONL payload") from error
+        metadata_path = _episode_trace_metadata_path(path)
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "trace_id": trace_id,
+                    "trace_format": trace_format,
+                    "trace_path": path.as_posix(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
             episode_id = store.record_trace_episode(repo=repo_path, bundle=bundle)
         return {
             "episode_id": episode_id,
             "trace_id": trace_id,
+            "trace_format": trace_format,
             "artifact_ref": _relative_ref(repo_path, path),
         }
 
@@ -582,6 +598,29 @@ def _looks_like_mcp_live_event_jsonl(path: Path) -> bool:
     return False
 
 
+def _detect_episode_trace_format(path: Path) -> str:
+    return "mcp" if _looks_like_mcp_live_event_jsonl(path) else "generic-jsonl"
+
+
+def _episode_trace_metadata_path(trace_path: Path) -> Path:
+    return trace_path.with_suffix(".json")
+
+
+def _read_episode_trace_format(trace_path: Path) -> str:
+    if not trace_path.exists():
+        return "generic-jsonl"
+    metadata_path = _episode_trace_metadata_path(trace_path)
+    if metadata_path.exists():
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("episode trace metadata must be a JSON object")
+        trace_format = payload.get("trace_format")
+        if not isinstance(trace_format, str) or not trace_format:
+            raise ValueError("episode trace metadata missing trace_format")
+        return trace_format
+    return _detect_episode_trace_format(trace_path)
+
+
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
     trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
@@ -595,9 +634,12 @@ def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
         repo_path,
         tool="tugboat_request_audit",
         kind="audit",
-        payload={"trace_id": trace_id},
+        payload={"trace_id": trace_id, "trace_format": _read_episode_trace_format(trace_path)},
         queue_kind="trace_audit",
-        queue_payload={"trace_path": str(trace_path)},
+        queue_payload={
+            "trace_path": str(trace_path),
+            "trace_format": _read_episode_trace_format(trace_path),
+        },
         preflight=validate_trace,
     )
 

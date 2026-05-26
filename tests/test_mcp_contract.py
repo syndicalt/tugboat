@@ -1319,6 +1319,72 @@ llmff:
     assert queued_payload["artifact_ref"].startswith(".sidecar/mcp/requests/")
 
 
+def test_request_audit_preserves_mcp_live_trace_format_through_daemon(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_audit: allow
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    episode = tugboat_record_episode(
+        repo,
+        '{"event":"request","text":"Fix bug"}\n'
+        '{"event":"tool.started","tool":"apply_patch"}\n'
+        '{"event":"tool.finished","tool":"apply_patch","exit_code":0}\n'
+        '{"event":"agent.final","text":"Done"}\n',
+    )
+
+    assert episode["trace_format"] == "mcp"
+    request = tugboat_request_audit(repo, episode["trace_id"])
+    result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert request["kind"] == "audit"
+    assert result["processed"] is True
+    assert result["final_state"] == "waiting_review"
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical_episode = json.loads(
+        (run_dir / "canonical-episode.json").read_text(encoding="utf-8")
+    )
+    assert canonical_episode["request"] == "Fix bug"
+    assert [event["event_type"] for event in canonical_episode["events"]] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+        "final_answer",
+    ]
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        queued_payload = json.loads(
+            queue_store.connection.execute(
+                "SELECT payload_json FROM daemon_jobs"
+            ).fetchone()[0]
+        )
+    assert queued_payload["trace_format"] == "mcp"
+
+
 def test_request_audit_records_daemon_job_in_audited_store_before_worker_runs(
     tmp_path: Path,
 ):
@@ -1775,6 +1841,7 @@ mcp:
         "state": "queued",
         "write_intent": True,
         "trace_id": episode["trace_id"],
+        "trace_format": "generic-jsonl",
         "repo_policy": {
             "path": ".sidecar/policy.yaml",
             "version": 7,
