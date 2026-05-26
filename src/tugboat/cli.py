@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
@@ -256,13 +257,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         harness = payload["checks"]["harness"]
         eval_check = payload["checks"].get("eval")
-        if harness["passed"] and (eval_check is None or eval_check["passed"]):
+        if _ci_payload_passed(payload):
             print("ci: ok")
             print(f"report: {report_path}")
             return 0
         print("ci: failed")
         for finding in harness["findings"]:
             print(finding)
+        semantic_lint = payload["checks"]["semantic_policy_lint"]
+        if not semantic_lint["passed"]:
+            print("semantic policy lint failed")
+            for finding in semantic_lint["findings"]:
+                print(finding)
         if eval_check is not None and not eval_check["passed"]:
             print(f"eval suite {eval_check['suite_id']} failed")
         print(f"report: {report_path}")
@@ -572,6 +578,7 @@ def _write_ci_report(
     policy = load_policy(repo)
     index = index_repo(repo, policy)
     harness = check_harness_legibility(repo, max_instruction_lines)
+    semantic_findings = _semantic_policy_lint(repo, index)
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "mode": "ci_check",
@@ -584,6 +591,10 @@ def _write_ci_report(
             "harness": {
                 "passed": harness.passed,
                 "findings": list(harness.findings),
+            },
+            "semantic_policy_lint": {
+                "passed": not semantic_findings,
+                "findings": semantic_findings,
             },
         },
     }
@@ -642,8 +653,51 @@ def _ci_payload_passed(payload: dict[str, Any]) -> bool:
     return bool(
         checks["index"]["passed"]
         and checks["harness"]["passed"]
+        and checks["semantic_policy_lint"]["passed"]
         and ("eval" not in checks or checks["eval"]["passed"])
     )
+
+
+SEMANTIC_LINT_TERMS = (
+    "approval",
+    "sandbox",
+    "test",
+    "review",
+    "secret",
+    "memory",
+    "network",
+    "deploy",
+    "permission",
+)
+PERMISSIVE_GOVERNANCE_LANGUAGE = re.compile(
+    r"\b(may|can|could|optional)\b(?:\s+\w+){0,4}\s+\b(skip|bypass|ignore)\b",
+    re.IGNORECASE,
+)
+NEGATED_PERMISSIVE_GOVERNANCE_LANGUAGE = re.compile(
+    r"\b(can(?:not|'t|\s+not)|could(?:\s+not|n't)|may\s+not)\b"
+    r"(?:\s+\w+){0,4}\s+\b(skip|bypass|ignore)\b",
+    re.IGNORECASE,
+)
+
+
+def _semantic_policy_lint(repo: Path, index) -> list[str]:
+    findings: list[str] = []
+    for document in index.documents:
+        text = (repo / document.path).read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            lowered = line.lower()
+            if not PERMISSIVE_GOVERNANCE_LANGUAGE.search(line):
+                continue
+            if NEGATED_PERMISSIVE_GOVERNANCE_LANGUAGE.search(line):
+                continue
+            for term in SEMANTIC_LINT_TERMS:
+                if term in lowered:
+                    findings.append(
+                        f"{document.path}:{line_number} weakens governance term "
+                        f"'{term}' with permissive language."
+                    )
+                    break
+    return findings
 
 
 def _persist_harness_report(repo: Path, report) -> Path:

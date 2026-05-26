@@ -56,6 +56,7 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
         "checks": {
             "harness": {"passed": True, "findings": []},
             "index": {"passed": True, "indexed_documents": 1},
+            "semantic_policy_lint": {"passed": True, "findings": []},
         },
     }
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -80,6 +81,133 @@ def test_ci_check_returns_nonzero_and_reports_harness_findings(tmp_path: Path, c
     assert "AGENTS.md references missing repo-local markdown file docs/missing.md." in output
     report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
     assert report["checks"]["harness"]["passed"] is False
+
+
+def test_ci_check_returns_nonzero_for_semantic_policy_lint_findings(tmp_path: Path, capsys):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text("# Agent Map\n\nSee [runbook](docs/runbook.md).\n", encoding="utf-8")
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    output = capsys.readouterr().out
+    assert "ci: failed" in output
+    assert "semantic policy lint failed" in output
+    assert "CODEX.md:5 weakens governance term 'test' with permissive language." in output
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["harness"]["passed"] is True
+    assert report["checks"]["semantic_policy_lint"] == {
+        "passed": False,
+        "findings": ["CODEX.md:5 weakens governance term 'test' with permissive language."],
+    }
+
+
+def test_ci_semantic_policy_lint_allows_restrictive_governance_language(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n\nYou must not skip tests.\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 0
+
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["semantic_policy_lint"] == {"passed": True, "findings": []}
+
+
+def test_ci_semantic_policy_lint_flags_could_skip_governance_language(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n\nYou could skip tests.\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["semantic_policy_lint"]["findings"] == [
+        "AGENTS.md:5 weakens governance term 'test' with permissive language."
+    ]
+
+
+def test_ci_semantic_policy_lint_allows_negated_can_skip_language(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n\nYou can't skip tests.\nYou can not skip reviews.\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 0
+
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["semantic_policy_lint"] == {"passed": True, "findings": []}
+
+
+def test_ci_semantic_policy_lint_checks_policy_configured_instruction_globs(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    skill_dir = repo / ".codex" / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("You may skip tests before final answers.\n", encoding="utf-8")
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["semantic_policy_lint"] == {
+        "passed": False,
+        "findings": [
+            ".codex/skills/demo/SKILL.md:1 weakens governance term 'test' with permissive language."
+        ],
+    }
+
+
+def test_ci_semantic_policy_lint_reports_source_line_numbers_across_headings(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n\n## Rules\nYou may skip tests.\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["semantic_policy_lint"]["findings"] == [
+        "AGENTS.md:6 weakens governance term 'test' with permissive language."
+    ]
 
 
 def test_ci_check_runs_requested_eval_suite_and_records_scores(tmp_path: Path, capsys):

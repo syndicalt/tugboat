@@ -686,7 +686,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "checks": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["index", "harness"],
+                "required": ["index", "harness", "semantic_policy_lint"],
                 "properties": {
                     "index": {
                         "type": "object",
@@ -698,6 +698,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                         },
                     },
                     "harness": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["passed", "findings"],
+                        "properties": {
+                            "passed": {"type": "boolean"},
+                            "findings": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                    "semantic_policy_lint": {
                         "type": "object",
                         "additionalProperties": False,
                         "required": ["passed", "findings"],
