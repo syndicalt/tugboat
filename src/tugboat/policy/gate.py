@@ -436,6 +436,10 @@ def _contains_governance_term(line: str, term: str) -> bool:
         pattern = r"\breview\w*\b"
     elif term == "deploy":
         pattern = r"\bdeploy\w*\b"
+    elif term == "sandbox":
+        pattern = r"\bsandbox\w*\b"
+    elif term == "test":
+        pattern = r"\btest\w*\b"
     else:
         pattern = rf"\b{re.escape(term)}s?\b"
     return re.search(pattern, line, re.IGNORECASE) is not None

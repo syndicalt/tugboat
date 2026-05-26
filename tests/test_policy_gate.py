@@ -322,11 +322,28 @@ def test_policy_gate_rejects_changes_to_protected_heading_sections(tmp_path: Pat
     assert decision.reasons == ("protected_heading_changed",)
 
 
-def test_policy_gate_rejects_removed_governance_constraints(tmp_path: Path):
+@pytest.mark.parametrize(
+    "removed_line",
+    [
+        "The approval constraint stays active.",
+        "The sandboxing constraint stays active.",
+        "The testing constraint stays active.",
+        "The review constraint stays active.",
+        "The secrets constraint stays active.",
+        "The memory constraint stays active.",
+        "The network constraint stays active.",
+        "The deployment constraint stays active.",
+        "The permissions constraint stays active.",
+    ],
+)
+def test_policy_gate_rejects_removed_governance_constraints(
+    tmp_path: Path,
+    removed_line: str,
+):
     base_file = tmp_path / "CODEX.md"
     base_file.write_text(
-        "Changes require human review before deploy.\n"
-        "Agents must preserve memory boundaries.\n",
+        f"{removed_line}\n"
+        "Other local guidance remains.\n",
         encoding="utf-8",
     )
     candidate = _candidate(
@@ -335,9 +352,9 @@ def test_policy_gate_rejects_removed_governance_constraints(tmp_path: Path):
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
             "@@\n"
-            "-Changes require human review before deploy.\n"
-            "+Changes can merge when convenient.\n"
-            " Agents must preserve memory boundaries.\n"
+            f"-{removed_line}\n"
+            "+This local guidance stays active.\n"
+            " Other local guidance remains.\n"
         ),
     )
 
