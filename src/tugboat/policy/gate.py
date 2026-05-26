@@ -26,6 +26,7 @@ DENIAL_REASON_ORDER = (
     "governance_constraint_removed",
     "modal_weakening",
     "new_external_endpoint",
+    "missing_trusted_source",
     "single_untrusted_source",
     "prohibited_risk_class",
 )
@@ -198,6 +199,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("modal_weakening")
     if _has_new_external_endpoint(candidate.diff):
         found_reasons.add("new_external_endpoint")
+    if not any(source.trusted for source in candidate.sources):
+        found_reasons.add("missing_trusted_source")
     if len(candidate.sources) == 1 and not candidate.sources[0].trusted:
         found_reasons.add("single_untrusted_source")
     risk_class = _risk_class_key(candidate.risk_class)

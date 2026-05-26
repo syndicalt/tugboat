@@ -59,9 +59,43 @@ def test_policy_gate_reports_all_machine_readable_denial_reasons(tmp_path: Path)
         "base_hash_mismatch",
         "modal_weakening",
         "new_external_endpoint",
+        "missing_trusted_source",
         "single_untrusted_source",
         "prohibited_risk_class",
     )
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        (),
+        (SourceRef("trace-1", trusted=False), SourceRef("trace-2", trusted=False)),
+    ],
+)
+def test_policy_gate_rejects_candidate_without_trusted_source(
+    tmp_path: Path,
+    sources: tuple[SourceRef, ...],
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " Keep this instruction.\n"
+            "+Agents must run regression tests before closing bug fixes.\n"
+        ),
+        sources=sources,
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "missing_trusted_source" in decision.reasons
+    if len(sources) != 1:
+        assert "single_untrusted_source" not in decision.reasons
 
 
 def test_policy_gate_rejects_base_file_outside_repo(tmp_path: Path):
