@@ -79,6 +79,81 @@ def test_get_job_raises_typed_payload_error_for_corrupt_payload_json(tmp_path: P
     assert exc_info.value.job_id == 1
 
 
+def test_enqueue_rejects_non_object_payload_without_persisting_row(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        with pytest.raises(ValueError, match="payload must be a JSON object"):
+            queue.enqueue(
+                kind="trace_audit",
+                payload=[],  # type: ignore[arg-type]
+                now=_at(0),
+            )
+
+        count = queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0]
+
+    assert count == 0
+
+
+def test_get_job_raises_typed_payload_error_for_non_object_payload_json(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "trace_audit",
+                "[]",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
+        )
+        queue.connection.commit()
+
+        with pytest.raises(QueuePayloadError) as exc_info:
+            queue.get_job(1)
+
+    assert exc_info.value.job_id == 1
+
+
+def test_acquire_fails_non_object_payload_before_leasing(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "trace_audit",
+                "[]",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
+        )
+        queue.connection.commit()
+
+        with pytest.raises(QueuePayloadError) as exc_info:
+            queue.acquire_next(
+                lease_owner="worker-a",
+                now=_at(10),
+                lease_duration=timedelta(seconds=30),
+            )
+
+        row = queue.connection.execute(
+            "SELECT state, attempts, lease_owner, lease_expires_at FROM daemon_jobs WHERE id = 1"
+        ).fetchone()
+
+    assert exc_info.value.job_id == 1
+    assert tuple(row) == (JobState.FAILED.value, 0, None, None)
+
+
 def test_acquire_returns_none_and_does_not_mutate_when_kill_switch_enabled(
     tmp_path: Path,
 ):

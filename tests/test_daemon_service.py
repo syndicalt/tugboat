@@ -339,11 +339,23 @@ def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
     tmp_path: Path,
 ):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
-        job = queue.enqueue(
-            kind="trace_audit",
-            payload=[],  # type: ignore[arg-type]
-            now=_at(0),
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "trace_audit",
+                "[]",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
         )
+        queue.connection.commit()
 
     result = run_daemon_once(
         tmp_path,
@@ -356,12 +368,15 @@ def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
 
     assert result == {
         "processed": True,
-        "job_id": job.id,
+        "job_id": 1,
         "final_state": "failed",
         "recovered_jobs": [],
     }
     with DaemonQueue.open_sidecar(tmp_path) as queue:
-        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+        row = queue.connection.execute(
+            "SELECT state, attempts, lease_owner, lease_expires_at FROM daemon_jobs WHERE id = 1"
+        ).fetchone()
+    assert tuple(row) == (JobState.FAILED.value, 0, None, None)
 
 
 def test_daemon_status_cli_and_mcp_read_queue_state(tmp_path: Path, capsys):

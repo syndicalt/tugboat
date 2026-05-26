@@ -152,6 +152,8 @@ class DaemonQueue:
         payload: dict[str, Any],
         now: datetime | None = None,
     ) -> DaemonJob:
+        if not isinstance(payload, dict):
+            raise ValueError("daemon job payload must be a JSON object")
         timestamp = _serialize_datetime(_coerce_datetime(now))
         cursor = self.connection.execute(
             """
@@ -220,7 +222,7 @@ class DaemonQueue:
             if row is None:
                 return None
             job_id = int(row["id"])
-            if not _payload_is_decodable(str(row["payload_json"])):
+            if not _payload_is_valid_object(str(row["payload_json"])):
                 self.connection.execute(
                     """
                     UPDATE daemon_jobs
@@ -404,19 +406,22 @@ def _job_from_row(row: sqlite3.Row) -> DaemonJob:
     )
 
 
-def _decode_payload_json(job_id: int, payload_json: str) -> Any:
+def _decode_payload_json(job_id: int, payload_json: str) -> dict[str, Any]:
     try:
-        return json.loads(payload_json)
+        payload = json.loads(payload_json)
     except json.JSONDecodeError as exc:
         raise QueuePayloadError(job_id) from exc
+    if not isinstance(payload, dict):
+        raise QueuePayloadError(job_id)
+    return payload
 
 
-def _payload_is_decodable(payload_json: str) -> bool:
+def _payload_is_valid_object(payload_json: str) -> bool:
     try:
-        json.loads(payload_json)
+        payload = json.loads(payload_json)
     except json.JSONDecodeError:
         return False
-    return True
+    return isinstance(payload, dict)
 
 
 def _coerce_datetime(value: datetime | None) -> datetime:

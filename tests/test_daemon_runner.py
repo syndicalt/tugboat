@@ -599,11 +599,23 @@ def test_run_daemon_cycle_fails_non_object_checkpoint_resume_payload_without_cra
     tmp_path: Path,
 ):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
-        queue.enqueue(
-            kind="llmff_resume",
-            payload=[],  # type: ignore[arg-type]
-            now=_at(0),
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "llmff_resume",
+                "[]",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
         )
+        queue.connection.commit()
 
     result = run_daemon_cycle(
         tmp_path,
@@ -616,10 +628,13 @@ def test_run_daemon_cycle_fails_non_object_checkpoint_resume_payload_without_cra
         ),
     )
 
-    assert result["failed_jobs"] == [{"job_id": 1, "reason": "resume_payload_invalid"}]
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "queue_payload_invalid"}]
     assert result["resume_jobs"] == []
     with DaemonQueue.open_sidecar(tmp_path) as queue:
-        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+        row = queue.connection.execute(
+            "SELECT state, attempts, lease_owner, lease_expires_at FROM daemon_jobs WHERE id = 1"
+        ).fetchone()
+    assert tuple(row) == (JobState.FAILED.value, 0, None, None)
 
 
 def test_write_worktree_profile_records_local_observability_refs(tmp_path: Path):
