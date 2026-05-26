@@ -769,6 +769,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "commit",
             "ci_url",
             "approver",
+            "security_review",
             "wheel",
             "smoke_commands",
             "retained_evidence",
@@ -788,6 +789,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "commit": {"type": "string"},
             "ci_url": {"type": "string"},
             "approver": {"type": "string"},
+            "security_review": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["decision", "critical_high_findings"],
+                "properties": {
+                    "decision": {"type": "string"},
+                    "critical_high_findings": {"type": "integer"},
+                },
+            },
             "wheel": {
                 "type": "object",
                 "additionalProperties": False,

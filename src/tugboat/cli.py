@@ -214,6 +214,12 @@ def build_parser() -> argparse.ArgumentParser:
     ops_release_manifest.add_argument("--commit", required=True)
     ops_release_manifest.add_argument("--ci-url", required=True)
     ops_release_manifest.add_argument("--approver", required=True)
+    ops_release_manifest.add_argument("--security-review-decision", required=True)
+    ops_release_manifest.add_argument(
+        "--security-review-critical-high-findings",
+        required=True,
+        type=int,
+    )
     ops_release_manifest.add_argument("--evidence", action="append", default=[])
     ops_restore = ops_subcommands.add_parser("restore")
     ops_restore.add_argument("--repo", required=True)
@@ -730,6 +736,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 commit=args.commit,
                 ci_url=args.ci_url,
                 approver=args.approver,
+                security_review_decision=args.security_review_decision,
+                security_review_critical_high_findings=(
+                    args.security_review_critical_high_findings
+                ),
                 evidence_paths=[Path(path) for path in args.evidence],
             )
         except (FileNotFoundError, ValueError, ArtifactValidationError) as error:
@@ -823,6 +833,8 @@ def _write_release_artifact_manifest(
     commit: str,
     ci_url: str,
     approver: str,
+    security_review_decision: str,
+    security_review_critical_high_findings: int,
     evidence_paths: Sequence[Path],
 ) -> Path:
     resolved_repo = repo.resolve()
@@ -831,6 +843,10 @@ def _write_release_artifact_manifest(
         raise FileNotFoundError("wheel does not exist")
     if not resolved_wheel.is_file():
         raise ValueError("wheel must be a file")
+    if security_review_critical_high_findings < 0:
+        raise ValueError("security review critical/high findings must be non-negative")
+    if security_review_critical_high_findings > 0:
+        raise ValueError("security review has open critical/high findings")
     retained_evidence = []
     for evidence_path in evidence_paths:
         resolved_evidence = evidence_path.resolve()
@@ -847,6 +863,10 @@ def _write_release_artifact_manifest(
         "commit": commit,
         "ci_url": ci_url,
         "approver": approver,
+        "security_review": {
+            "decision": security_review_decision,
+            "critical_high_findings": security_review_critical_high_findings,
+        },
         "wheel": _file_manifest_entry(resolved_wheel),
         "smoke_commands": [
             "tugboat doctor",
@@ -869,6 +889,7 @@ def _write_release_artifact_manifest(
                 "commit": commit,
                 "ci_url": ci_url,
                 "approver": approver,
+                "security_review": payload["security_review"],
                 "wheel_sha256": payload["wheel"]["sha256"],
             },
         )

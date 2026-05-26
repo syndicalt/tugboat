@@ -1404,6 +1404,10 @@ def test_validate_release_artifact_manifest_accepts_current_schema():
             "commit": "abc1234",
             "ci_url": "https://ci.example/runs/1",
             "approver": "release-owner",
+            "security_review": {
+                "decision": "approved_proposal_only",
+                "critical_high_findings": 0,
+            },
             "wheel": {
                 "path": "/repo/dist/tugboat-0.1.0-py3-none-any.whl",
                 "sha256": "a" * 64,
