@@ -60,6 +60,11 @@ from tugboat.ops.backup import build_sidecar_backup_bundle, build_sidecar_restor
 from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy
+from tugboat.optimization import (
+    REJECTED_EDIT_SUPPRESSION_SIGNAL,
+    EpisodeOutcome,
+    build_success_failure_minibatch,
+)
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.pipeline import run_propose_pipeline
@@ -446,6 +451,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if audit_exit != 0:
             return audit_exit
+        run_dir = latest_run_dir(repo)
+        _record_optimize_minibatch_guidance(repo, run_dir, suite_id=args.suite)
         propose_exit = main(["propose", "--repo", str(repo), "--audit", "latest"])
         run_dir = latest_run_dir(repo)
         if propose_exit != 0:
@@ -2005,6 +2012,156 @@ def _record_validation_baseline_score(
     )
 
 
+def _record_optimize_minibatch_guidance(repo: Path, run_dir: Path, *, suite_id: str) -> None:
+    canonical_episode_path = run_dir / "canonical-episode.json"
+    if not canonical_episode_path.exists():
+        return
+    episode = json.loads(canonical_episode_path.read_text(encoding="utf-8"))
+    if not isinstance(episode, dict):
+        raise ValueError("canonical-episode.json must be a JSON object")
+    outcome = _episode_outcome_from_labels(episode.get("outcome_labels", []))
+    if outcome is None:
+        return
+    pattern = _episode_pattern_from_canonical_episode(episode, outcome=outcome)
+    minibatch = build_success_failure_minibatch(
+        (
+            EpisodeOutcome(
+                episode_id=_episode_id_for_run(repo, run_dir),
+                outcome=outcome,
+                pattern=pattern,
+            ),
+        )
+    )
+    batch_payload = {
+        "schema_version": SCHEMA_VERSION,
+        "failure_episodes": list(minibatch.failure_episodes),
+        "failure_patterns": list(minibatch.failure_patterns),
+        "held_out_suite": suite_id,
+        "success_episodes": list(minibatch.success_episodes),
+        "success_patterns": list(minibatch.success_patterns),
+    }
+    (run_dir / "optimization-batch.json").write_text(
+        json.dumps(batch_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    guidance = _optimizer_guidance_from_minibatch(minibatch, suite_id=suite_id)
+    if guidance is None:
+        return
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=_repo_memory_path(repo),
+            memory_type="slow_update",
+            key=f"optimize_minibatch:{run_dir.name}",
+            payload={
+                "category": "optimizer_guidance",
+                "legacy_note": f"optimizer_guidance: {guidance}",
+                "note": guidance,
+            },
+        )
+
+
+def _episode_outcome_from_labels(labels: object) -> str | None:
+    if not isinstance(labels, list):
+        return None
+    normalized = {str(label).strip().lower().replace("-", "_") for label in labels}
+    if normalized & {"accepted", "success", "succeeded", "passed", "ci_passed"}:
+        return "success"
+    if normalized & {"rejected", "failure", "failed", "ci_failed"}:
+        return "failure"
+    return None
+
+
+def _episode_pattern_from_canonical_episode(episode: dict[str, object], *, outcome: str) -> str:
+    corrections = episode.get("user_corrections", [])
+    if isinstance(corrections, list):
+        for correction in corrections:
+            if isinstance(correction, dict):
+                payload = correction.get("payload", {})
+                if isinstance(payload, dict):
+                    content = str(payload.get("content", "")).strip()
+                    if content:
+                        return content
+    request = str(episode.get("request", "")).strip()
+    if request:
+        return request
+    return f"{outcome} episode"
+
+
+def _episode_id_for_run(repo: Path, run_dir: Path) -> str:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        row = store.connection.execute(
+            "SELECT episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+    if row is None or row[0] is None:
+        return run_dir.name
+    return str(row[0])
+
+
+def _optimizer_guidance_from_minibatch(minibatch, *, suite_id: str) -> str | None:
+    if minibatch.failure_patterns:
+        return (
+            f"SkillOpt minibatch before held-out suite {suite_id}: "
+            f"avoid repeating failure patterns: {'; '.join(minibatch.failure_patterns)}"
+        )
+    if minibatch.success_patterns:
+        return (
+            f"SkillOpt minibatch before held-out suite {suite_id}: "
+            f"preserve success patterns: {'; '.join(minibatch.success_patterns)}"
+        )
+    return None
+
+
+def _record_missing_rejected_edit_memory(
+    store: Store,
+    *,
+    repo: Path,
+    candidate: dict[str, object],
+    candidate_id: int,
+    suite_id: str,
+    reason: str,
+) -> None:
+    raw_metadata = candidate.get("bounded_edit_metadata", [])
+    if not isinstance(raw_metadata, list):
+        return
+    for item in raw_metadata:
+        if not isinstance(item, dict):
+            continue
+        operator = str(item.get("operator", ""))
+        target_file = str(item.get("file", candidate.get("base_file", "")))
+        section = str(item.get("section", ""))
+        if not operator or not target_file or not section:
+            continue
+        fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
+        row = store.connection.execute(
+            """
+            SELECT 1
+            FROM optimizer_memory
+            WHERE repo_path = ?
+              AND memory_type = 'rejected_edit'
+              AND key = ?
+            """,
+            (_repo_memory_path(repo), fingerprint),
+        ).fetchone()
+        if row is not None:
+            continue
+        store.record_optimizer_memory(
+            repo_path=_repo_memory_path(repo),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "future_proposal_suppression_signal": REJECTED_EDIT_SUPPRESSION_SIGNAL,
+                "rejection_reason": reason,
+                "semantic_fingerprint": fingerprint,
+                "source_refs": [f"candidate:{candidate_id}", f"suite:{suite_id}"],
+            },
+        )
+
+
+def _bounded_edit_fingerprint(operator: str, target_file: str, section: str) -> str:
+    return hashlib.sha256(f"{operator}\n{target_file}\n{section}".encode("utf-8")).hexdigest()
+
+
 def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> int:
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     candidate_id = int(candidate["candidate_id"])
@@ -2082,6 +2239,15 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
             category="successful" if decision == "needs_review" else "rejected",
             reason=reason,
         )
+        if decision == "rejected":
+            _record_missing_rejected_edit_memory(
+                store,
+                repo=repo,
+                candidate=candidate,
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                reason=reason,
+            )
         if decision == "needs_review" and held_out_score is not None:
             _record_validation_baseline_score(
                 store,

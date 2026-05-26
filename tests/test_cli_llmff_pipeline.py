@@ -2693,7 +2693,6 @@ llmff:
             ORDER BY id
             """
         ).fetchall()
-
     assert jobs == [
         ("instruction-index.yaml", "completed"),
         ("episode-audit.yaml", "completed"),
@@ -3269,6 +3268,68 @@ llmff:
     ]
 
 
+def test_optimize_feeds_episode_minibatch_guidance_to_patch_propose(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                '{"type":"user_request","text":"Fix bug"}',
+                '{"type":"user_correction","content":"You skipped regression tests"}',
+                '{"type":"outcome_label","label":"rejected"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    inputs_by_manifest = [
+        json.loads(line)
+        for line in (run_dir / "llmff-inputs-by-manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    patch_propose_inputs = next(
+        item["inputs"] for item in inputs_by_manifest if item["manifest"] == "patch-propose"
+    )
+    optimizer_memory = json.loads(Path(patch_propose_inputs["optimizer_memory"]).read_text(encoding="utf-8"))
+    batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
+
+    assert batch == {
+        "schema_version": 1,
+        "held_out_suite": "held-out",
+        "success_episodes": [],
+        "failure_episodes": ["1"],
+        "success_patterns": [],
+        "failure_patterns": ["You skipped regression tests"],
+    }
+    assert optimizer_memory["slow_update_records"] == [
+        {
+            "category": "optimizer_guidance",
+            "note": (
+                "SkillOpt minibatch before held-out suite held-out: "
+                "avoid repeating failure patterns: You skipped regression tests"
+            ),
+        }
+    ]
+
+
 def test_optimize_rejects_candidate_when_held_out_does_not_beat_validation_baseline(
     tmp_path: Path,
 ):
@@ -3332,6 +3393,13 @@ llmff:
               AND key = 'validation_baseline:held-out'
             """
         ).fetchone()[0]
+        rejected_edit_rows = store.connection.execute(
+            """
+            SELECT key, payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'rejected_edit'
+            """
+        ).fetchall()
 
     assert summary["decision"] == "rejected"
     assert summary["validation_baseline_score"] == 0.4
@@ -3344,6 +3412,18 @@ llmff:
         "held-out eval score did not improve over baseline",
     )
     assert json.loads(baseline_payload)["held_out_score"] == 0.4
+    fingerprint = hashlib.sha256(b"add\nCODEX.md\nTesting").hexdigest()
+    assert [(row[0], json.loads(row[1])) for row in rejected_edit_rows] == [
+        (
+            fingerprint,
+            {
+                "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                "rejection_reason": "held-out eval score did not improve over baseline",
+                "semantic_fingerprint": fingerprint,
+                "source_refs": [f"candidate:{summary['candidate_id']}", "suite:held-out"],
+            },
+        )
+    ]
 
 
 def test_optimize_records_baseline_rejection_before_acceptance_summary_runs(
