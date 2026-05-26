@@ -1367,6 +1367,16 @@ llmff:
                 "source_refs": ["audit:1"],
             },
         )
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="validation_baseline",
+            key="validation_baseline:held-out",
+            payload={
+                "candidate_id": 7,
+                "held_out_score": 0.82,
+                "suite_id": "held-out",
+            },
+        )
 
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
 
@@ -1384,6 +1394,13 @@ llmff:
             }
         ],
         "slow_update_notes": [],
+        "validation_baselines": [
+            {
+                "candidate_id": 7,
+                "held_out_score": 0.82,
+                "suite_id": "held-out",
+            }
+        ],
     }
 
 

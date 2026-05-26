@@ -4,6 +4,7 @@ inputs:
   - instruction_index
   - drift_clusters
   - optimizer_notes
+  - optimizer_memory
   - policy
 outputs:
   - candidate_patch

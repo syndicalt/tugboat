@@ -211,6 +211,14 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
             for _, record in sorted(memory.rejected_edits.items())
         ],
         "slow_update_notes": list(memory.slow_update_notes),
+        "validation_baselines": [
+            {
+                "candidate_id": record.candidate_id,
+                "held_out_score": record.held_out_score,
+                "suite_id": record.suite_id,
+            }
+            for _, record in sorted(memory.validation_baselines.items())
+        ],
     }
     validate_json_artifact("optimizer-memory.json", payload)
     path = run_dir / "optimizer-memory.json"

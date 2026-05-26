@@ -361,6 +361,13 @@ def test_validate_optimizer_memory_artifact_accepts_current_schema():
                 }
             ],
             "slow_update_notes": ["Prefer smaller edits."],
+            "validation_baselines": [
+                {
+                    "candidate_id": 7,
+                    "held_out_score": 0.82,
+                    "suite_id": "held-out",
+                }
+            ],
         },
     )
 

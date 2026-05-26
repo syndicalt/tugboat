@@ -75,6 +75,13 @@ class RejectedEditRecord:
 
 
 @dataclass(frozen=True)
+class ValidationBaselineRecord:
+    suite_id: str
+    held_out_score: float
+    candidate_id: int | None = None
+
+
+@dataclass(frozen=True)
 class ReflectionArtifact:
     recurring_failure_patterns: tuple[str, ...]
     preserved_success_patterns: tuple[str, ...]
@@ -86,6 +93,7 @@ class ReflectionArtifact:
 class OptimizationMemory:
     rejected_edits: dict[str, RejectedEditRecord] = field(default_factory=dict)
     slow_update_notes: list[str] = field(default_factory=list)
+    validation_baselines: dict[str, ValidationBaselineRecord] = field(default_factory=dict)
 
     def record_rejection(
         self,
@@ -128,6 +136,17 @@ class OptimizationMemory:
                 key=f"slow_update:{index}:{hashlib.sha256(note.encode('utf-8')).hexdigest()}",
                 payload={"note": note},
             )
+        for suite_id, record in sorted(self.validation_baselines.items()):
+            store.record_optimizer_memory(
+                repo_path=repo_path,
+                memory_type="validation_baseline",
+                key=f"validation_baseline:{suite_id}",
+                payload={
+                    "candidate_id": record.candidate_id,
+                    "held_out_score": record.held_out_score,
+                    "suite_id": record.suite_id,
+                },
+            )
 
     @classmethod
     def load(cls, store: "Store", *, repo: Path) -> "OptimizationMemory":
@@ -154,6 +173,19 @@ class OptimizationMemory:
                 )
             elif memory_type == "slow_update":
                 memory.slow_update_notes.append(str(payload["note"]))
+            elif memory_type == "validation_baseline":
+                raw_candidate_id = payload.get("candidate_id")
+                candidate_id = (
+                    None
+                    if raw_candidate_id is None
+                    else int(raw_candidate_id)
+                )
+                suite_id = str(payload["suite_id"])
+                memory.validation_baselines[suite_id] = ValidationBaselineRecord(
+                    suite_id=suite_id,
+                    held_out_score=float(payload["held_out_score"]),
+                    candidate_id=candidate_id,
+                )
         return memory
 
 

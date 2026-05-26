@@ -31,6 +31,15 @@ def test_materialize_manifests_writes_required_templates(tmp_path: Path):
         assert manifest["outputs"]
 
 
+def test_patch_propose_manifest_declares_optimizer_memory_input(tmp_path: Path):
+    records = materialize_manifests(tmp_path)
+    patch_propose = next(record for record in records if record.name == "patch-propose.yaml")
+
+    manifest = yaml.safe_load(patch_propose.path.read_text(encoding="utf-8"))
+
+    assert "optimizer_memory" in manifest["inputs"]
+
+
 def test_materialize_manifests_preserves_existing_files_without_overwrite(tmp_path: Path):
     manifest_dir = tmp_path / ".sidecar" / "manifests"
     manifest_dir.mkdir(parents=True)

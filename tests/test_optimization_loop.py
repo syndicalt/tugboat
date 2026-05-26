@@ -11,6 +11,7 @@ from tugboat.optimization import (
     OptimizationRun,
     ReflectionArtifact,
     ScoreSet,
+    ValidationBaselineRecord,
     build_minibatches,
     budget_reasons_for_bounded_edit_metadata,
     evaluate_candidate,
@@ -270,6 +271,42 @@ def test_slow_update_memory_records_successful_and_rejected_directions():
         "successful: Specific regression-test wording improved held-out cases",
         "rejected: Do not weaken approval requirements",
     ]
+
+
+def test_validation_baseline_memory_persists_to_optimizer_memory_table(tmp_path):
+    repo = tmp_path
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory()
+        memory.validation_baselines["held-out"] = ValidationBaselineRecord(
+            suite_id="held-out",
+            held_out_score=0.82,
+            candidate_id=7,
+        )
+        memory.persist(store, repo=repo)
+        loaded = OptimizationMemory.load(store, repo=repo)
+        row = store.connection.execute(
+            """
+            SELECT o.memory_type, o.key, o.payload_json, a.event_type
+            FROM optimizer_memory o
+            JOIN audit_events a ON a.sequence = o.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "validation_baseline"
+    assert row[1] == "validation_baseline:held-out"
+    assert json.loads(row[2]) == {
+        "candidate_id": 7,
+        "held_out_score": 0.82,
+        "suite_id": "held-out",
+    }
+    assert row[3] == "optimizer_memory.recorded"
+    assert loaded.validation_baselines["held-out"] == ValidationBaselineRecord(
+        suite_id="held-out",
+        held_out_score=0.82,
+        candidate_id=7,
+    )
 
 
 def test_rejected_edit_memory_persists_to_optimizer_memory_table_with_audit_link(tmp_path):

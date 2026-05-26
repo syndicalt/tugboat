@@ -570,6 +570,19 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
             },
             "slow_update_notes": {"type": "array", "items": {"type": "string"}},
+            "validation_baselines": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["candidate_id", "held_out_score", "suite_id"],
+                    "properties": {
+                        "candidate_id": {"type": ["integer", "null"]},
+                        "held_out_score": {"type": "number"},
+                        "suite_id": {"type": "string"},
+                    },
+                },
+            },
         },
     },
     "optimization-summary.json": {
