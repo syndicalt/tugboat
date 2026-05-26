@@ -860,6 +860,16 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "daemon-discovered-traces.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "traces"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "traces": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
@@ -1116,6 +1126,8 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
         raise ArtifactValidationError(f"unknown artifact schema: {name}")
     if schema.get("type") != "object":
         raise ArtifactValidationError(f"{name} schema must be an object schema")
+    if not isinstance(payload, dict):
+        raise ArtifactValidationError(f"{name} must be a JSON object")
     properties = schema.get("properties", {})
     if not isinstance(properties, dict):
         raise ArtifactValidationError(f"{name} schema properties must be an object")

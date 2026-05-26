@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.daemon.queue import (
     DaemonQueue,
     FileKillSwitch,
@@ -49,31 +50,39 @@ def discover_trace_jobs(
     now: datetime | None = None,
 ) -> dict[str, int]:
     registry = _load_discovered_traces(repo)
+    eligible_traces: list[tuple[Path, str]] = []
+    planned_registry = set(registry)
     discovered = 0
     skipped = 0
+    for trace_dir in trace_dirs:
+        for path in sorted(trace_dir.glob("*.jsonl")):
+            trace_key = str(path.resolve())
+            if trace_key in planned_registry:
+                skipped += 1
+                continue
+            try:
+                scan_path(path)
+            except SecretScanError:
+                skipped += 1
+                continue
+            eligible_traces.append((path, trace_key))
+            planned_registry.add(trace_key)
+
+    validate_json_artifact("daemon-discovered-traces.json", _discovered_traces_payload(planned_registry))
+
     with DaemonQueue.open_sidecar(repo) as queue:
-        for trace_dir in trace_dirs:
-            for path in sorted(trace_dir.glob("*.jsonl")):
-                trace_key = str(path.resolve())
-                if trace_key in registry:
-                    skipped += 1
-                    continue
-                try:
-                    scan_path(path)
-                except SecretScanError:
-                    skipped += 1
-                    continue
-                payload = {"trace_path": str(path)}
-                job = queue.enqueue(kind="trace_audit", payload=payload, now=now)
-                with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
-                    store.record_daemon_job(
-                        job_id=str(job.id),
-                        repo_path=repo,
-                        state=job.state.value,
-                        payload=payload,
-                    )
-                registry.add(trace_key)
-                discovered += 1
+        for path, trace_key in eligible_traces:
+            payload = {"trace_path": str(path)}
+            job = queue.enqueue(kind="trace_audit", payload=payload, now=now)
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.record_daemon_job(
+                    job_id=str(job.id),
+                    repo_path=repo,
+                    state=job.state.value,
+                    payload=payload,
+                )
+            registry.add(trace_key)
+            discovered += 1
     _write_discovered_traces(repo, registry)
     return {"discovered": discovered, "skipped": skipped}
 
@@ -266,6 +275,11 @@ def _load_discovered_traces(repo: Path) -> set[str]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return set()
+    if isinstance(payload, dict):
+        traces = payload.get("traces")
+        if not isinstance(traces, list):
+            return set()
+        return {str(item) for item in traces}
     if not isinstance(payload, list):
         return set()
     return {str(item) for item in payload}
@@ -273,5 +287,14 @@ def _load_discovered_traces(repo: Path) -> set[str]:
 
 def _write_discovered_traces(repo: Path, traces: set[str]) -> None:
     path = repo / ".sidecar" / "discovered-traces.json"
+    payload = _discovered_traces_payload(traces)
+    validate_json_artifact("daemon-discovered-traces.json", payload)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sorted(traces), indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _discovered_traces_payload(traces: set[str]) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "traces": sorted(traces),
+    }

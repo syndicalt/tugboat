@@ -720,6 +720,24 @@ def test_validate_mcp_request_artifact_rejects_missing_repo_policy():
         )
 
 
+def test_validate_daemon_discovered_traces_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "daemon-discovered-traces.json",
+        {
+            "schema_version": 1,
+            "traces": ["/repo/traces/episode.jsonl"],
+        },
+    )
+
+
+def test_validate_daemon_discovered_traces_artifact_rejects_legacy_list():
+    with pytest.raises(ArtifactValidationError, match="must be a JSON object"):
+        validate_json_artifact(
+            "daemon-discovered-traces.json",
+            ["/repo/traces/episode.jsonl"],  # type: ignore[arg-type]
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 
