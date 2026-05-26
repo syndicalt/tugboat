@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
+from typing import Any
 
 
 INSTRUCTION_FILES = ("AGENTS.md", "CODEX.md", "CLAUDE.md", "SKILL.md")
@@ -149,13 +151,16 @@ def generate_harness_report(repo: Path) -> HarnessReport:
         doc_gardening_tasks.append(
             f"Either reference {orphan} from an instruction map or remove/archive it."
         )
+    recurring_failures_without_docs = _recurring_failures_without_docs(repo)
+    for failure in recurring_failures_without_docs:
+        doc_gardening_tasks.append(f"Document recurring failure {failure}")
 
     return HarnessReport(
         knowledge_map=knowledge_map,
         missing_docs=sorted(missing_docs),
         stale_docs=_dedupe(stale_docs),
         orphaned_runbooks=orphaned_runbooks,
-        recurring_failures_without_docs=[],
+        recurring_failures_without_docs=recurring_failures_without_docs,
         doc_gardening_tasks=_dedupe(doc_gardening_tasks),
     )
 
@@ -258,6 +263,38 @@ def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _recurring_failures_without_docs(repo: Path) -> list[str]:
+    path = repo / ".sidecar" / "recurring-failures.json"
+    if not path.exists():
+        return []
+    payload: Any = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("recurring-failures.json must contain a JSON object")
+    if int(payload.get("schema_version", 0)) != 1:
+        raise ValueError("unsupported recurring-failures.json schema_version")
+    failures = payload.get("failures", [])
+    if not isinstance(failures, list):
+        raise ValueError("recurring-failures.json failures must be a list")
+    missing: list[str] = []
+    for item in failures:
+        if not isinstance(item, dict):
+            raise ValueError("recurring failure entries must be JSON objects")
+        failure_id = str(item.get("failure_id", "")).strip()
+        summary = str(item.get("summary", "")).strip()
+        if not failure_id or not summary:
+            raise ValueError("recurring failure entries require failure_id and summary")
+        doc_ref = str(item.get("doc_ref", "")).strip()
+        if doc_ref and _doc_ref_exists(repo, doc_ref):
+            continue
+        missing.append(f"{failure_id}: {summary}")
+    return missing
+
+
+def _doc_ref_exists(repo: Path, doc_ref: str) -> bool:
+    path = (repo / doc_ref).resolve()
+    return _is_relative_to(path, repo) and path.is_file() and path.suffix.lower() == ".md"
+
+
 def _finding_by_cleanup_task(report: HarnessReport) -> dict[str, list[str]]:
     mapping: dict[str, list[str]] = {}
     for missing in report.missing_docs:
@@ -274,6 +311,8 @@ def _finding_by_cleanup_task(report: HarnessReport) -> dict[str, list[str]]:
     for orphan in report.orphaned_runbooks:
         task = f"Either reference {orphan} from an instruction map or remove/archive it."
         mapping[task] = [f"{orphan} is not referenced by any instruction map."]
+    for failure in report.recurring_failures_without_docs:
+        mapping[f"Document recurring failure {failure}"] = [failure]
     return mapping
 
 

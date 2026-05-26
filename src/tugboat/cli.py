@@ -674,6 +674,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("## Orphaned Runbooks")
         for item in report.orphaned_runbooks:
             print(f"- {item}")
+        print("## Recurring Failures Without Docs")
+        for item in report.recurring_failures_without_docs:
+            print(f"- {item}")
         print("## Doc Gardening Tasks")
         for item in report.doc_gardening_tasks:
             print(f"- {item}")
@@ -725,6 +728,12 @@ def _persist_harness_report(repo: Path, report) -> Path:
                 repo_path=repo,
                 finding=finding,
                 severity="orphaned_runbook",
+            )
+        for finding in report.recurring_failures_without_docs:
+            store.record_harness_finding(
+                repo_path=repo,
+                finding=finding,
+                severity="recurring_failure_without_doc",
             )
         for task in report.doc_gardening_tasks:
             store.record_harness_finding(

@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sqlite3
 from contextlib import closing
 
@@ -158,6 +159,84 @@ def test_generate_harness_report_builds_knowledge_map_and_cleanup_tasks(tmp_path
     ]
 
 
+def test_generate_harness_report_flags_recurring_failures_without_docs(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "recurring-failures.json").write_text(
+        """
+{
+  "schema_version": 1,
+  "failures": [
+    {"failure_id": "final-answer-evidence", "summary": "Final answers omit evidence."},
+    {"failure_id": "covered", "summary": "Covered behavior.", "doc_ref": "docs/runbook.md"},
+    {"failure_id": "stale-doc", "summary": "Linked doc is missing.", "doc_ref": "docs/missing.md"}
+  ]
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    report = generate_harness_report(repo)
+
+    assert report.recurring_failures_without_docs == [
+        "final-answer-evidence: Final answers omit evidence.",
+        "stale-doc: Linked doc is missing.",
+    ]
+    assert report.doc_gardening_tasks == [
+        "Document recurring failure final-answer-evidence: Final answers omit evidence.",
+        "Document recurring failure stale-doc: Linked doc is missing.",
+    ]
+
+
+def test_harness_report_persists_recurring_failures_without_docs(tmp_path: Path, capsys):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "recurring-failures.json").write_text(
+        """
+{
+  "schema_version": 1,
+  "failures": [
+    {"failure_id": "approval-boundary", "summary": "Approval boundary corrections repeated."}
+  ]
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["harness", "report", "--repo", str(repo)]) == 0
+
+    output = capsys.readouterr().out
+    payload_path = repo / ".sidecar" / "harness-report.json"
+    assert "## Recurring Failures Without Docs" in output
+    assert "- approval-boundary: Approval boundary corrections repeated." in output
+    assert json.loads(payload_path.read_text(encoding="utf-8"))[
+        "recurring_failures_without_docs"
+    ] == ["approval-boundary: Approval boundary corrections repeated."]
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT severity, audit_event_sequence
+            FROM harness_findings
+            WHERE finding = 'approval-boundary: Approval boundary corrections repeated.'
+            """
+        ).fetchone()
+
+    assert row[0] == "recurring_failure_without_doc"
+    assert row[1] is not None
+
+
 def test_harness_report_persists_findings_and_doc_gardening_run(tmp_path: Path):
     repo = tmp_path
     docs = repo / "docs"
@@ -237,4 +316,39 @@ def test_generate_cleanup_candidates_are_review_only_and_tied_to_findings(tmp_pa
             "source_findings": ["docs/runbook.md is missing verification-status metadata."],
             "required_eval_suites": ["structural"],
         },
+    ]
+
+
+def test_cleanup_candidates_include_recurring_failure_doc_tasks(tmp_path: Path):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "recurring-failures.json").write_text(
+        """
+{
+  "schema_version": 1,
+  "failures": [
+    {"failure_id": "approval-boundary", "summary": "Approval boundary corrections repeated."}
+  ]
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    candidates = generate_cleanup_candidates(repo)
+
+    assert [candidate.to_json_dict() for candidate in candidates] == [
+        {
+            "candidate_id": "harness-cleanup-1",
+            "risk_class": "review_required",
+            "auto_apply": False,
+            "task": (
+                "Document recurring failure approval-boundary: "
+                "Approval boundary corrections repeated."
+            ),
+            "source_findings": [
+                "approval-boundary: Approval boundary corrections repeated.",
+            ],
+            "required_eval_suites": ["structural"],
+        }
     ]
