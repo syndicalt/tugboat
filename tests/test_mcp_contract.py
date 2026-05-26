@@ -82,6 +82,15 @@ if args[:1] == ["run"]:
         outputs["drift_clusters"].write_text(json.dumps({
             "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_mcp_daemon"]}]
         }) + "\\n", encoding="utf-8")
+        if "optimizer_notes" in outputs:
+            outputs["optimizer_notes"].write_text(json.dumps({
+                "notes": [
+                    {
+                        "summary": "Use daemon audit drift evidence for the proposal.",
+                        "evidence_refs": ["ev_mcp_daemon"],
+                    }
+                ]
+            }) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         import hashlib
         repo = outputs["candidate_patch"].parents[3]

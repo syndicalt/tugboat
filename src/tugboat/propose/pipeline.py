@@ -127,7 +127,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
     instruction_index_path = run_dir / "instruction-index.raw.json"
-    drift_clusters_path = _run_drift_detect(
+    drift_clusters_path, optimizer_notes_path = _run_drift_detect(
         repo,
         run_dir,
         policy,
@@ -143,7 +143,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             "instruction_index": run_dir / "instruction-snapshot",
             "instruction_index_artifact": instruction_index_path,
             "drift_clusters": drift_clusters_path,
-            "optimizer_notes": run_dir / "audit.json",
+            "optimizer_notes": optimizer_notes_path,
             "optimizer_memory": optimizer_memory_path,
             "policy": sidecar_dir(repo) / "policy.yaml",
         },
@@ -194,10 +194,11 @@ def _run_drift_detect(
     manifests,
     *,
     instruction_index_path: Path,
-) -> Path:
+) -> tuple[Path, Path]:
     manifest = next(record.path for record in manifests if record.name == "drift-detect.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     output_path = run_dir / "drift.raw.json"
+    optimizer_notes_path = run_dir / "optimizer-notes.raw.json"
     input_paths = _filter_declared_manifest_inputs(
         manifest,
         {
@@ -208,6 +209,14 @@ def _run_drift_detect(
         },
         required_inputs={"audit_reports", "instruction_index"},
     )
+    output_paths = _filter_declared_manifest_outputs(
+        manifest,
+        {
+            "drift_clusters": output_path,
+            "optimizer_notes": optimizer_notes_path,
+        },
+        required_outputs={"drift_clusters"},
+    )
     run = run_manifest(
         manifest,
         run_dir=run_dir,
@@ -217,7 +226,7 @@ def _run_drift_detect(
         retry_backoff_ms=policy.llmff_retry_backoff_ms,
         checkpoint_path=run_dir / "drift-detect" / "checkpoint.json",
         input_paths=input_paths,
-        output_paths={"drift_clusters": output_path},
+        output_paths=output_paths,
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
@@ -233,7 +242,15 @@ def _run_drift_detect(
         raise RuntimeError(f"llmff drift-detect failed with exit code {run.exit_code}")
     payload = load_json_object_artifact(output_path, "drift.raw.json")
     validate_json_artifact("drift.raw.json", payload)
-    return output_path
+    if "optimizer_notes" in run.output_paths:
+        optimizer_payload = load_json_object_artifact(
+            run.output_paths["optimizer_notes"],
+            "optimizer-notes.raw.json",
+        )
+        validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
+    else:
+        optimizer_notes_path = run_dir / "audit.json"
+    return output_path, optimizer_notes_path
 
 
 def _filter_declared_manifest_inputs(
@@ -255,6 +272,27 @@ def _filter_declared_manifest_inputs(
             f"{manifest.name} missing required llmff inputs: {', '.join(missing_required)}"
         )
     return {name: path for name, path in input_paths.items() if name in declared}
+
+
+def _filter_declared_manifest_outputs(
+    manifest: Path,
+    output_paths: dict[str, Path],
+    *,
+    required_outputs: set[str],
+) -> dict[str, Path]:
+    payload = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{manifest.name} must be a YAML object")
+    declared_outputs = payload.get("outputs")
+    if not isinstance(declared_outputs, list):
+        raise RuntimeError(f"{manifest.name} must declare llmff outputs as a list")
+    declared = {str(output_name) for output_name in declared_outputs}
+    missing_required = sorted(required_outputs - declared)
+    if missing_required:
+        raise RuntimeError(
+            f"{manifest.name} missing required llmff outputs: {', '.join(missing_required)}"
+        )
+    return {name: path for name, path in output_paths.items() if name in declared}
 
 
 def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:

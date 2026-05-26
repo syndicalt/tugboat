@@ -362,6 +362,26 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "optimizer-notes.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["notes"],
+        "properties": {
+            "notes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["summary", "evidence_refs"],
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    },
     "eval-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
