@@ -3,6 +3,8 @@ purpose: Detect recurring gaps between agent behavior and repository instruction
 inputs:
   - audit_reports
   - instruction_index
+  - instruction_index_artifact
+  - policy
 outputs:
   - drift_clusters
   - optimizer_notes

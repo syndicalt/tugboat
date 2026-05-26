@@ -2,6 +2,7 @@ name: patch-propose
 purpose: Propose bounded instruction edits from audited evidence and drift clusters.
 inputs:
   - instruction_index
+  - instruction_index_artifact
   - drift_clusters
   - optimizer_notes
   - optimizer_memory

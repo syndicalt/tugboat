@@ -5,6 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from tugboat.artifacts import (
     BOUNDED_EDIT_OPERATORS,
     SCHEMA_VERSION,
@@ -42,6 +44,12 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
         return ProposePipelineResult(1, run_dir, "audit does not warrant an instruction edit")
     if not (run_dir / "audit.raw.json").exists():
         return ProposePipelineResult(1, run_dir, "propose requires llmff audit output: missing audit.raw.json")
+    if not (run_dir / "instruction-index.raw.json").exists():
+        return ProposePipelineResult(
+            1,
+            run_dir,
+            "propose requires llmff instruction index output: missing instruction-index.raw.json",
+        )
 
     policy = load_policy(repo)
     try:
@@ -118,10 +126,34 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     manifests = materialize_manifests(repo)
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
-    drift_clusters_path = _run_drift_detect(repo, run_dir, policy, manifests)
+    instruction_index_path = run_dir / "instruction-index.raw.json"
+    drift_clusters_path = _run_drift_detect(
+        repo,
+        run_dir,
+        policy,
+        manifests,
+        instruction_index_path=instruction_index_path,
+    )
     manifest = next(record.path for record in manifests if record.name == "patch-propose.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     optimizer_memory_path = _write_optimizer_memory_artifact(repo, run_dir)
+    input_paths = _filter_declared_manifest_inputs(
+        manifest,
+        {
+            "instruction_index": run_dir / "instruction-snapshot",
+            "instruction_index_artifact": instruction_index_path,
+            "drift_clusters": drift_clusters_path,
+            "optimizer_notes": run_dir / "audit.json",
+            "optimizer_memory": optimizer_memory_path,
+            "policy": sidecar_dir(repo) / "policy.yaml",
+        },
+        required_inputs={
+            "instruction_index",
+            "drift_clusters",
+            "optimizer_notes",
+            "policy",
+        },
+    )
     run = run_manifest(
         manifest,
         run_dir=run_dir,
@@ -130,13 +162,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         retry_attempts=policy.llmff_retry_attempts,
         retry_backoff_ms=policy.llmff_retry_backoff_ms,
         checkpoint_path=run_dir / "patch-propose" / "checkpoint.json",
-        input_paths={
-            "instruction_index": run_dir / "instruction-snapshot",
-            "drift_clusters": drift_clusters_path,
-            "optimizer_notes": run_dir / "audit.json",
-            "optimizer_memory": optimizer_memory_path,
-            "policy": sidecar_dir(repo) / "policy.yaml",
-        },
+        input_paths=input_paths,
         output_paths={"candidate_patch": run_dir / "candidate.raw.json"},
     )
     if run.exit_code != 0:
@@ -161,10 +187,27 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     return _candidate_from_payload(payload, audit_id=audit_id)
 
 
-def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
+def _run_drift_detect(
+    repo: Path,
+    run_dir: Path,
+    policy,
+    manifests,
+    *,
+    instruction_index_path: Path,
+) -> Path:
     manifest = next(record.path for record in manifests if record.name == "drift-detect.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     output_path = run_dir / "drift.raw.json"
+    input_paths = _filter_declared_manifest_inputs(
+        manifest,
+        {
+            "audit_reports": run_dir / "audit.raw.json",
+            "instruction_index": run_dir / "instruction-snapshot",
+            "instruction_index_artifact": instruction_index_path,
+            "policy": sidecar_dir(repo) / "policy.yaml",
+        },
+        required_inputs={"audit_reports", "instruction_index"},
+    )
     run = run_manifest(
         manifest,
         run_dir=run_dir,
@@ -173,11 +216,7 @@ def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
         retry_attempts=policy.llmff_retry_attempts,
         retry_backoff_ms=policy.llmff_retry_backoff_ms,
         checkpoint_path=run_dir / "drift-detect" / "checkpoint.json",
-        input_paths={
-            "audit_reports": run_dir / "audit.raw.json",
-            "instruction_index": run_dir / "instruction-snapshot",
-            "policy": sidecar_dir(repo) / "policy.yaml",
-        },
+        input_paths=input_paths,
         output_paths={"drift_clusters": output_path},
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -195,6 +234,27 @@ def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
     payload = load_json_object_artifact(output_path, "drift.raw.json")
     validate_json_artifact("drift.raw.json", payload)
     return output_path
+
+
+def _filter_declared_manifest_inputs(
+    manifest: Path,
+    input_paths: dict[str, Path],
+    *,
+    required_inputs: set[str],
+) -> dict[str, Path]:
+    payload = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{manifest.name} must be a YAML object")
+    declared_inputs = payload.get("inputs")
+    if not isinstance(declared_inputs, list):
+        raise RuntimeError(f"{manifest.name} must declare llmff inputs as a list")
+    declared = {str(input_name) for input_name in declared_inputs}
+    missing_required = sorted(required_inputs - declared)
+    if missing_required:
+        raise RuntimeError(
+            f"{manifest.name} missing required llmff inputs: {', '.join(missing_required)}"
+        )
+    return {name: path for name, path in input_paths.items() if name in declared}
 
 
 def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
