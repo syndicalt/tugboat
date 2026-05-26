@@ -110,7 +110,7 @@ def run_audit_pipeline(
                 retry_backoff_ms=policy.llmff_retry_backoff_ms,
                 checkpoint_path=run_dir / "instruction-index" / "checkpoint.json",
                 input_paths={
-                    "instruction_snapshot": run_dir / "instruction-snapshot",
+                    "instruction_corpus": run_dir / "instruction-snapshot",
                     "policy": sidecar_dir(repo) / "policy.yaml",
                 },
                 output_paths={"instruction_index": run_dir / "instruction-index.raw.json"},
@@ -222,7 +222,10 @@ def run_audit_pipeline(
                     "instruction_index": instruction_index_path,
                     "policy": sidecar_dir(repo) / "policy.yaml",
                 },
-                output_paths={"audit_report": run_dir / "audit.raw.json"},
+                output_paths={
+                    "audit_report": run_dir / "audit.raw.json",
+                    "evidence_ids": run_dir / "evidence-ids.raw.json",
+                },
             )
         except SecretScanError as error:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -283,6 +286,11 @@ def run_audit_pipeline(
                 "audit.raw.json",
             )
             validate_json_artifact("audit.raw.json", raw_audit)
+            raw_evidence_ids = load_json_object_artifact(
+                run.output_paths["evidence_ids"],
+                "evidence-ids.raw.json",
+            )
+            validate_json_artifact("evidence-ids.raw.json", raw_evidence_ids)
         except ArtifactValidationError as error:
             return _failed_audit_result(
                 repo,

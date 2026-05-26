@@ -59,6 +59,9 @@ if args[:1] == ["run"]:
             "confidence": 0.92,
             "evidence_refs": ["ev_cycle"],
         }) + "\\n", encoding="utf-8")
+        outputs["evidence_ids"].write_text(json.dumps({
+            "evidence_ids": ["ev_cycle"],
+        }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)

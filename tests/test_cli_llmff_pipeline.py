@@ -19,6 +19,7 @@ def _write_fake_llmff(
     bounded_edit_metadata: object | None = None,
     candidate_overrides: dict[str, object] | None = None,
     audit_report: object | None = None,
+    evidence_ids: object | None = None,
     instruction_index: object | None = None,
     drift_clusters: object | None = None,
     eval_report: object | None = None,
@@ -74,6 +75,8 @@ def _write_fake_llmff(
             "confidence": 0.91,
             "evidence_refs": ["ev_fake"],
         }
+    if evidence_ids is None:
+        evidence_ids = {"evidence_ids": ["ev_fake"]}
     if instruction_index is None:
         instruction_index = {"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]}
     if drift_clusters is None:
@@ -120,6 +123,7 @@ SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
 AUDIT_REPORT = __AUDIT_REPORT__
+EVIDENCE_IDS = __EVIDENCE_IDS__
 INSTRUCTION_INDEX = __INSTRUCTION_INDEX__
 DRIFT_CLUSTERS = __DRIFT_CLUSTERS__
 OPTIMIZER_NOTES = __OPTIMIZER_NOTES__
@@ -205,6 +209,11 @@ if args[:1] == ["run"]:
             outputs["audit_report"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["audit_report"].write_text(json.dumps(AUDIT_REPORT) + "\\n", encoding="utf-8")
+        if "evidence_ids" in outputs:
+            if INVALID_JSON_OUTPUT == "evidence_ids":
+                outputs["evidence_ids"].write_text("{not json\\n", encoding="utf-8")
+            else:
+                outputs["evidence_ids"].write_text(json.dumps(EVIDENCE_IDS) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
         if INVALID_JSON_OUTPUT == "drift_clusters":
             outputs["drift_clusters"].write_text("{not json\\n", encoding="utf-8")
@@ -270,6 +279,8 @@ raise SystemExit(64)
         ).replace(
             "__CANDIDATE_OVERRIDES__", repr(candidate_overrides)
         ).replace("__AUDIT_REPORT__", repr(audit_report)).replace(
+            "__EVIDENCE_IDS__", repr(evidence_ids)
+        ).replace(
             "__INSTRUCTION_INDEX__", repr(instruction_index)
         ).replace(
             "__DRIFT_CLUSTERS__", repr(drift_clusters)
@@ -488,6 +499,74 @@ llmff:
     assert not (run_dir / "audit.json").exists()
 
 
+def test_audit_rejects_invalid_json_evidence_ids_output_without_normalizing(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="evidence_ids",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "audit rejected: evidence-ids.raw.json contains invalid JSON" in output
+    assert (run_dir / "evidence-ids.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
+def test_audit_rejects_wrong_type_evidence_ids_output_without_normalizing(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        evidence_ids={"evidence_ids": "ev_fake"},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "audit rejected: evidence-ids.raw.json field has wrong type: evidence_ids" in output
+    assert (run_dir / "evidence-ids.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
 def test_audit_rejects_malformed_llmff_instruction_index_raw_output(
     tmp_path: Path, capsys
 ):
@@ -585,6 +664,10 @@ llmff:
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     llmff_inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
+    llmff_inputs_by_manifest = [
+        json.loads(line)
+        for line in (run_dir / "llmff-inputs-by-manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         jobs = store.connection.execute(
             """
@@ -613,9 +696,14 @@ llmff:
         ("instruction-index.yaml", "completed"),
         ("episode-audit.yaml", "completed"),
     ]
-    assert output_names == ["instruction_index", "audit_report"]
+    assert output_names == ["instruction_index", "audit_report", "evidence_ids"]
+    assert llmff_inputs_by_manifest[0]["inputs"] == {
+        "instruction_corpus": str(run_dir / "instruction-snapshot"),
+        "policy": str(repo / ".sidecar" / "policy.yaml"),
+    }
     assert Path(llmff_inputs["instruction_index"]) == run_dir / "instruction-index.raw.json"
     assert (run_dir / "instruction-index.raw.json").exists()
+    assert (run_dir / "evidence-ids.raw.json").exists()
 
 
 def test_audit_passes_canonical_episode_artifact_to_llmff(tmp_path: Path):
@@ -1087,6 +1175,7 @@ llmff:
     assert output_names == [
         "instruction_index",
         "audit_report",
+        "evidence_ids",
         "drift_clusters",
         "optimizer_notes",
         "candidate_patch",
@@ -2227,6 +2316,7 @@ llmff:
     assert output_names == [
         "instruction_index",
         "audit_report",
+        "evidence_ids",
         "drift_clusters",
         "optimizer_notes",
         "candidate_patch",

@@ -78,6 +78,9 @@ if args[:1] == ["run"]:
             "confidence": 0.91,
             "evidence_refs": ["ev_mcp_daemon"],
         }) + "\\n", encoding="utf-8")
+        outputs["evidence_ids"].write_text(json.dumps({
+            "evidence_ids": ["ev_mcp_daemon"],
+        }) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
         outputs["drift_clusters"].write_text(json.dumps({
             "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_mcp_daemon"]}]

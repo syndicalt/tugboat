@@ -110,6 +110,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "instruction_refs": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "evidence-ids.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["evidence_ids"],
+        "properties": {
+            "evidence_ids": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "instruction-index.raw.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
