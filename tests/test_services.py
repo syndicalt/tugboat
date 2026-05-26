@@ -195,6 +195,26 @@ def test_write_eval_report_writes_json_report(tmp_path: Path):
     }
 
 
+def test_write_eval_report_rejects_secret_in_metrics(tmp_path: Path):
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        write_eval_report(
+            tmp_path,
+            "run-1",
+            candidate_id=5,
+            suite_id="unit",
+            passed=False,
+            metrics={"raw_output": "provider leaked ghp_abcdefghijklmnopqrstuvwx"},
+            trigger_score=0.4,
+            held_out_score=0.3,
+            governance_passed=False,
+            recommendation="reject",
+        )
+
+    assert not (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    ).exists()
+
+
 def test_write_report_writes_markdown_summary(tmp_path: Path):
     eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
     eval_report_path.parent.mkdir(parents=True)

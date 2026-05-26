@@ -6,6 +6,7 @@ from typing import Any
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.paths import runs_dir
+from tugboat.security.secrets import SecretScanError, scan_text
 
 
 def write_eval_report(
@@ -44,10 +45,11 @@ def write_eval_report(
             for split_name, case_ids in sorted(validation_splits.items())
         }
     validate_json_artifact("eval-report.json", payload)
-    report_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    report_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(report_path.as_posix(), report_text)
+    if findings:
+        raise SecretScanError(findings)
+    report_path.write_text(report_text, encoding="utf-8")
     return report_path
 
 
