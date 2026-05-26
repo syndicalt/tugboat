@@ -296,6 +296,47 @@ def test_daemon_unix_socket_serves_status_and_exits_after_bounded_requests(tmp_p
     assert result == {"requests_served": 1, "socket_path": ".sidecar/daemon.sock"}
 
 
+def test_daemon_unix_socket_returns_error_for_malformed_request_and_cleans_up(
+    tmp_path: Path,
+):
+    socket_path = tmp_path / ".sidecar" / "daemon.sock"
+    result: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def run_server() -> None:
+        try:
+            result.update(
+                serve_daemon_socket(
+                    tmp_path,
+                    socket_path=socket_path,
+                    config=DaemonRunConfig(
+                        worker_id="socket-worker",
+                        lease_duration=timedelta(seconds=30),
+                        now=_at(10),
+                    ),
+                    max_requests=1,
+                )
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=run_server)
+    thread.start()
+    with _connect_unix_socket(socket_path) as client:
+        client.sendall(b"{not-json\n")
+        response = json.loads(client.recv(4096).decode("utf-8"))
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert response == {
+        "error": "invalid daemon socket request",
+        "socket_path": ".sidecar/daemon.sock",
+    }
+    assert result == {"requests_served": 1, "socket_path": ".sidecar/daemon.sock"}
+    assert not socket_path.exists()
+
+
 def test_daemon_unix_socket_rejects_path_outside_repo_before_bind(tmp_path: Path):
     outside_socket = tmp_path.parent / f"{tmp_path.name}-outside.sock"
 

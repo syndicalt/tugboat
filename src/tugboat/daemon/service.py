@@ -93,18 +93,26 @@ def serve_daemon_socket(
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     socket_path.unlink(missing_ok=True)
     requests_served = 0
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-        server.bind(str(socket_path))
-        server.listen(1)
-        while max_requests is None or requests_served < max_requests:
-            connection, _ = server.accept()
-            with connection:
-                request = _read_socket_request(connection)
-                response = _handle_socket_request(repo, config, request)
-                response["socket_path"] = socket_ref
-                connection.sendall((json.dumps(response, sort_keys=True) + "\n").encode("utf-8"))
-            requests_served += 1
-    socket_path.unlink(missing_ok=True)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            server.bind(str(socket_path))
+            server.listen(1)
+            while max_requests is None or requests_served < max_requests:
+                connection, _ = server.accept()
+                with connection:
+                    try:
+                        request = _read_socket_request(connection)
+                    except (json.JSONDecodeError, ValueError):
+                        response = {"error": "invalid daemon socket request"}
+                    else:
+                        response = _handle_socket_request(repo, config, request)
+                    response["socket_path"] = socket_ref
+                    connection.sendall(
+                        (json.dumps(response, sort_keys=True) + "\n").encode("utf-8")
+                    )
+                requests_served += 1
+    finally:
+        socket_path.unlink(missing_ok=True)
     return {
         "requests_served": requests_served,
         "socket_path": socket_ref,
