@@ -16,6 +16,8 @@ from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 from tugboat.vcs import VcsAdapter, VcsStateError
 
+SECRET_VALUE = "sk-abcdefghijklmnopqrstuvwx"
+
 
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
@@ -740,6 +742,77 @@ def test_rollback_rejects_malformed_apply_plan_before_writing_plan(tmp_path: Pat
     apply_plan.pop("schema_version")
     (run_dir / "apply-plan.json").write_text(
         json.dumps(apply_plan, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest"]) == 1
+
+    assert not (run_dir / "rollback-plan.json").exists()
+
+
+def test_apply_rejects_secret_in_final_apply_plan_before_writing_authority_artifacts(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "proposal",
+                "--review-actor",
+                f"reviewer-{SECRET_VALUE}",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+
+
+def test_rollback_rejects_secret_in_final_rollback_plan_before_writing_artifact(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    commit_sha = _git(repo, "rev-parse", "HEAD")
+    (run_dir / "apply-plan.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mode": "commit",
+                "candidate_id": 7,
+                "run_id": "20260525T000000000000Z",
+                "branch_name": f"tugboat/{SECRET_VALUE}",
+                "commit_message": "Apply Tugboat candidate 7",
+                "target_files": ["CODEX.md"],
+                "pre_hashes": {"CODEX.md": _hash(repo / "CODEX.md")},
+                "post_hashes": {"CODEX.md": _hash(repo / "CODEX.md")},
+                "applied_commit": commit_sha,
+                "rollback_command": [
+                    ["git", "switch", f"tugboat/{SECRET_VALUE}"],
+                    ["git", "revert", "--no-edit", commit_sha],
+                ],
+                "provenance_bundle": ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json",
+                "pr_metadata": {},
+                "review_actor": "tugboat",
+                "auto_apply": False,
+                "explicit_human_review": False,
+                "review_required_reasons": [],
+                "decision_rationale": "manual test fixture",
+                "decision_id": "20260525T000000000000Z",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
 

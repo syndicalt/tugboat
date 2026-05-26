@@ -70,7 +70,7 @@ from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.report.service import write_report
-from tugboat.security.secrets import SecretScanError, scan_path
+from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 from tugboat.vcs import VcsAdapter, VcsStateError
 
 
@@ -79,6 +79,15 @@ def _write_blocked_by_read_only(repo: Path, action: str) -> bool:
         return False
     print(f"{action} blocked: read-only kill switch is enabled")
     return True
+
+
+def _write_secret_scanned_json_artifact(path: Path, artifact_name: str, payload: dict[str, object]) -> None:
+    validate_json_artifact(artifact_name, payload)
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
+    path.write_text(text, encoding="utf-8")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1607,8 +1616,7 @@ def _write_apply_plan(
     }
     provenance_bundle = str(payload["provenance_bundle"])
     path = run_dir / "apply-plan.json"
-    validate_json_artifact("apply-plan.json", payload)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(path, "apply-plan.json", payload)
     _write_provenance_bundle(
         repo,
         run_dir,
@@ -1661,10 +1669,10 @@ def _write_apply_plan(
             )
         if auto_apply and auto_apply_approval is not None:
             approval_path = run_dir / "auto-apply-approval.json"
-            validate_json_artifact("auto-apply-approval.json", auto_apply_approval)
-            approval_path.write_text(
-                json.dumps(auto_apply_approval, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
+            _write_secret_scanned_json_artifact(
+                approval_path,
+                "auto-apply-approval.json",
+                auto_apply_approval,
             )
             store.append_audit_event(
                 "auto_apply.applied",
@@ -1732,8 +1740,7 @@ def _write_provenance_bundle(
         },
     }
     path = run_dir / "provenance-bundle.json"
-    validate_json_artifact("provenance-bundle.json", payload)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(path, "provenance-bundle.json", payload)
     return path
 
 
@@ -2467,8 +2474,7 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
     }
     path = run_dir / "rollback-plan.json"
     rollback_plan = _relative_repo_path(repo, path)
-    validate_json_artifact("rollback-plan.json", payload)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(path, "rollback-plan.json", payload)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_rollback(
             decision_id=str(apply_plan["decision_id"]),
