@@ -39,6 +39,7 @@ from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
 from tugboat.ops.observability import summarize_sidecar_observability
+from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.pipeline import run_propose_pipeline
@@ -53,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subcommands.add_parser("status")
     status.add_argument("--repo", required=True)
+
+    retention = subcommands.add_parser("retention")
+    retention.add_argument("--repo", required=True)
+    retention.add_argument("--apply", action="store_true")
 
     index = subcommands.add_parser("index")
     index.add_argument("--repo", required=True)
@@ -190,6 +195,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"indexed_documents: {indexed_documents}")
         print(f"latest_run: {latest[0]} {latest[1]}" if latest else "latest_run: none")
         print(f"pending_candidates: {pending_candidates}")
+        return 0
+
+    if args.command == "retention":
+        repo = Path(args.repo)
+        result = apply_retention_policy(repo, load_policy(repo), dry_run=not args.apply)
+        print(f"retention_mode: {'apply' if args.apply else 'dry-run'}")
+        print(f"candidates: {len(result.candidates)}")
+        print(f"deleted: {len(result.deleted)}")
+        for candidate in result.candidates:
+            print(f"candidate: {candidate}")
+        for deleted in result.deleted:
+            print(f"deleted: {deleted}")
         return 0
 
     if args.command == "index":

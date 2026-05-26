@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from tugboat.models import Policy
+from tugboat.cli import main
 from tugboat.ops.retention import apply_retention_policy
 
 
@@ -92,3 +93,69 @@ def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp
     assert not (run_dir / "events.jsonl").exists()
     assert not (run_dir / "checkpoint-patch-eval.json").exists()
     assert (run_dir / "candidate.diff").exists()
+
+
+def test_retention_cli_dry_run_reports_expired_runtime_artifacts(
+    tmp_path: Path, capsys
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+  checkpoints_days: 7
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _touch_old(run_dir / "trace-input.jsonl", days_old=15)
+    _touch_old(run_dir / "episode-audit" / "checkpoint.json", days_old=8)
+
+    assert main(["retention", "--repo", str(tmp_path)]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "retention_mode: dry-run",
+        "candidates: 2",
+        "deleted: 0",
+        "candidate: .sidecar/runs/run-1/episode-audit/checkpoint.json",
+        "candidate: .sidecar/runs/run-1/trace-input.jsonl",
+    ]
+    assert (run_dir / "trace-input.jsonl").exists()
+    assert (run_dir / "episode-audit" / "checkpoint.json").exists()
+
+
+def test_retention_cli_apply_deletes_expired_runtime_artifacts(
+    tmp_path: Path, capsys
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+  checkpoints_days: 7
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _touch_old(run_dir / "trace-redacted.jsonl", days_old=15)
+    _touch_old(run_dir / "episode-audit" / "llmff-events.jsonl", days_old=8)
+
+    assert main(["retention", "--repo", str(tmp_path), "--apply"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "retention_mode: apply",
+        "candidates: 2",
+        "deleted: 2",
+        "candidate: .sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
+        "candidate: .sidecar/runs/run-1/trace-redacted.jsonl",
+        "deleted: .sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
+        "deleted: .sidecar/runs/run-1/trace-redacted.jsonl",
+    ]
+    assert not (run_dir / "trace-redacted.jsonl").exists()
+    assert not (run_dir / "episode-audit" / "llmff-events.jsonl").exists()
