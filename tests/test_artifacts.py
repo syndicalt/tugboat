@@ -179,6 +179,9 @@ def test_validate_candidate_raw_artifact_accepts_current_schema():
             "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
             "risk_class": "instruction_clarification",
             "rationale": "Preserve regression guidance.",
+            "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+            "evals_required": ["governance-regression"],
+            "rollback_plan": ["revert generated diff"],
             "sources": [{"source_id": "ev_fake", "trusted": True}],
             "reflections": [{"source_ref": "audit:latest", "summary": "Tests were skipped."}],
             "bounded_edit_metadata": [
@@ -206,6 +209,49 @@ def test_validate_eval_raw_artifacts_accept_current_schema():
         "policy-decision.raw.json",
         {"allowed": False, "reasons": ["held_out_regression"]},
     )
+
+
+def test_validate_candidate_raw_artifact_rejects_unknown_top_level_fields():
+    with pytest.raises(ArtifactValidationError, match="additional property"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": "CODEX.md",
+                "base_hash": "abc123",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "raw_model_payload": "unbounded side channel",
+            },
+        )
+
+
+def test_validate_eval_report_raw_artifact_rejects_unknown_top_level_fields():
+    with pytest.raises(ArtifactValidationError, match="additional property"):
+        validate_json_artifact(
+            "eval-report.raw.json",
+            {
+                "passed": True,
+                "metrics": {"governance_regressions": 0},
+                "raw_model_payload": "unbounded side channel",
+            },
+        )
+
+
+def test_validate_policy_decision_raw_artifact_rejects_unknown_top_level_fields():
+    with pytest.raises(ArtifactValidationError, match="additional property"):
+        validate_json_artifact(
+            "policy-decision.raw.json",
+            {
+                "allowed": True,
+                "reasons": [],
+                "raw_model_payload": "unbounded side channel",
+            },
+        )
 
 
 def test_validate_eval_suite_artifact_accepts_current_schema():
