@@ -152,6 +152,25 @@ class DaemonQueue:
         payload: dict[str, Any],
         now: datetime | None = None,
     ) -> DaemonJob:
+        return self._enqueue(kind=kind, payload=payload, now=now, commit=True)
+
+    def enqueue_uncommitted(
+        self,
+        *,
+        kind: str,
+        payload: dict[str, Any],
+        now: datetime | None = None,
+    ) -> DaemonJob:
+        return self._enqueue(kind=kind, payload=payload, now=now, commit=False)
+
+    def _enqueue(
+        self,
+        *,
+        kind: str,
+        payload: dict[str, Any],
+        now: datetime | None,
+        commit: bool,
+    ) -> DaemonJob:
         if not isinstance(payload, dict):
             raise ValueError("daemon job payload must be a JSON object")
         timestamp = _serialize_datetime(_coerce_datetime(now))
@@ -171,7 +190,8 @@ class DaemonQueue:
                 timestamp,
             ),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return self._require_job(int(cursor.lastrowid))
 
     def get_job(self, job_id: int) -> DaemonJob | None:

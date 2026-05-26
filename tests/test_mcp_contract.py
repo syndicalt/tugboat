@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
+from collections.abc import Callable
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -909,6 +912,133 @@ llmff:
     queued_payload = json.loads(queued[1])
     assert queued_payload["trace_path"] == str(repo / episode["artifact_ref"])
     assert queued_payload["artifact_ref"].startswith(".sidecar/mcp/requests/")
+
+
+def test_request_audit_records_daemon_job_in_audited_store_before_worker_runs(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"user_correction","content":"Add regression tests"}\n',
+    )
+
+    request = tugboat_request_audit(repo, episode["trace_id"])
+
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        queued = queue_store.connection.execute(
+            "SELECT id, kind, payload_json, state FROM daemon_jobs"
+        ).fetchone()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        recorded = store.connection.execute(
+            """
+            SELECT d.job_id, d.state, d.payload_json, d.audit_event_sequence, a.event_type
+            FROM daemon_jobs d
+            JOIN audit_events a ON a.sequence = d.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert tuple(queued[:2]) == (1, "trace_audit")
+    assert queued[3] == "queued"
+    queued_payload = json.loads(queued[2])
+    assert queued_payload["request_id"] == request["request_id"]
+    assert queued_payload["artifact_ref"] == request["artifact_ref"]
+    assert queued_payload["trace_path"] == str(repo / episode["artifact_ref"])
+    assert recorded is not None
+    assert recorded[0] == "1"
+    assert recorded[1] == "queued"
+    assert json.loads(recorded[2]) == queued_payload
+    assert recorded[3] is not None
+    assert recorded[4] == "daemon_job.recorded"
+
+
+def test_request_audit_keeps_daemon_job_invisible_until_audit_record_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n',
+    )
+    original_record_daemon_job = Store.record_daemon_job
+    visible_counts: list[int] = []
+
+    def record_and_probe(self: Store, **kwargs: object) -> int:
+        queue_path = repo / ".sidecar" / "daemon.sqlite"
+        connection = sqlite3.connect(
+            f"file:{queue_path.as_posix()}?mode=ro",
+            uri=True,
+            timeout=0.1,
+        )
+        with closing(connection):
+            visible_counts.append(
+                int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM daemon_jobs"
+                    ).fetchone()[0]
+                )
+            )
+        return original_record_daemon_job(self, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Store, "record_daemon_job", record_and_probe)
+
+    tugboat_request_audit(repo, episode["trace_id"])
+
+    assert visible_counts == [0]
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        assert queue_store.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(
+    ("request_fn", "expected_kind", "expected_payload"),
+    (
+        (lambda repo: tugboat_request_proposal(repo, "audit-7"), "proposal", {"audit_id": "audit-7"}),
+        (
+            lambda repo: tugboat_request_eval(repo, "candidate-9", "all"),
+            "eval",
+            {"candidate_id": "candidate-9", "suite": "all"},
+        ),
+    ),
+)
+def test_mcp_write_intent_tools_record_daemon_jobs_in_audited_store(
+    tmp_path: Path,
+    request_fn: Callable[[Path], dict[str, object]],
+    expected_kind: str,
+    expected_payload: dict[str, str],
+):
+    repo = tmp_path
+    request = request_fn(repo)
+
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        queued = queue_store.connection.execute(
+            "SELECT id, kind, payload_json, state FROM daemon_jobs"
+        ).fetchone()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        recorded = store.connection.execute(
+            """
+            SELECT d.job_id, d.state, d.payload_json, a.event_type
+            FROM daemon_jobs d
+            JOIN audit_events a ON a.sequence = d.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert tuple(queued[:2]) == (1, expected_kind)
+    assert queued[3] == "queued"
+    queued_payload = json.loads(queued[2])
+    assert queued_payload == {
+        "request_id": request["request_id"],
+        "artifact_ref": request["artifact_ref"],
+        **expected_payload,
+    }
+    assert recorded is not None
+    assert recorded[0] == "1"
+    assert recorded[1] == "queued"
+    assert json.loads(recorded[2]) == queued_payload
+    assert recorded[3] == "daemon_job.recorded"
 
 
 def test_request_proposal_enqueues_daemon_executable_patch_propose(tmp_path: Path):
