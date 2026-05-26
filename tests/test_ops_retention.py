@@ -18,6 +18,7 @@ def _touch_old(path: Path, *, days_old: int) -> None:
 def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
     _touch_old(run_dir / "trace-input.jsonl", days_old=15)
+    _touch_old(run_dir / "trace-redacted.jsonl", days_old=15)
     _touch_old(run_dir / "events.jsonl", days_old=8)
     _touch_old(run_dir / "checkpoint-patch-eval.json", days_old=8)
     _touch_old(run_dir / "audit.json", days_old=99)
@@ -33,8 +34,10 @@ def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_
         ".sidecar/runs/run-1/checkpoint-patch-eval.json",
         ".sidecar/runs/run-1/events.jsonl",
         ".sidecar/runs/run-1/trace-input.jsonl",
+        ".sidecar/runs/run-1/trace-redacted.jsonl",
     )
     assert (run_dir / "trace-input.jsonl").exists()
+    assert (run_dir / "trace-redacted.jsonl").exists()
     assert (run_dir / "events.jsonl").exists()
     assert (run_dir / "checkpoint-patch-eval.json").exists()
     assert (run_dir / "audit.json").exists()
@@ -67,6 +70,7 @@ def test_retention_policy_dry_run_reports_expired_per_manifest_lifecycle_trace_a
 def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
     _touch_old(run_dir / "trace-input.jsonl", days_old=15)
+    _touch_old(run_dir / "trace-redacted.jsonl", days_old=15)
     _touch_old(run_dir / "events.jsonl", days_old=8)
     _touch_old(run_dir / "checkpoint-patch-eval.json", days_old=8)
     _touch_old(run_dir / "candidate.diff", days_old=99)
@@ -81,8 +85,10 @@ def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp
         ".sidecar/runs/run-1/checkpoint-patch-eval.json",
         ".sidecar/runs/run-1/events.jsonl",
         ".sidecar/runs/run-1/trace-input.jsonl",
+        ".sidecar/runs/run-1/trace-redacted.jsonl",
     )
     assert not (run_dir / "trace-input.jsonl").exists()
+    assert not (run_dir / "trace-redacted.jsonl").exists()
     assert not (run_dir / "events.jsonl").exists()
     assert not (run_dir / "checkpoint-patch-eval.json").exists()
     assert (run_dir / "candidate.diff").exists()
