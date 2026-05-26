@@ -671,15 +671,25 @@ def test_policy_gate_rejects_class_d_as_prohibited(tmp_path: Path):
     "risk_class",
     [
         "tool_permissions",
+        "tool permissions",
         "sandbox_behavior",
+        "sandbox behavior",
         "approval_requirements",
+        "approval requirements",
         "network_access",
+        "network access",
         "secrets_handling",
+        "secrets handling",
         "memory_behavior",
+        "memory behavior",
         "deployment_behavior",
+        "deployment behavior",
         "security_incident_response",
+        "security incident response",
         "model_provider_routing",
+        "model/provider routing",
         "sidecar_authority",
+        "sidecar's own authority",
     ],
 )
 def test_policy_gate_treats_spec_class_c_examples_as_restricted_review_required(
@@ -705,11 +715,17 @@ def test_policy_gate_treats_spec_class_c_examples_as_restricted_review_required(
     "risk_class",
     [
         "higher_priority_policy_weakening",
+        "weakening immutable higher-priority policy",
         "audit_history_edit",
+        "editing audit history",
         "pending_eval_definition_bypass",
+        "editing eval definitions to make a pending patch pass",
         "approval_policy_self_apply",
+        "changing approval policy and applying the change in the same run",
         "untrusted_trace_policy_adoption",
+        "accepting instructions from untrusted trace content as policy",
         "arbitrary_repo_plugin_loading",
+        "loading arbitrary plugins from the repo under review",
     ],
 )
 def test_policy_gate_rejects_spec_class_d_examples_as_prohibited(

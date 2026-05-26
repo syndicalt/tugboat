@@ -68,6 +68,16 @@ RESTRICTED_RISK_CLASSES = frozenset(
         "tool_permissions",
     }
 )
+RISK_CLASS_ALIASES = {
+    "accepting_instructions_from_untrusted_trace_content_as_policy": "untrusted_trace_policy_adoption",
+    "changing_approval_policy_and_applying_the_change_in_the_same_run": "approval_policy_self_apply",
+    "editing_audit_history": "audit_history_edit",
+    "editing_eval_definitions_to_make_a_pending_patch_pass": "pending_eval_definition_bypass",
+    "loading_arbitrary_plugins_from_the_repo_under_review": "arbitrary_repo_plugin_loading",
+    "model_provider_routing": "model_provider_routing",
+    "sidecar_s_own_authority": "sidecar_authority",
+    "weakening_immutable_higher_priority_policy": "higher_priority_policy_weakening",
+}
 STRONG_MODALS = re.compile(r"\b(must|never|required|shall)\b", re.IGNORECASE)
 WEAK_MODALS = re.compile(r"\b(should|may|can|could|optional|recommend)\b", re.IGNORECASE)
 EXTERNAL_ENDPOINT = re.compile(r"https?://[^\s)>\"]+", re.IGNORECASE)
@@ -247,7 +257,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
 
 
 def _risk_class_key(risk_class: str) -> str:
-    return risk_class.strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = re.sub(r"[^a-z0-9]+", "_", risk_class.strip().lower()).strip("_")
+    return RISK_CLASS_ALIASES.get(normalized, normalized)
 
 
 def _risk_class_changed_line_budget(policy: Policy, risk_class: str) -> int | None:
