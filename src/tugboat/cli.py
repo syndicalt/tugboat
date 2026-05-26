@@ -1324,6 +1324,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
     governance_passed = False
     recommendation = "reject"
     validation_baseline_score = _load_validation_baseline_score(repo, suite_id=suite_id)
+    accepted_bounded_edit_metadata: list[object] = []
     if eval_report_path.exists():
         eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
         trigger_score = _score_from_eval_report(eval_report, "trigger_score")
@@ -1339,8 +1340,13 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         except ValueError as error:
             reason = str(error)
         else:
-            decision = "needs_review"
-            reason = "held_out_improved"
+            raw_metadata = candidate.get("bounded_edit_metadata", [])
+            accepted_bounded_edit_metadata = raw_metadata if isinstance(raw_metadata, list) else []
+            if accepted_bounded_edit_metadata:
+                decision = "needs_review"
+                reason = "held_out_improved"
+            else:
+                reason = "accepted candidate missing bounded edit metadata"
 
     _merge_json(
         run_dir / "decision.json",
@@ -1392,6 +1398,8 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         "trigger_score": trigger_score,
         "validation_baseline_score": validation_baseline_score,
     }
+    if decision == "needs_review":
+        summary["accepted_bounded_edit_metadata"] = accepted_bounded_edit_metadata
     validate_json_artifact("optimization-summary.json", summary)
     (run_dir / "optimization-summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",

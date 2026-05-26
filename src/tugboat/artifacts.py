@@ -611,6 +611,28 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "suite_id": {"type": "string"},
             "trigger_score": {"type": "number"},
             "validation_baseline_score": {"type": ["number", "null"]},
+            "accepted_bounded_edit_metadata": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "operator",
+                        "file",
+                        "section",
+                        "changed_lines",
+                        "normative_changes",
+                    ],
+                    "properties": {
+                        "operator": {"type": "string"},
+                        "file": {"type": "string"},
+                        "section": {"type": "string"},
+                        "changed_lines": {"type": "integer"},
+                        "normative_changes": {"type": "integer"},
+                    },
+                },
+            },
         },
     },
     "observability-summary.json": {
@@ -937,6 +959,8 @@ def _validate_schema_value(
             raise ArtifactValidationError(f"{artifact_name} field has unsupported value: {field_path}")
 
     if expected_type == "array":
+        if "minItems" in schema and isinstance(value, list) and len(value) < int(schema["minItems"]):
+            raise ArtifactValidationError(f"{artifact_name} field has too few items: {field_path}")
         item_schema = schema.get("items")
         if item_schema is None:
             return

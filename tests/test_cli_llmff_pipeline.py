@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from tugboat.cli import main
+from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 
@@ -1949,6 +1949,15 @@ llmff:
         "suite_id": "held-out",
         "trigger_score": 0.7,
         "validation_baseline_score": None,
+        "accepted_bounded_edit_metadata": [
+            {
+                "changed_lines": 1,
+                "file": "CODEX.md",
+                "normative_changes": 0,
+                "operator": "add",
+                "section": "Testing",
+            }
+        ],
     }
     assert decision["decision"] == "needs_review"
     assert candidate_state == "needs_review"
@@ -1961,6 +1970,59 @@ llmff:
         "successful: held_out_improved for candidate "
         f"{decision['candidate_id']} in suite held-out"
     ]
+
+
+def test_optimization_summary_rejects_accepted_eval_without_bounded_edit_metadata(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": 7,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "risk_class": "instruction_clarification",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "decision.json").write_text(
+        json.dumps({"candidate_id": 7, "decision": "needs_review"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "governance_passed": True,
+                "held_out_score": 0.9,
+                "metrics": {"governance_regressions": 0},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "held-out",
+                "trigger_score": 0.7,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert _write_optimization_summary(repo, run_dir, suite_id="held-out") == 1
+
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    assert summary["decision"] == "rejected"
+    assert "accepted_bounded_edit_metadata" not in summary
+    assert decision["policy_reasons"] == ["accepted candidate missing bounded edit metadata"]
 
 
 def test_optimize_passes_policy_llmff_runtime_knobs_to_all_manifests(tmp_path: Path):

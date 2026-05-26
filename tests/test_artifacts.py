@@ -403,8 +403,36 @@ def test_validate_optimization_summary_artifact_accepts_current_schema():
             "suite_id": "held-out",
             "trigger_score": 0.7,
             "validation_baseline_score": None,
+            "accepted_bounded_edit_metadata": [
+                {
+                    "changed_lines": 1,
+                    "file": "CODEX.md",
+                    "normative_changes": 0,
+                    "operator": "add",
+                    "section": "Testing",
+                }
+            ],
         },
     )
+
+
+def test_validate_optimization_summary_artifact_rejects_empty_accepted_metadata():
+    with pytest.raises(ArtifactValidationError, match="accepted_bounded_edit_metadata"):
+        validate_json_artifact(
+            "optimization-summary.json",
+            {
+                "schema_version": 1,
+                "audit_run": "run-1",
+                "candidate_id": 1,
+                "decision": "needs_review",
+                "governance_passed": True,
+                "held_out_score": 0.9,
+                "recommendation": "accept",
+                "suite_id": "held-out",
+                "trigger_score": 0.7,
+                "accepted_bounded_edit_metadata": [],
+            },
+        )
 
 
 def test_validate_observability_summary_artifact_accepts_current_schema():
