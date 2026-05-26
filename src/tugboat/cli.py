@@ -92,6 +92,16 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--candidate", required=True)
     evaluate.add_argument("--suite", required=True)
 
+    optimize = subcommands.add_parser("optimize")
+    optimize.add_argument("--repo", required=True)
+    optimize.add_argument("--trace", required=True)
+    optimize.add_argument("--suite", required=True)
+    optimize.add_argument(
+        "--trace-format",
+        choices=("generic-jsonl", "codex", "claude", "ci", "mcp"),
+        default="generic-jsonl",
+    )
+
     apply = subcommands.add_parser("apply")
     apply.add_argument("--repo", required=True)
     apply.add_argument("--candidate", required=True)
@@ -526,6 +536,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
         print(f"eval suite: {args.suite} {'passed' if passed else 'failed'}")
         return 0 if passed else 1
+
+    if args.command == "optimize":
+        repo = Path(args.repo)
+        audit_exit = main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(Path(args.trace)),
+                "--trace-format",
+                args.trace_format,
+            ]
+        )
+        if audit_exit != 0:
+            return audit_exit
+        propose_exit = main(["propose", "--repo", str(repo), "--audit", "latest"])
+        run_dir = latest_run_dir(repo)
+        if propose_exit != 0:
+            return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
+        main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", args.suite])
+        return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
 
     if args.command == "apply":
         repo = Path(args.repo)
@@ -1758,6 +1790,76 @@ def _assert_eval_acceptance(eval_report: dict[str, object]) -> None:
             raise ValueError("eval report is missing trigger and held-out validation scores")
     if float(held_out_score) <= float(trigger_score):
         raise ValueError("held-out eval score did not improve")
+
+
+def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> int:
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    candidate_id = int(candidate["candidate_id"])
+    eval_report_path = run_dir / "eval-report.json"
+    decision = "rejected"
+    reason = "proposal rejected"
+    trigger_score: float | None = None
+    held_out_score: float | None = None
+    recommendation = "reject"
+    if eval_report_path.exists():
+        eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
+        trigger_score = _score_from_eval_report(eval_report, "trigger_score")
+        held_out_score = _score_from_eval_report(eval_report, "held_out_score")
+        recommendation = str(eval_report.get("recommendation", "reject"))
+        try:
+            _assert_eval_acceptance(eval_report)
+        except ValueError as error:
+            reason = str(error)
+        else:
+            decision = "needs_review"
+            reason = "held_out_improved"
+
+    _merge_json(
+        run_dir / "decision.json",
+        {
+            "decision": decision,
+            "policy_allowed": decision == "needs_review",
+            "policy_reasons": [reason],
+        },
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.update_candidate_state(
+            candidate_id=candidate_id,
+            state=decision,
+            reason=reason,
+        )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor="tugboat",
+            policy="optimization_acceptance_gate",
+            decision=decision,
+            reason=reason,
+        )
+
+    summary = {
+        "audit_run": run_dir.name,
+        "candidate_id": candidate_id,
+        "decision": decision,
+        "held_out_score": held_out_score,
+        "recommendation": recommendation,
+        "suite_id": suite_id,
+        "trigger_score": trigger_score,
+    }
+    (run_dir / "optimization-summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"optimization: {decision}")
+    return 0 if decision == "needs_review" else 1
+
+
+def _score_from_eval_report(eval_report: dict[str, object], field: str) -> float | None:
+    value = eval_report.get(field)
+    if value is None:
+        metrics = eval_report.get("metrics", {})
+        if isinstance(metrics, dict):
+            value = metrics.get(field)
+    return None if value is None else float(value)
 
 
 def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) -> Path:

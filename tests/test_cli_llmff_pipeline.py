@@ -1,7 +1,5 @@
-from __future__ import annotations
-
-import json
 import hashlib
+import json
 from pathlib import Path
 
 from tugboat.cli import main
@@ -9,12 +7,14 @@ from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 
 
-def _write_fake_llmff(path: Path) -> Path:
+def _write_fake_llmff(path: Path, *, eval_passed: bool = False) -> Path:
     path.write_text(
         """#!/usr/bin/env python3
 import json
 import sys
 from pathlib import Path
+
+EVAL_PASSED = __EVAL_PASSED__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -78,18 +78,32 @@ if args[:1] == ["run"]:
             }],
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
-        outputs["eval_report"].write_text(json.dumps({
-            "passed": False,
-            "metrics": {"governance_regressions": 1, "held_out_cases": 3},
-        }) + "\\n", encoding="utf-8")
-        outputs["policy_decision"].write_text(json.dumps({
-            "allowed": False,
-            "reasons": ["held_out_regression"],
-        }) + "\\n", encoding="utf-8")
+        if EVAL_PASSED:
+            outputs["eval_report"].write_text(json.dumps({
+                "passed": True,
+                "trigger_score": 0.7,
+                "held_out_score": 0.9,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            }) + "\\n", encoding="utf-8")
+            outputs["policy_decision"].write_text(json.dumps({
+                "allowed": True,
+                "reasons": [],
+            }) + "\\n", encoding="utf-8")
+        else:
+            outputs["eval_report"].write_text(json.dumps({
+                "passed": False,
+                "metrics": {"governance_regressions": 1, "held_out_cases": 3},
+            }) + "\\n", encoding="utf-8")
+            outputs["policy_decision"].write_text(json.dumps({
+                "allowed": False,
+                "reasons": ["held_out_regression"],
+            }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
-""",
+""".replace("__EVAL_PASSED__", repr(eval_passed)),
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -509,3 +523,121 @@ llmff:
         "source_refs": ["audit:1"],
     }
     assert rejected_memory[3] is not None
+
+
+def test_optimize_runs_llmff_propose_and_eval_as_governed_workflow(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        candidate_state = store.connection.execute("SELECT state FROM candidates").fetchone()[0]
+        decision_rows = store.connection.execute(
+            """
+            SELECT policy, decision, reason
+            FROM decisions
+            ORDER BY id
+            """
+        ).fetchall()
+
+    assert jobs == [
+        ("episode-audit.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+        ("patch-eval.yaml", "completed"),
+    ]
+    assert eval_report["trigger_score"] == 0.7
+    assert eval_report["held_out_score"] == 0.9
+    assert summary == {
+        "audit_run": run_dir.name,
+        "candidate_id": decision["candidate_id"],
+        "decision": "needs_review",
+        "held_out_score": 0.9,
+        "recommendation": "accept",
+        "suite_id": "held-out",
+        "trigger_score": 0.7,
+    }
+    assert decision["decision"] == "needs_review"
+    assert candidate_state == "needs_review"
+    assert decision_rows[-1] == (
+        "optimization_acceptance_gate",
+        "needs_review",
+        "held_out_improved",
+    )
+
+
+def test_optimize_rejects_candidate_when_held_out_gate_fails(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_state = store.connection.execute("SELECT state FROM candidates").fetchone()[0]
+        gate_decision = store.connection.execute(
+            """
+            SELECT policy, decision, reason
+            FROM decisions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert summary["decision"] == "rejected"
+    assert summary["recommendation"] == "reject"
+    assert decision["decision"] == "rejected"
+    assert decision["policy_reasons"] == ["eval report recommendation was reject"]
+    assert candidate_state == "rejected"
+    assert gate_decision == (
+        "optimization_acceptance_gate",
+        "rejected",
+        "eval report recommendation was reject",
+    )

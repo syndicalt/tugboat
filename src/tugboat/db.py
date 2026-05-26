@@ -584,6 +584,17 @@ class Store:
         self.append_audit_event("candidate.recorded", {"candidate_id": candidate_id, "audit_id": audit_id})
         return candidate_id
 
+    def update_candidate_state(self, *, candidate_id: int, state: str, reason: str) -> None:
+        self.append_audit_event(
+            "candidate.state_updated",
+            {"candidate_id": candidate_id, "state": state, "reason": reason},
+        )
+        self.connection.execute(
+            "UPDATE candidates SET state = ? WHERE id = ?",
+            (state, candidate_id),
+        )
+        self.connection.commit()
+
     def insert_eval(
         self,
         *,
