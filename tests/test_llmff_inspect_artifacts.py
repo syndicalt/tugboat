@@ -31,7 +31,7 @@ def test_inspect_manifest_writes_sidecar_artifact_with_manifest_hash(tmp_path: P
         runner=runner,
     )
 
-    artifact_path = run_dir / "llmff-inspect.json"
+    artifact_path = run_dir / "manifest" / "llmff-inspect.json"
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
     assert result.manifest_hash == artifact["manifest_hash"]
     assert result.network_required is False
@@ -52,7 +52,9 @@ def test_inspect_manifest_fails_closed_when_network_is_disallowed(tmp_path: Path
             runner=runner,
         )
 
-    assert not (tmp_path / ".sidecar" / "runs" / "run-1" / "llmff-inspect.json").exists()
+    assert not (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "manifest" / "llmff-inspect.json"
+    ).exists()
 
 
 def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
@@ -68,7 +70,9 @@ def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
             runner=runner,
         )
 
-    assert not (tmp_path / ".sidecar" / "runs" / "run-1" / "llmff-inspect.json").exists()
+    assert not (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "manifest" / "llmff-inspect.json"
+    ).exists()
 
 
 def test_write_audit_writes_deterministic_pretty_json(tmp_path: Path):

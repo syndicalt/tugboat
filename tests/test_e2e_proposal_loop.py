@@ -121,7 +121,6 @@ llmff:
     run_dir = run_dirs[-1]
     assert (run_dir / "trace-input.jsonl").exists()
     assert (run_dir / "instruction-snapshot").is_dir()
-    assert (run_dir / "llmff-inspect.json").exists()
     manifest_dir = repo / ".sidecar" / "manifests"
     assert sorted(path.name for path in manifest_dir.glob("*.yaml")) == [
         "acceptance-summary.yaml",
@@ -131,7 +130,9 @@ llmff:
         "patch-eval.yaml",
         "patch-propose.yaml",
     ]
-    inspect = json.loads((run_dir / "llmff-inspect.json").read_text(encoding="utf-8"))
+    inspect = json.loads(
+        (run_dir / "patch-eval" / "llmff-inspect.json").read_text(encoding="utf-8")
+    )
     assert inspect["manifest_path"].endswith(".sidecar/manifests/patch-eval.yaml")
     assert (run_dir / "audit.json").exists()
     assert (run_dir / "candidate.diff").exists()

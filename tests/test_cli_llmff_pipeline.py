@@ -193,9 +193,9 @@ llmff:
     assert audit["severity"] == "high"
     assert audit["confidence"] == 0.91
     assert audit["evidence_refs"] == ["ev_fake"]
-    assert (run_dir / "llmff-trace.jsonl").exists()
-    assert (run_dir / "llmff-events.jsonl").exists()
-    assert (run_dir / "checkpoint.json").exists()
+    assert (run_dir / "episode-audit" / "llmff-trace.jsonl").exists()
+    assert (run_dir / "episode-audit" / "llmff-events.jsonl").exists()
+    assert (run_dir / "episode-audit" / "checkpoint.json").exists()
     assert (run_dir / "audit.raw.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         job = store.connection.execute(
@@ -518,6 +518,44 @@ llmff:
     ]
     assert Path(llmff_inputs["drift_clusters"]) == run_dir / "drift.raw.json"
     assert (run_dir / "drift.raw.json").exists()
+
+
+def test_pipeline_preserves_per_manifest_lifecycle_artifacts(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "governance-regression"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    for stage in (
+        "instruction-index",
+        "episode-audit",
+        "drift-detect",
+        "patch-propose",
+        "patch-eval",
+    ):
+        assert (run_dir / stage / "llmff-inspect.json").exists()
+        assert (run_dir / stage / "llmff-trace.jsonl").exists()
+        assert (run_dir / stage / "llmff-events.jsonl").exists()
+        assert (run_dir / stage / "checkpoint.json").exists()
 
 
 def test_propose_rejects_malformed_llmff_bounded_edit_metadata(

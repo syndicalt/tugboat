@@ -278,7 +278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 timeout_ms=60_000,
                 retry_attempts=0,
                 retry_backoff_ms=0,
-                checkpoint_path=run_dir / "checkpoint-instruction-index.json",
+                checkpoint_path=run_dir / "instruction-index" / "checkpoint.json",
                 input_paths={
                     "instruction_snapshot": run_dir / "instruction-snapshot",
                     "policy": sidecar_dir(repo) / "policy.yaml",
@@ -1078,7 +1078,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         timeout_ms=60_000,
         retry_attempts=0,
         retry_backoff_ms=0,
-        checkpoint_path=run_dir / "checkpoint-patch-propose.json",
+        checkpoint_path=run_dir / "patch-propose" / "checkpoint.json",
         input_paths={
             "instruction_index": run_dir / "instruction-snapshot",
             "drift_clusters": drift_clusters_path,
@@ -1126,7 +1126,7 @@ def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
         timeout_ms=60_000,
         retry_attempts=0,
         retry_backoff_ms=0,
-        checkpoint_path=run_dir / "checkpoint-drift-detect.json",
+        checkpoint_path=run_dir / "drift-detect" / "checkpoint.json",
         input_paths={
             "audit_reports": run_dir / "audit.raw.json",
             "instruction_index": run_dir / "instruction-snapshot",
@@ -1405,7 +1405,7 @@ def _run_patch_eval(
         timeout_ms=60_000,
         retry_attempts=0,
         retry_backoff_ms=0,
-        checkpoint_path=run_dir / "checkpoint-patch-eval.json",
+        checkpoint_path=run_dir / "patch-eval" / "checkpoint.json",
         input_paths={
             "candidate_patch": run_dir / "candidate.raw.json",
             "eval_suite": suite_path,

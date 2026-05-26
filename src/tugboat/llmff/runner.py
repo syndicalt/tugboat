@@ -64,11 +64,13 @@ class LlmffRunSupervisor:
         input_paths: dict[str, Path] | None = None,
         output_paths: dict[str, Path] | None = None,
     ) -> RunResult:
-        trace_path = run_dir / "llmff-trace.jsonl"
-        events_path = run_dir / "llmff-events.jsonl"
-        actual_checkpoint_path = checkpoint_path or run_dir / "checkpoint.json"
+        lifecycle_dir = _manifest_lifecycle_dir(run_dir, manifest_path)
+        trace_path = lifecycle_dir / "llmff-trace.jsonl"
+        events_path = lifecycle_dir / "llmff-events.jsonl"
+        actual_checkpoint_path = checkpoint_path or lifecycle_dir / "checkpoint.json"
         outputs = dict(output_paths or {})
         run_dir.mkdir(parents=True, exist_ok=True)
+        lifecycle_dir.mkdir(parents=True, exist_ok=True)
         _reject_checkpoint_mismatch(actual_checkpoint_path, manifest_path)
         _validate_output_paths(run_dir, outputs)
         for path in outputs.values():
@@ -201,6 +203,10 @@ def _manifest_hash(manifest_path: Path) -> str:
     return hashlib.sha256(manifest_path.read_bytes()).hexdigest()
 
 
+def _manifest_lifecycle_dir(run_dir: Path, manifest_path: Path) -> Path:
+    return run_dir / manifest_path.stem
+
+
 def _network_required(inspect_payload: dict[str, Any]) -> bool:
     return bool(
         inspect_payload.get("network_required")
@@ -225,7 +231,7 @@ def inspect_manifest(
     manifest_digest = _manifest_hash(manifest_path)
     if policy.allowed_manifest_hashes and manifest_digest not in policy.allowed_manifest_hashes:
         raise InspectPolicyError("manifest hash is not allowed by policy")
-    artifact_path = run_dir / "llmff-inspect.json"
+    artifact_path = _manifest_lifecycle_dir(run_dir, manifest_path) / "llmff-inspect.json"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact = {
         "manifest_path": str(manifest_path),

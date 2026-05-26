@@ -42,11 +42,11 @@ def test_run_manifest_invokes_subprocess_with_file_backed_streams(
                     "run",
                     str(manifest),
                     "--trace",
-                    str(run_dir / "llmff-trace.jsonl"),
+                    str(run_dir / "episode-audit" / "llmff-trace.jsonl"),
                     "--events",
-                    str(run_dir / "llmff-events.jsonl"),
+                    str(run_dir / "episode-audit" / "llmff-events.jsonl"),
                     "--checkpoint",
-                    str(run_dir / "checkpoint.json"),
+                    str(run_dir / "episode-audit" / "checkpoint.json"),
                     "--timeout-ms",
                     "12000",
                     "--retry-attempts",
@@ -116,9 +116,9 @@ def test_successful_run_returns_exit_code_and_artifact_paths(monkeypatch, tmp_pa
     )
 
     assert result.exit_code == 0
-    assert result.trace_path == run_dir / "llmff-trace.jsonl"
-    assert result.events_path == run_dir / "llmff-events.jsonl"
-    assert result.checkpoint_path == run_dir / "checkpoint.json"
+    assert result.trace_path == run_dir / "episode-audit" / "llmff-trace.jsonl"
+    assert result.events_path == run_dir / "episode-audit" / "llmff-events.jsonl"
+    assert result.checkpoint_path == run_dir / "episode-audit" / "checkpoint.json"
     assert result.failure_kind is None
     assert result.failure_message is None
 
@@ -217,7 +217,9 @@ def test_run_manifest_rejects_checkpoint_for_different_manifest(tmp_path: Path):
     manifest.write_text("name: episode-audit\n", encoding="utf-8")
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "checkpoint.json").write_text(
+    checkpoint_path = run_dir / "episode-audit" / "checkpoint.json"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_text(
         json.dumps({"manifest_hash": "different"}) + "\n",
         encoding="utf-8",
     )
