@@ -104,6 +104,54 @@ def test_ingest_codex_session_maps_response_item_envelopes(tmp_path: Path):
     assert episode.final_answer == "Done"
 
 
+def test_ingest_codex_session_maps_custom_tool_response_items(tmp_path: Path):
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call",
+                            "call_id": "call-1",
+                            "name": "apply_patch",
+                            "input": "*** Begin Patch\n*** End Patch\n",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call_output",
+                            "call_id": "call-1",
+                            "output": "Success. Updated the following files:\nM CODEX.md\n",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_codex_session(session)
+
+    assert episode.tool_calls[0].payload == {
+        "type": "tool_call",
+        "tool": "apply_patch",
+        "call_id": "call-1",
+        "arguments": "*** Begin Patch\n*** End Patch\n",
+    }
+    assert episode.command_outputs[0].payload == {
+        "type": "tool_result",
+        "tool": "apply_patch",
+        "call_id": "call-1",
+        "output": "Success. Updated the following files:\nM CODEX.md\n",
+    }
+
+
 def test_ingest_codex_session_maps_session_meta_base_instructions(tmp_path: Path):
     session = tmp_path / "codex-session.jsonl"
     session.write_text(

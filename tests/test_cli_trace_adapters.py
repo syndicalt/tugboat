@@ -267,6 +267,63 @@ def test_audit_cli_ingests_codex_response_item_envelopes(tmp_path: Path):
     assert json.loads(rows[2][1])["output"] == "1 failed"
 
 
+def test_audit_cli_ingests_codex_custom_tool_response_items(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "codex.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call",
+                            "call_id": "call-1",
+                            "name": "apply_patch",
+                            "input": "*** Begin Patch\n*** End Patch\n",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call_output",
+                            "call_id": "call-1",
+                            "output": "Success. Updated the following files:\nM CODEX.md\n",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "codex",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == ["tool_call", "tool_result"]
+    assert json.loads(rows[0][1])["tool"] == "apply_patch"
+    assert json.loads(rows[1][1])["output"] == "Success. Updated the following files:\nM CODEX.md\n"
+
+
 def test_audit_cli_ingests_codex_session_meta_instruction_snapshot(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

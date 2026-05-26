@@ -146,18 +146,19 @@ def _normalize_codex_response_item(
             return {"type": "user_request", "content": content}
         if role == "assistant":
             return {"type": "final_answer", "content": content}
-    if item_type == "function_call":
+    if item_type in {"function_call", "custom_tool_call"}:
         call_id = str(payload.get("call_id", ""))
         tool = str(payload.get("name", "unknown"))
         if call_id:
             tool_names_by_call_id[call_id] = tool
+        arguments = payload.get("arguments", payload.get("input", ""))
         return {
             "type": "tool_call",
             "tool": tool,
             "call_id": call_id,
-            "arguments": str(payload.get("arguments", "")),
+            "arguments": str(arguments),
         }
-    if item_type == "function_call_output":
+    if item_type in {"function_call_output", "custom_tool_call_output"}:
         call_id = str(payload.get("call_id", ""))
         return {
             "type": "tool_result",
