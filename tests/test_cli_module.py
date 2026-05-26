@@ -21,6 +21,22 @@ def test_cli_module_can_run_from_source_tree():
     assert "tugboat: ok" in completed.stdout
 
 
+def test_package_module_can_run_from_source_tree():
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path.cwd() / "src")
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "tugboat", "doctor"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "tugboat: ok" in completed.stdout
+
+
 def test_cli_module_can_run_audit_from_source_tree(tmp_path: Path):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path.cwd() / "src")
