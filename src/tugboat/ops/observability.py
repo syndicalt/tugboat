@@ -11,6 +11,7 @@ def summarize_observability(
     jobs: Iterable[dict[str, Any]] = (),
     evals: Iterable[dict[str, Any]] = (),
     corpus_snapshots: Iterable[dict[str, Any]] = (),
+    harness_findings: Iterable[str] = (),
 ) -> dict[str, Any]:
     run_items = list(runs)
     return {
@@ -20,6 +21,7 @@ def summarize_observability(
         "eval_suite_trends": _eval_suite_trends(evals),
         "corpus_growth": _corpus_growth(corpus_snapshots),
         "provider_backend_failure_rate": _provider_backend_failure_rate(run_items),
+        "duplicate_rule_count": _duplicate_rule_count(harness_findings),
     }
 
 
@@ -130,6 +132,14 @@ def _provider_backend_failure_rate(runs: list[dict[str, Any]]) -> dict[str, int 
         "rate": _round(failed / total) if total else 0,
         "total": total,
     }
+
+
+def _duplicate_rule_count(harness_findings: Iterable[str]) -> int:
+    return sum(
+        1
+        for finding in harness_findings
+        if str(finding).startswith("Duplicate instruction rule appears ")
+    )
 
 
 def _parse_datetime(value: str) -> datetime:

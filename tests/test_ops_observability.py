@@ -60,6 +60,11 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
             {"captured_at": "2026-05-25T09:00:00Z", "document_count": 8},
             {"captured_at": "2026-05-25T12:00:00Z", "document_count": 11},
         ],
+        harness_findings=[
+            "Duplicate instruction rule appears 2 times: run tests.",
+            "CODEX.md has no repo-local markdown references; keep instruction files as short maps.",
+            "Duplicate instruction rule appears 3 times: cite evidence.",
+        ],
     )
 
     json.dumps(summary)
@@ -94,3 +99,4 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "rate": 0.666667,
         "total": 3,
     }
+    assert summary["duplicate_rule_count"] == 2
