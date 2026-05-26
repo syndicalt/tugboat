@@ -85,6 +85,27 @@ def test_learning_rate_budget_rejects_oversized_candidate():
     )
 
 
+def test_learning_rate_budget_rejects_too_many_sections_touched():
+    candidate = OptimizationCandidate(
+        candidate_id="cand-1",
+        edits=(
+            BoundedEdit("add", "CODEX.md", "Testing", changed_lines=1, normative_changes=0),
+            BoundedEdit("annotate", "CODEX.md", "Review", changed_lines=1, normative_changes=0),
+        ),
+        trigger_score=ScoreSet(0.8, 0.0, True),
+        held_out_score=ScoreSet(0.9, 0.0, True),
+    )
+
+    decision = evaluate_candidate(
+        candidate,
+        baseline=ScoreSet(0.5, 0.0, True),
+        budget=LearningRateBudget(max_sections_touched=1),
+    )
+
+    assert decision.accepted is False
+    assert decision.reasons == ("max_sections_touched_exceeded",)
+
+
 def test_learning_rate_budget_enforces_operator_specific_risk_limits():
     candidate = OptimizationCandidate(
         candidate_id="cand-1",

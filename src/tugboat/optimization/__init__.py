@@ -38,6 +38,7 @@ class BoundedEdit:
 @dataclass(frozen=True)
 class LearningRateBudget:
     max_files_touched: int = 2
+    max_sections_touched: int = 4
     max_changed_lines: int = 20
     max_normative_changes: int = 2
     operator_risk_limits: dict[str, int] = field(default_factory=dict)
@@ -246,11 +247,14 @@ def rank_candidates(run: OptimizationRun) -> tuple[OptimizationDecision, ...]:
 def _budget_reasons(candidate: OptimizationCandidate, budget: LearningRateBudget) -> tuple[str, ...]:
     reasons: list[str] = []
     files = {edit.file for edit in candidate.edits}
+    sections = {(edit.file, edit.section) for edit in candidate.edits}
     changed_lines = sum(edit.changed_lines for edit in candidate.edits)
     normative_changes = sum(edit.normative_changes for edit in candidate.edits)
     operators = Counter(edit.operator for edit in candidate.edits)
     if len(files) > budget.max_files_touched:
         reasons.append("max_files_touched_exceeded")
+    if len(sections) > budget.max_sections_touched:
+        reasons.append("max_sections_touched_exceeded")
     if changed_lines > budget.max_changed_lines:
         reasons.append("max_changed_lines_exceeded")
     if normative_changes > budget.max_normative_changes:
