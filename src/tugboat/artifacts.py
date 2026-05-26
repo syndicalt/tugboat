@@ -110,6 +110,26 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "instruction_refs": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "instruction-index.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["documents"],
+        "properties": {
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "obligations"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "obligations": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    },
     "candidate.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
@@ -177,6 +197,26 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "object",
         "additionalProperties": True,
         "properties": {},
+    },
+    "drift.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["clusters"],
+        "properties": {
+            "clusters": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["cluster_id", "evidence_refs"],
+                    "properties": {
+                        "cluster_id": {"type": "string"},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
     },
     "eval-report.json": {
         "$schema": JSON_SCHEMA_URI,

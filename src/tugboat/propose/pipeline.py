@@ -186,6 +186,10 @@ def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
             )
     if run.exit_code != 0:
         raise RuntimeError(f"llmff drift-detect failed with exit code {run.exit_code}")
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("llmff drift_clusters output must be a JSON object")
+    validate_json_artifact("drift.raw.json", payload)
     return output_path
 
 

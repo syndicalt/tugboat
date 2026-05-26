@@ -129,6 +129,25 @@ def run_audit_pipeline(
                 run_dir,
                 f"instruction index run failed: {index_run.exit_code}",
             )
+        raw_instruction_index = json.loads(
+            index_run.output_paths["instruction_index"].read_text(encoding="utf-8")
+        )
+        if not isinstance(raw_instruction_index, dict):
+            return _failed_instruction_index_result(
+                repo,
+                run_dir,
+                manifest_hash=index_inspect.manifest_hash,
+                message="instruction index rejected: llmff instruction_index output must be a JSON object",
+            )
+        try:
+            validate_json_artifact("instruction-index.raw.json", raw_instruction_index)
+        except ArtifactValidationError as error:
+            return _failed_instruction_index_result(
+                repo,
+                run_dir,
+                manifest_hash=index_inspect.manifest_hash,
+                message=f"instruction index rejected: {error}",
+            )
         instruction_index_path = index_run.output_paths["instruction_index"]
     manifest = next(record.path for record in manifests if record.name == "episode-audit.yaml")
     runner = (
@@ -265,6 +284,24 @@ def _failed_audit_result(
             status="failed",
             run_dir=run_dir,
             episode_id=episode_id,
+        )
+    return AuditPipelineResult(1, run_dir, message)
+
+
+def _failed_instruction_index_result(
+    repo: Path,
+    run_dir: Path,
+    *,
+    manifest_hash: str,
+    message: str,
+) -> AuditPipelineResult:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="instruction_index",
+            manifest_hash=manifest_hash,
+            status="failed",
+            run_dir=run_dir,
         )
     return AuditPipelineResult(1, run_dir, message)
 

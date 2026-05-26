@@ -143,6 +143,13 @@ def test_validate_audit_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_instruction_index_raw_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "instruction-index.raw.json",
+        {"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]},
+    )
+
+
 def test_validate_reflection_artifact_accepts_current_schema():
     validate_json_artifact(
         "reflection.json",
@@ -150,6 +157,13 @@ def test_validate_reflection_artifact_accepts_current_schema():
             "source_ref": "audit:latest",
             "summary": "Tests were skipped because regression guidance was missing.",
         },
+    )
+
+
+def test_validate_drift_raw_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "drift.raw.json",
+        {"clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_fake"]}]},
     )
 
 

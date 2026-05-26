@@ -35,13 +35,21 @@ if args[:1] == ["run"]:
     trace.write_text('{"event":"step"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
-    if manifest == "episode-audit":
+    if manifest == "instruction-index":
+        outputs["instruction_index"].write_text(json.dumps({
+            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "episode-audit":
         outputs["audit_report"].write_text(json.dumps({
             "edit_warranted": True,
             "failure_class": "instruction_missing",
             "severity": "medium",
             "confidence": 0.82,
             "evidence_refs": ["ev_e2e"],
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "drift-detect":
+        outputs["drift_clusters"].write_text(json.dumps({
+            "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_e2e"]}]
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         repo = outputs["candidate_patch"].parents[3]

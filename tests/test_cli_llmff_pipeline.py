@@ -16,6 +16,8 @@ def _write_fake_llmff(
     bounded_edit_metadata: object | None = None,
     candidate_overrides: dict[str, object] | None = None,
     audit_report: object | None = None,
+    instruction_index: object | None = None,
+    drift_clusters: object | None = None,
     eval_report: object | None = None,
     policy_decision: object | None = None,
     acceptance_summary: object | None = None,
@@ -65,6 +67,10 @@ def _write_fake_llmff(
             "confidence": 0.91,
             "evidence_refs": ["ev_fake"],
         }
+    if instruction_index is None:
+        instruction_index = {"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]}
+    if drift_clusters is None:
+        drift_clusters = {"clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_fake"]}]}
     if acceptance_summary is None:
         acceptance_summary = {
             "decision_recommendation": "needs_review",
@@ -92,6 +98,8 @@ SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
 AUDIT_REPORT = __AUDIT_REPORT__
+INSTRUCTION_INDEX = __INSTRUCTION_INDEX__
+DRIFT_CLUSTERS = __DRIFT_CLUSTERS__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
 ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
@@ -137,15 +145,11 @@ if args[:1] == ["run"]:
         }) + "\\n", encoding="utf-8")
         raise SystemExit(7)
     if manifest == "instruction-index":
-        outputs["instruction_index"].write_text(json.dumps({
-            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
-        }) + "\\n", encoding="utf-8")
+        outputs["instruction_index"].write_text(json.dumps(INSTRUCTION_INDEX) + "\\n", encoding="utf-8")
     elif manifest == "episode-audit":
         outputs["audit_report"].write_text(json.dumps(AUDIT_REPORT) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
-        outputs["drift_clusters"].write_text(json.dumps({
-            "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_fake"]}]
-        }) + "\\n", encoding="utf-8")
+        outputs["drift_clusters"].write_text(json.dumps(DRIFT_CLUSTERS) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         import hashlib
         repo = outputs["candidate_patch"].parents[3]
@@ -179,6 +183,10 @@ raise SystemExit(64)
         ).replace(
             "__CANDIDATE_OVERRIDES__", repr(candidate_overrides)
         ).replace("__AUDIT_REPORT__", repr(audit_report)).replace(
+            "__INSTRUCTION_INDEX__", repr(instruction_index)
+        ).replace(
+            "__DRIFT_CLUSTERS__", repr(drift_clusters)
+        ).replace(
             "__EVAL_REPORT__", repr(eval_report)
         ).replace(
             "__POLICY_DECISION__", repr(policy_decision)
@@ -349,6 +357,44 @@ llmff:
         ).fetchone()[0]
     assert audits == 0
     assert run_status == "failed"
+
+
+def test_audit_rejects_malformed_llmff_instruction_index_raw_output(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        instruction_index={"documents": [{"path": 7, "obligations": ["Use tests."]}]},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert (
+        "instruction index rejected: instruction-index.raw.json field has wrong type: documents[0].path"
+        in output
+    )
+    assert (run_dir / "instruction-index.raw.json").exists()
+    assert not (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
 
 
 def test_audit_runs_instruction_index_before_episode_audit(tmp_path: Path):
@@ -642,6 +688,42 @@ llmff:
     ]
     assert Path(llmff_inputs["drift_clusters"]) == run_dir / "drift.raw.json"
     assert (run_dir / "drift.raw.json").exists()
+
+
+def test_propose_rejects_malformed_llmff_drift_raw_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        drift_clusters={"clusters": [{"cluster_id": "drift-1", "evidence_refs": [7]}]},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "drift.raw.json field has wrong type: clusters[0].evidence_refs[0]" in output
+    assert (run_dir / "drift.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
 
 
 def test_pipeline_preserves_per_manifest_lifecycle_artifacts(tmp_path: Path):
