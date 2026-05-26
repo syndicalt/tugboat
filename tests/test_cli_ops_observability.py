@@ -28,7 +28,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
                 "held_out_score": 0.9,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {},
+                "metrics": {"governance_regressions": 2},
             },
             sort_keys=True,
         )
@@ -72,7 +72,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             suite_id="all",
             report_path=eval_report,
             passed=True,
-            metrics={"held_out_score": 0.9},
+            metrics={"governance_regressions": 2, "held_out_score": 0.9},
         )
         store.insert_decision(
             candidate_id=7,
@@ -141,6 +141,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     assert summary["failure_kind_counts"] == {"provider_error": 1}
     assert summary["edits"] == {"accepted": 1, "rejected": 1, "rolled_back": 1}
     assert summary["eval_suite_trends"]["all"]["latest_score"] == 0.9
+    assert summary["governance_regression_count"] == 2
     assert summary["provider_backend_failure_rate"] == {"failed": 1, "rate": 1, "total": 1}
     assert summary["corpus_growth"] == {"earliest_count": 1, "latest_count": 1, "delta": 0}
     assert summary["duplicate_rule_count"] == 1

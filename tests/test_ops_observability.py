@@ -49,16 +49,19 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
                 "suite_id": "governance",
                 "completed_at": "2026-05-25T10:00:00Z",
                 "score": 0.7,
+                "governance_regressions": 1,
             },
             {
                 "suite_id": "governance",
                 "completed_at": "2026-05-25T11:00:00Z",
                 "score": 0.9,
+                "governance_regressions": 0,
             },
             {
                 "suite_id": "provider-smoke",
                 "completed_at": "2026-05-25T11:30:00Z",
                 "passed": False,
+                "governance_regressions": 2,
             },
         ],
         corpus_snapshots=[
@@ -106,6 +109,7 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "reviewed_count": 3,
     }
     assert summary["mean_changed_lines"] == 8
+    assert summary["governance_regression_count"] == 3
     assert summary["eval_suite_trends"]["governance"] == {
         "count": 2,
         "latest_score": 0.9,
@@ -188,6 +192,46 @@ def test_sidecar_observability_counts_llmff_job_failure_without_events(
     summary = summarize_sidecar_observability(repo)
 
     assert summary["failure_kind_counts"] == {"timeout": 1}
+
+
+def test_sidecar_observability_ignores_non_numeric_governance_regression_metric(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    run_dir = sidecar / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    eval_report = run_dir / "eval-report.json"
+    eval_report.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "suite_id": "all",
+                "passed": True,
+                "trigger_score": 0.7,
+                "held_out_score": 0.9,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": "n/a"},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.insert_eval(
+            candidate_id=7,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={},
+        )
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["governance_regression_count"] == 0
 
 
 def test_sidecar_observability_deduplicates_llmff_job_failure_with_run_event(

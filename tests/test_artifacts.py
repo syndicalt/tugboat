@@ -542,6 +542,7 @@ def test_validate_observability_summary_artifact_accepts_current_schema():
                 },
                 "mean_changed_lines": 4,
                 "eval_suite_trends": {"all": {"latest_score": 0.9}},
+                "governance_regression_count": 2,
                 "corpus_growth": {"earliest_count": 1, "latest_count": 2, "delta": 1},
                 "provider_backend_failure_rate": {"failed": 1, "rate": 1, "total": 1},
                 "duplicate_rule_count": 1,

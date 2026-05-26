@@ -22,13 +22,15 @@ def summarize_observability(
     run_items = list(runs)
     job_items = list(jobs)
     edit_counts = _edit_counts(job_items)
+    eval_items = list(evals)
     return {
         "run_duration": _run_duration_summary(run_items),
         "failure_kind_counts": dict(sorted(_failure_kind_counts(run_items).items())),
         "edits": edit_counts,
         "edit_rates": _edit_rates(edit_counts),
         "mean_changed_lines": _mean_changed_lines(job_items),
-        "eval_suite_trends": _eval_suite_trends(evals),
+        "eval_suite_trends": _eval_suite_trends(eval_items),
+        "governance_regression_count": _governance_regression_count(eval_items),
         "corpus_growth": _corpus_growth(corpus_snapshots),
         "provider_backend_failure_rate": _provider_backend_failure_rate(run_items),
         "duplicate_rule_count": _duplicate_rule_count(harness_findings),
@@ -118,6 +120,11 @@ def _sidecar_evals(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             report = json.loads(report_path.read_text(encoding="utf-8"))
             if isinstance(report, dict):
                 item["score"] = report.get("held_out_score", report.get("trigger_score"))
+                metrics = report.get("metrics")
+                if isinstance(metrics, dict):
+                    governance_regressions = _int_metric(metrics.get("governance_regressions"))
+                    if governance_regressions is not None:
+                        item["governance_regressions"] = governance_regressions
         evals.append(item)
     return evals
 
@@ -312,6 +319,21 @@ def _eval_score(item: dict[str, Any]) -> float:
     if "score" in item:
         return float(item["score"])
     return 1.0 if bool(item.get("passed")) else 0.0
+
+
+def _governance_regression_count(evals: Iterable[dict[str, Any]]) -> int:
+    count = 0
+    for item in evals:
+        governance_regressions = _int_metric(item.get("governance_regressions"))
+        if governance_regressions is not None:
+            count += governance_regressions
+    return count
+
+
+def _int_metric(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def _corpus_growth(snapshots: Iterable[dict[str, Any]]) -> dict[str, int]:
