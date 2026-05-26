@@ -1046,11 +1046,11 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
 def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> CandidatePatch:
     return CandidatePatch(
         audit_id=audit_id,
-        base_file=str(payload["base_file"]),
-        base_hash=str(payload["base_hash"]),
-        diff=str(payload["diff"]),
-        risk_class=str(payload["risk_class"]),
-        rationale=str(payload["rationale"]),
+        base_file=_required_non_empty_string(payload, "base_file", "candidate"),
+        base_hash=_required_non_empty_string(payload, "base_hash", "candidate"),
+        diff=_required_non_empty_string(payload, "diff", "candidate"),
+        risk_class=_required_non_empty_string(payload, "risk_class", "candidate"),
+        rationale=_required_non_empty_string(payload, "rationale", "candidate"),
         sources=_source_refs_from_payload(payload),
         bounded_edit_metadata=_bounded_edit_metadata_from_payload(payload),
     )

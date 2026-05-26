@@ -13,6 +13,7 @@ def _write_fake_llmff(
     eval_passed: bool = False,
     sources: object | None = None,
     bounded_edit_metadata: object | None = None,
+    candidate_overrides: dict[str, object] | None = None,
     eval_report: object | None = None,
     policy_decision: object | None = None,
 ) -> Path:
@@ -50,6 +51,8 @@ def _write_fake_llmff(
             if eval_passed
             else {"allowed": False, "reasons": ["held_out_regression"]}
         )
+    if candidate_overrides is None:
+        candidate_overrides = {}
     path.write_text(
         """#!/usr/bin/env python3
 import json
@@ -59,6 +62,7 @@ from pathlib import Path
 EVAL_PASSED = __EVAL_PASSED__
 SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
+CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
 
@@ -104,7 +108,7 @@ if args[:1] == ["run"]:
         import hashlib
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
-        outputs["candidate_patch"].write_text(json.dumps({
+        candidate_patch = {
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
             "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add llmff proposed regression guidance.\\n",
@@ -116,7 +120,9 @@ if args[:1] == ["run"]:
                 "summary": "Tests were skipped because regression guidance was missing."
             }],
             "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
-        }) + "\\n", encoding="utf-8")
+        }
+        candidate_patch.update(CANDIDATE_OVERRIDES)
+        outputs["candidate_patch"].write_text(json.dumps(candidate_patch) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
         outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
@@ -127,6 +133,8 @@ raise SystemExit(64)
             "__SOURCES__", repr(sources)
         ).replace(
             "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
+        ).replace(
+            "__CANDIDATE_OVERRIDES__", repr(candidate_overrides)
         ).replace("__EVAL_REPORT__", repr(eval_report)).replace(
             "__POLICY_DECISION__", repr(policy_decision)
         ),
@@ -449,6 +457,48 @@ llmff:
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "sources[0].trusted must be a boolean" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_count = store.connection.execute(
+            "SELECT COUNT(*) FROM candidates"
+        ).fetchone()[0]
+    assert candidate_count == 0
+
+
+def test_propose_rejects_malformed_llmff_candidate_scalar_fields(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        candidate_overrides={"base_file": ["CODEX.md"]},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "candidate.base_file is required" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
