@@ -103,19 +103,32 @@ class LlmffRunSupervisor:
         for name, path in outputs.items():
             command.extend(["--output", name, str(path)])
 
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        boundary_timeout = False
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_ms / 1000,
+            )
+        except subprocess.TimeoutExpired:
+            boundary_timeout = True
+            completed = subprocess.CompletedProcess(
+                command,
+                124,
+                stdout="",
+                stderr=f"Timed out after {timeout_ms} ms",
+            )
         if completed.returncode == 0:
             _validate_declared_outputs_exist(outputs)
         for path in (trace_path, events_path, actual_checkpoint_path, *outputs.values()):
             if path.exists():
                 scan_path(path)
         failure_kind, failure_message = (None, None)
-        if completed.returncode != 0:
+        if boundary_timeout:
+            failure_kind, failure_message = ("timeout", f"Timed out after {timeout_ms} ms")
+        elif completed.returncode != 0:
             failure_kind, failure_message = _last_run_failure(events_path)
 
         return RunResult(

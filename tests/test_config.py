@@ -237,6 +237,24 @@ llmff:
         load_policy(tmp_path)
 
 
+def test_load_policy_yaml_rejects_zero_llmff_timeout(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  timeout_ms: 0
+  retry_attempts: 0
+  retry_backoff_ms: 0
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="llmff.timeout_ms"):
+        load_policy(tmp_path)
+
+
 @pytest.mark.parametrize("raw_value", ["true", "1.5"])
 def test_load_policy_yaml_rejects_non_integer_llmff_runtime_knobs(
     tmp_path: Path,

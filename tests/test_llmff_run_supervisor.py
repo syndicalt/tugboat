@@ -60,7 +60,7 @@ def test_run_manifest_invokes_subprocess_with_file_backed_streams(
                     "250",
                 ],
             ),
-            {"check": False, "capture_output": True, "text": True},
+            {"check": False, "capture_output": True, "text": True, "timeout": 12.0},
         )
     ]
 
@@ -184,6 +184,35 @@ def test_failed_run_returns_sanitized_last_run_failed_event(
     assert result.failure_message == "Timed out after 12000 ms"
 
 
+def test_python_boundary_timeout_returns_deterministic_failure(
+    monkeypatch, tmp_path: Path
+):
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    result = run_manifest(
+        manifest,
+        run_dir=run_dir,
+        policy=Policy(),
+        timeout_ms=12_000,
+        retry_attempts=2,
+        retry_backoff_ms=250,
+    )
+
+    assert result.exit_code == 124
+    assert result.trace_path == run_dir / "episode-audit" / "llmff-trace.jsonl"
+    assert result.events_path == run_dir / "episode-audit" / "llmff-events.jsonl"
+    assert result.checkpoint_path == run_dir / "episode-audit" / "checkpoint.json"
+    assert result.output_paths == {}
+    assert result.failure_kind == "timeout"
+    assert result.failure_message == "Timed out after 12000 ms"
+
+
 def test_non_json_event_lines_are_ignored_safely(monkeypatch, tmp_path: Path):
     def fake_run(*args, **kwargs):
         events_path = Path(args[0][args[0].index("--events") + 1])
@@ -292,6 +321,30 @@ def test_run_manifest_rejects_secret_in_checkpoint(monkeypatch, tmp_path: Path):
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        run_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+
+def test_python_boundary_timeout_scans_partial_artifacts(monkeypatch, tmp_path: Path):
+    def fake_run(*args, **kwargs):
+        checkpoint_path = Path(args[0][args[0].index("--checkpoint") + 1])
+        checkpoint_path.write_text(
+            json.dumps({"token": "ghp_abcdefghijklmnopqrstuvwx"}) + "\n",
+            encoding="utf-8",
+        )
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"

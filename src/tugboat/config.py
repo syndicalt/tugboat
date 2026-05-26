@@ -47,6 +47,13 @@ def _as_non_negative_int(raw: Any, field_name: str) -> int:
     return value
 
 
+def _as_positive_int(raw: Any, field_name: str) -> int:
+    value = _as_non_negative_int(raw, field_name)
+    if value == 0:
+        raise ValueError(f"{field_name} must be positive")
+    return value
+
+
 def _as_operator_risk_limits(raw: Any) -> dict[str, int]:
     if raw is None:
         return {}
@@ -172,7 +179,7 @@ def load_policy(repo: Path) -> Policy:
         llmff_binary=str(llmff.get("binary", "llmff")),
         llmff_require_inspect=bool(llmff.get("require_inspect", True)),
         llmff_allow_network=bool(llmff.get("allow_network", False)),
-        llmff_timeout_ms=_as_non_negative_int(
+        llmff_timeout_ms=_as_positive_int(
             llmff.get("timeout_ms", Policy().llmff_timeout_ms),
             "llmff.timeout_ms",
         ),
