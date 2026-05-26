@@ -95,7 +95,7 @@ def _candidate_run(
         encoding="utf-8",
     )
     (run_dir / "policy-gate.json").write_text(
-        json.dumps({"allowed": True, "reasons": []}, indent=2) + "\n",
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}, indent=2) + "\n",
         encoding="utf-8",
     )
     (run_dir / "eval-report.json").write_text(
@@ -474,7 +474,7 @@ def test_apply_rejects_sidecar_policy_self_apply_even_when_stored_gate_passed(
         encoding="utf-8",
     )
     (run_dir / "policy-gate.json").write_text(
-        json.dumps({"allowed": True, "reasons": []}, indent=2) + "\n",
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}, indent=2) + "\n",
         encoding="utf-8",
     )
     (run_dir / "eval-report.json").write_text(
@@ -549,7 +549,7 @@ def test_apply_rejects_sidecar_audit_record_edit_even_when_stored_gate_passed(
         encoding="utf-8",
     )
     (run_dir / "policy-gate.json").write_text(
-        json.dumps({"allowed": True, "reasons": []}, indent=2) + "\n",
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}, indent=2) + "\n",
         encoding="utf-8",
     )
     (run_dir / "eval-report.json").write_text(
@@ -612,6 +612,22 @@ def test_apply_rejects_eval_report_for_different_candidate(tmp_path: Path):
     run_dir = _candidate_run(repo)
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     eval_report["candidate_id"] = 999
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+
+
+def test_apply_rejects_malformed_eval_report_artifact(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report.pop("schema_version")
     (run_dir / "eval-report.json").write_text(
         json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

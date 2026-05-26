@@ -1459,9 +1459,11 @@ def _write_apply_plan(
     if not decision.allowed:
         raise ValueError(f"policy gate rejected candidate: {', '.join(decision.reasons)}")
     policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    validate_json_artifact("policy-gate.json", policy_gate)
     if not bool(policy_gate["allowed"]):
         raise ValueError("stored policy gate rejected candidate")
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    validate_json_artifact("eval-report.json", eval_report)
     if int(eval_report["candidate_id"]) != candidate_id:
         raise ValueError("eval report candidate_id does not match candidate")
     if not bool(eval_report["passed"]):
