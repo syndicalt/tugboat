@@ -132,6 +132,7 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
                     continue
                 if validation.resume is not None:
                     resume_jobs.append(validation.resume)
+                    _record_resume_ready(repo, validation.resume)
                     continue
             final_job = process_daemon_job(repo, queue, job.id, now=config.now)
             if final_job.state is JobState.FAILED:
@@ -264,6 +265,21 @@ def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
             job_id=str(job_id),
             repo_path=repo,
             state=state.value,
+        )
+
+
+def _record_resume_ready(repo: Path, resume: dict[str, Any]) -> None:
+    checkpoint_path = Path(str(resume["checkpoint_path"]))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "daemon_job.resume_ready",
+            {
+                "job_id": str(resume["job_id"]),
+                "repo": str(repo),
+                "run_id": str(resume["run_id"]),
+                "checkpoint_path": checkpoint_path.resolve().relative_to(repo.resolve()).as_posix(),
+                "manifest_hash": str(resume["manifest_hash"]),
+            },
         )
 
 

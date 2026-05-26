@@ -542,6 +542,23 @@ def test_run_daemon_cycle_leases_checkpoint_resume_when_manifest_hash_matches(tm
     assert job.state is JobState.INSPECTING
     assert job.lease_owner == "worker-a"
     assert job.lease_expires_at == _at(40)
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        event = connection.execute(
+            """
+            SELECT payload_json
+            FROM audit_events
+            WHERE event_type = 'daemon_job.resume_ready'
+            """
+        ).fetchone()
+
+    assert event is not None
+    assert json.loads(event[0]) == {
+        "checkpoint_path": ".sidecar/runs/run-1/checkpoint.json",
+        "job_id": "1",
+        "manifest_hash": "abc123",
+        "repo": str(tmp_path),
+        "run_id": "run-1",
+    }
 
 
 def test_run_daemon_cycle_fails_checkpoint_resume_on_manifest_mismatch(tmp_path: Path):
