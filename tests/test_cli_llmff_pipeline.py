@@ -1309,6 +1309,7 @@ inputs:
   - instruction_index
 outputs:
   - drift_clusters
+  - optimizer_notes
 """.lstrip(),
         encoding="utf-8",
     )
@@ -1323,6 +1324,7 @@ inputs:
   - policy
 outputs:
   - candidate_patch
+  - proposal_rationale
 """.lstrip(),
         encoding="utf-8",
     )
@@ -1391,6 +1393,104 @@ outputs:
 
     output = capsys.readouterr().out
     assert "drift-detect.yaml missing required llmff inputs: audit_reports" in output
+
+
+def test_propose_rejects_materialized_drift_manifest_missing_required_output(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+    manifest_dir = repo / ".sidecar" / "manifests"
+    (manifest_dir / "drift-detect.yaml").write_text(
+        """
+name: drift-detect
+purpose: broken local manifest
+inputs:
+  - audit_reports
+  - instruction_index
+outputs:
+  - drift_clusters
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "drift-detect.yaml missing required llmff outputs: optimizer_notes" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
+def test_propose_rejects_materialized_patch_propose_manifest_missing_required_output(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+    manifest_dir = repo / ".sidecar" / "manifests"
+    (manifest_dir / "patch-propose.yaml").write_text(
+        """
+name: patch-propose
+purpose: broken local manifest
+inputs:
+  - instruction_index
+  - drift_clusters
+  - optimizer_notes
+  - policy
+outputs:
+  - candidate_patch
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "patch-propose.yaml missing required llmff outputs: proposal_rationale" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
 
 
 def test_propose_rejects_materialized_manifest_without_input_list(

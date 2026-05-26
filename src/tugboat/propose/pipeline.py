@@ -160,7 +160,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             "candidate_patch": run_dir / "candidate.raw.json",
             "proposal_rationale": run_dir / "proposal-rationale.raw.json",
         },
-        required_outputs={"candidate_patch"},
+        required_outputs={"candidate_patch", "proposal_rationale"},
     )
     run = run_manifest(
         manifest,
@@ -229,7 +229,7 @@ def _run_drift_detect(
             "drift_clusters": output_path,
             "optimizer_notes": optimizer_notes_path,
         },
-        required_outputs={"drift_clusters"},
+        required_outputs={"drift_clusters", "optimizer_notes"},
     )
     run = run_manifest(
         manifest,
@@ -256,14 +256,11 @@ def _run_drift_detect(
         raise RuntimeError(f"llmff drift-detect failed with exit code {run.exit_code}")
     payload = load_json_object_artifact(output_path, "drift.raw.json")
     validate_json_artifact("drift.raw.json", payload)
-    if "optimizer_notes" in run.output_paths:
-        optimizer_payload = load_json_object_artifact(
-            run.output_paths["optimizer_notes"],
-            "optimizer-notes.raw.json",
-        )
-        validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
-    else:
-        optimizer_notes_path = run_dir / "audit.json"
+    optimizer_payload = load_json_object_artifact(
+        run.output_paths["optimizer_notes"],
+        "optimizer-notes.raw.json",
+    )
+    validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
     return output_path, optimizer_notes_path
 
 
