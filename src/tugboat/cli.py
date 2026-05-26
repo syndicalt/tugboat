@@ -45,6 +45,7 @@ from tugboat.harness.checks import (
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
+from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
@@ -176,6 +177,9 @@ def build_parser() -> argparse.ArgumentParser:
     harness_cleanup.add_argument("--repo", required=True)
     ops = subcommands.add_parser("ops")
     ops_subcommands = ops.add_subparsers(dest="ops_command", required=True)
+    ops_migrate = ops_subcommands.add_parser("migrate")
+    ops_migrate.add_argument("--repo", required=True)
+    ops_migrate.add_argument("--apply", action="store_true")
     ops_observability = ops_subcommands.add_parser("observability")
     ops_observability.add_argument("--repo", required=True)
     ops_observability.add_argument("--output")
@@ -579,6 +583,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             encoding="utf-8",
         )
         print(f"observability summary: {output_path}")
+        return 0
+
+    if args.command == "ops" and args.ops_command == "migrate":
+        repo = Path(args.repo)
+        plan = execute_migration_plan(repo) if args.apply else dry_run_migration_plan(repo)
+        print(f"migration_mode: {'apply' if args.apply else 'dry-run'}")
+        print(f"current_version: {plan.current_version}")
+        print(f"target_version: {plan.target_version}")
+        for step in plan.steps:
+            print(f"step: {step.migration_id} {step.from_version}->{step.to_version}")
+        if plan.report_path is not None:
+            print(f"migration_report: {plan.report_path}")
         return 0
 
     parser.error(f"unknown command: {args.command}")
