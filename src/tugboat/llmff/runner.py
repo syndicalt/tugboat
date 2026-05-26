@@ -20,6 +20,10 @@ class OutputPathError(ValueError):
     pass
 
 
+class CheckpointPathError(ValueError):
+    pass
+
+
 class MissingOutputError(RuntimeError):
     pass
 
@@ -76,6 +80,7 @@ class LlmffRunSupervisor:
         outputs = dict(output_paths or {})
         run_dir.mkdir(parents=True, exist_ok=True)
         lifecycle_dir.mkdir(parents=True, exist_ok=True)
+        _validate_checkpoint_path(run_dir, actual_checkpoint_path)
         _reject_checkpoint_mismatch(actual_checkpoint_path, manifest_path)
         _validate_output_paths(run_dir, outputs)
         for path in outputs.values():
@@ -192,6 +197,13 @@ def _validate_output_paths(run_dir: Path, output_paths: dict[str, Path]) -> None
             path.resolve().relative_to(run_root)
         except ValueError as exc:
             raise OutputPathError("llmff output path is outside run directory") from exc
+
+
+def _validate_checkpoint_path(run_dir: Path, checkpoint_path: Path) -> None:
+    try:
+        checkpoint_path.resolve().relative_to(run_dir.resolve())
+    except ValueError as exc:
+        raise CheckpointPathError("llmff checkpoint path is outside run directory") from exc
 
 
 def _validate_declared_outputs_exist(output_paths: dict[str, Path]) -> None:

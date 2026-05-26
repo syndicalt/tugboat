@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tugboat.llmff.runner import (
+    CheckpointPathError,
     CheckpointMismatchError,
     MissingOutputError,
     OutputPathError,
@@ -285,6 +286,40 @@ def test_run_manifest_rejects_outputs_outside_run_dir(tmp_path: Path):
             retry_attempts=2,
             retry_backoff_ms=250,
             output_paths={"audit_report": tmp_path / "outside.json"},
+        )
+
+
+def test_run_manifest_rejects_checkpoint_outside_run_dir(tmp_path: Path):
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(CheckpointPathError, match="outside run directory"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            checkpoint_path=tmp_path / "outside-checkpoint.json",
+        )
+
+
+def test_run_manifest_rejects_checkpoint_path_traversal(tmp_path: Path):
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(CheckpointPathError, match="outside run directory"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            checkpoint_path=run_dir / ".." / "outside-checkpoint.json",
         )
 
 

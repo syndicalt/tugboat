@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tugboat.llmff.contracts import InspectPolicyError, InspectResult, RunResult
 from tugboat.llmff.runner import (
+    CheckpointPathError,
     FixtureLlmffRunner,
     LlmffRunSupervisor,
     SubprocessLlmffRunner,
@@ -10,6 +11,7 @@ from tugboat.llmff.runner import (
 )
 
 __all__ = [
+    "CheckpointPathError",
     "FixtureLlmffRunner",
     "InspectPolicyError",
     "InspectResult",
