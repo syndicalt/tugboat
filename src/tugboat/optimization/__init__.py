@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +40,7 @@ class LearningRateBudget:
     max_files_touched: int = 2
     max_changed_lines: int = 20
     max_normative_changes: int = 2
+    operator_risk_limits: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -224,15 +226,21 @@ def rank_candidates(run: OptimizationRun) -> tuple[OptimizationDecision, ...]:
         key=lambda candidate: candidate.held_out_score.behavior,
         reverse=True,
     )
-    return tuple(
-        evaluate_candidate(
+    evaluated = tuple(
+        (
             candidate,
-            baseline=run.baseline,
-            budget=run.budget,
-            memory=run.memory,
+            evaluate_candidate(
+                candidate,
+                baseline=run.baseline,
+                budget=run.budget,
+                memory=run.memory,
+            ),
         )
         for candidate in candidates
     )
+    accepted = tuple(candidate for candidate, decision in evaluated if decision.accepted)
+    rejected = tuple(decision for _, decision in evaluated if not decision.accepted)
+    return (*_merge_accepted_candidates(accepted, run.budget), *rejected)
 
 
 def _budget_reasons(candidate: OptimizationCandidate, budget: LearningRateBudget) -> tuple[str, ...]:
@@ -240,13 +248,67 @@ def _budget_reasons(candidate: OptimizationCandidate, budget: LearningRateBudget
     files = {edit.file for edit in candidate.edits}
     changed_lines = sum(edit.changed_lines for edit in candidate.edits)
     normative_changes = sum(edit.normative_changes for edit in candidate.edits)
+    operators = Counter(edit.operator for edit in candidate.edits)
     if len(files) > budget.max_files_touched:
         reasons.append("max_files_touched_exceeded")
     if changed_lines > budget.max_changed_lines:
         reasons.append("max_changed_lines_exceeded")
     if normative_changes > budget.max_normative_changes:
         reasons.append("max_normative_changes_exceeded")
+    for operator, count in sorted(operators.items()):
+        limit = budget.operator_risk_limits.get(operator)
+        if limit is not None and count > limit:
+            reasons.append(f"operator_risk_limit_exceeded:{operator}")
     return tuple(reasons)
+
+
+def _merge_accepted_candidates(
+    candidates: tuple[OptimizationCandidate, ...],
+    budget: LearningRateBudget,
+) -> tuple[OptimizationDecision, ...]:
+    groups: list[list[OptimizationCandidate]] = []
+    for candidate in candidates:
+        for group in groups:
+            merged = [*group, candidate]
+            if _compatible(merged) and not _budget_reasons(_merged_candidate(merged), budget):
+                group.append(candidate)
+                break
+        else:
+            groups.append([candidate])
+    return tuple(_decision_from_group(group) for group in groups)
+
+
+def _compatible(candidates: list[OptimizationCandidate]) -> bool:
+    edits = [edit for candidate in candidates for edit in candidate.edits]
+    fingerprints = {edit.fingerprint for edit in edits}
+    touched_sections = {(edit.file, edit.section) for edit in edits}
+    return len(fingerprints) == len(edits) and len(touched_sections) == len(edits)
+
+
+def _merged_candidate(candidates: list[OptimizationCandidate]) -> OptimizationCandidate:
+    edits = tuple(edit for candidate in candidates for edit in candidate.edits)
+    return OptimizationCandidate(
+        candidate_id="+".join(candidate.candidate_id for candidate in candidates),
+        edits=edits,
+        trigger_score=candidates[0].trigger_score,
+        held_out_score=candidates[0].held_out_score,
+    )
+
+
+def _decision_from_group(candidates: list[OptimizationCandidate]) -> OptimizationDecision:
+    edits = tuple(edit for candidate in candidates for edit in candidate.edits)
+    if len(candidates) == 1:
+        candidate_id = candidates[0].candidate_id
+        reasons = ("held_out_improved",)
+    else:
+        candidate_id = "merged:" + "+".join(candidate.candidate_id for candidate in candidates)
+        reasons = ("held_out_improved", "compatible_edits_merged")
+    return OptimizationDecision(
+        candidate_id,
+        True,
+        reasons,
+        tuple(edit.metadata() for edit in edits),
+    )
 
 
 def _unique(values: tuple[str, ...]) -> tuple[str, ...]:

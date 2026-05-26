@@ -85,6 +85,65 @@ def test_learning_rate_budget_rejects_oversized_candidate():
     )
 
 
+def test_learning_rate_budget_enforces_operator_specific_risk_limits():
+    candidate = OptimizationCandidate(
+        candidate_id="cand-1",
+        edits=(
+            BoundedEdit("delete", "CODEX.md", "One", changed_lines=1, normative_changes=1),
+            BoundedEdit("delete", "CODEX.md", "Two", changed_lines=1, normative_changes=1),
+        ),
+        trigger_score=ScoreSet(0.8, 0.0, True),
+        held_out_score=ScoreSet(0.9, 0.0, True),
+    )
+
+    decision = evaluate_candidate(
+        candidate,
+        baseline=ScoreSet(0.5, 0.0, True),
+        budget=LearningRateBudget(operator_risk_limits={"delete": 1}),
+    )
+
+    assert decision.accepted is False
+    assert decision.reasons == ("operator_risk_limit_exceeded:delete",)
+
+
+def test_rank_candidates_merges_compatible_accepted_edits_within_budget():
+    run = OptimizationRun(
+        baseline=ScoreSet(0.5, 0.0, True),
+        budget=LearningRateBudget(max_files_touched=1, max_changed_lines=5, max_normative_changes=2),
+        candidates=(
+            OptimizationCandidate(
+                candidate_id="testing",
+                edits=(BoundedEdit("annotate", "CODEX.md", "Testing", 1, 0),),
+                trigger_score=ScoreSet(0.6, 0.0, True),
+                held_out_score=ScoreSet(0.8, 0.0, True),
+            ),
+            OptimizationCandidate(
+                candidate_id="review",
+                edits=(BoundedEdit("add", "CODEX.md", "Review", 2, 1),),
+                trigger_score=ScoreSet(0.6, 0.0, True),
+                held_out_score=ScoreSet(0.7, 0.0, True),
+            ),
+            OptimizationCandidate(
+                candidate_id="harmful",
+                edits=(BoundedEdit("demote", "CODEX.md", "Approval", 1, 1),),
+                trigger_score=ScoreSet(0.8, 0.0, True),
+                held_out_score=ScoreSet(0.9, 0.0, False),
+            ),
+        ),
+    )
+
+    ranked = rank_candidates(run)
+
+    assert ranked[0].candidate_id == "merged:testing+review"
+    assert ranked[0].accepted is True
+    assert ranked[0].reasons == ("held_out_improved", "compatible_edits_merged")
+    assert ranked[0].operator_metadata == (
+        {"operator": "annotate", "file": "CODEX.md", "section": "Testing"},
+        {"operator": "add", "file": "CODEX.md", "section": "Review"},
+    )
+    assert [decision.candidate_id for decision in ranked[1:]] == ["harmful"]
+
+
 def test_rejected_edit_memory_suppresses_later_matching_candidates():
     memory = OptimizationMemory()
     rejected = OptimizationCandidate(
