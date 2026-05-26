@@ -644,6 +644,10 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "suite_id": {"type": "string"},
             "trigger_score": {"type": "number"},
             "validation_baseline_score": {"type": ["number", "null"]},
+            "acceptance_decision_recommendation": {"type": "string"},
+            "acceptance_evidence": {"type": "array", "items": {"type": "string"}},
+            "acceptance_reasons": {"type": "array", "items": {"type": "string"}},
+            "acceptance_summary_path": {"type": "string"},
             "accepted_bounded_edit_metadata": {
                 "type": "array",
                 "minItems": 1,
@@ -666,6 +670,8 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+            "reviewer_checklist": {"type": "array", "items": {"type": "string"}},
+            "rollback_command": {"type": "array", "items": {"type": "string"}},
         },
     },
     "observability-summary.json": {
@@ -1177,6 +1183,18 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
         if field_schema is None:
             continue
         _validate_schema_value(name, field, field_schema, value)
+    if name == "optimization-summary.json" and payload.get("decision") == "needs_review":
+        for field in (
+            "acceptance_decision_recommendation",
+            "acceptance_evidence",
+            "acceptance_reasons",
+            "acceptance_summary_path",
+            "accepted_bounded_edit_metadata",
+            "reviewer_checklist",
+            "rollback_command",
+        ):
+            if field not in payload:
+                raise ArtifactValidationError(f"{name} missing required field: {field}")
 
 
 def validate_report_markdown(text: str) -> None:

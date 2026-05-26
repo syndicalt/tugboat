@@ -421,6 +421,10 @@ def test_validate_optimization_summary_artifact_accepts_current_schema():
             "suite_id": "held-out",
             "trigger_score": 0.7,
             "validation_baseline_score": None,
+            "acceptance_decision_recommendation": "needs_review",
+            "acceptance_evidence": ["audit:1"],
+            "acceptance_reasons": ["policy gate and eval report passed"],
+            "acceptance_summary_path": ".sidecar/runs/run-1/acceptance-summary.raw.json",
             "accepted_bounded_edit_metadata": [
                 {
                     "changed_lines": 1,
@@ -430,6 +434,8 @@ def test_validate_optimization_summary_artifact_accepts_current_schema():
                     "section": "Testing",
                 }
             ],
+            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         },
     )
 

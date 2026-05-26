@@ -11,7 +11,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from tugboat.artifacts import ArtifactValidationError, SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import (
+    ArtifactValidationError,
+    SCHEMA_VERSION,
+    load_json_object_artifact,
+    validate_json_artifact,
+)
 from tugboat.audit.pipeline import run_audit_pipeline
 from tugboat.auto_apply import (
     AutoApplyCandidate,
@@ -1673,6 +1678,17 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
             else:
                 reason = "accepted candidate missing bounded edit metadata"
 
+    acceptance_summary: dict[str, object] | None = None
+    acceptance_summary_path = run_dir / "acceptance-summary.raw.json"
+    if decision == "needs_review":
+        if not acceptance_summary_path.exists():
+            raise ArtifactValidationError("acceptance-summary.raw.json is required for needs_review")
+        acceptance_summary = load_json_object_artifact(
+            acceptance_summary_path,
+            "acceptance-summary.raw.json",
+        )
+        validate_json_artifact("acceptance-summary.raw.json", acceptance_summary)
+
     _merge_json(
         run_dir / "decision.json",
         {
@@ -1725,6 +1741,18 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
     }
     if decision == "needs_review":
         summary["accepted_bounded_edit_metadata"] = accepted_bounded_edit_metadata
+        if acceptance_summary is None:
+            raise ArtifactValidationError("acceptance-summary.raw.json is required for needs_review")
+        summary.update(
+            {
+                "acceptance_decision_recommendation": acceptance_summary["decision_recommendation"],
+                "acceptance_evidence": acceptance_summary["evidence"],
+                "acceptance_reasons": acceptance_summary["reasons"],
+                "acceptance_summary_path": acceptance_summary_path.relative_to(repo).as_posix(),
+                "reviewer_checklist": acceptance_summary["reviewer_checklist"],
+                "rollback_command": acceptance_summary["rollback_command"],
+            }
+        )
     validate_json_artifact("optimization-summary.json", summary)
     (run_dir / "optimization-summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",

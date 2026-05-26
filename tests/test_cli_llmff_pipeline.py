@@ -2,6 +2,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+from tugboat.artifacts import ArtifactValidationError
 from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
@@ -2407,6 +2410,10 @@ llmff:
         "suite_id": "held-out",
         "trigger_score": 0.7,
         "validation_baseline_score": None,
+        "acceptance_decision_recommendation": "needs_review",
+        "acceptance_evidence": ["audit:1"],
+        "acceptance_reasons": ["policy gate and eval report passed"],
+        "acceptance_summary_path": f".sidecar/runs/{run_dir.name}/acceptance-summary.raw.json",
         "accepted_bounded_edit_metadata": [
             {
                 "changed_lines": 1,
@@ -2416,6 +2423,8 @@ llmff:
                 "section": "Testing",
             }
         ],
+        "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+        "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
     }
     assert decision["decision"] == "needs_review"
     assert candidate_state == "needs_review"
@@ -2481,6 +2490,63 @@ def test_optimization_summary_rejects_accepted_eval_without_bounded_edit_metadat
     assert summary["decision"] == "rejected"
     assert "accepted_bounded_edit_metadata" not in summary
     assert decision["policy_reasons"] == ["accepted candidate missing bounded edit metadata"]
+
+
+def test_optimization_summary_requires_acceptance_summary_for_needs_review(tmp_path: Path):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": 7,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "risk_class": "instruction_clarification",
+                "bounded_edit_metadata": [
+                    {
+                        "changed_lines": 1,
+                        "file": "CODEX.md",
+                        "normative_changes": 0,
+                        "operator": "add",
+                        "section": "Testing",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "decision.json").write_text(
+        json.dumps({"candidate_id": 7, "decision": "needs_review"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "governance_passed": True,
+                "held_out_score": 0.9,
+                "metrics": {"governance_regressions": 0},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "held-out",
+                "trigger_score": 0.7,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ArtifactValidationError, match="acceptance-summary.raw.json"):
+        _write_optimization_summary(repo, run_dir, suite_id="held-out")
+
+    assert not (run_dir / "optimization-summary.json").exists()
 
 
 def test_optimize_passes_policy_llmff_runtime_knobs_to_all_manifests(tmp_path: Path):

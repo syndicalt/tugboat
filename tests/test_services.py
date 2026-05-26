@@ -203,6 +203,21 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
                 "suite_id": "provider-smoke",
                 "trigger_score": 0.84,
                 "validation_baseline_score": None,
+                "acceptance_decision_recommendation": "needs_review",
+                "acceptance_evidence": ["audit:1"],
+                "acceptance_reasons": ["policy gate and eval report passed"],
+                "acceptance_summary_path": ".sidecar/runs/run-1/acceptance-summary.raw.json",
+                "accepted_bounded_edit_metadata": [
+                    {
+                        "changed_lines": 1,
+                        "file": "CODEX.md",
+                        "normative_changes": 0,
+                        "operator": "add",
+                        "section": "Testing",
+                    }
+                ],
+                "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
             }
         )
         + "\n",
