@@ -172,6 +172,12 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "candidate.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {},
+    },
     "eval-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
@@ -199,6 +205,18 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "trigger_score": {"type": "number"},
             "live_provider_required": {"type": "boolean"},
         },
+    },
+    "eval-report.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {},
+    },
+    "policy-decision.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {},
     },
     "candidate-preview.json": {
         "$schema": JSON_SCHEMA_URI,

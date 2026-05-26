@@ -237,11 +237,13 @@ def _run_patch_eval(
     eval_payload = json.loads(run.output_paths["eval_report"].read_text(encoding="utf-8"))
     if not isinstance(eval_payload, dict):
         raise ValueError("llmff eval_report output must be a JSON object")
+    validate_json_artifact("eval-report.raw.json", eval_payload)
     raw_policy_decision_payload = json.loads(
         run.output_paths["policy_decision"].read_text(encoding="utf-8")
     )
     if not isinstance(raw_policy_decision_payload, dict):
         raise ValueError("llmff policy_decision output must be a JSON object")
+    validate_json_artifact("policy-decision.raw.json", raw_policy_decision_payload)
     return eval_payload, raw_policy_decision_payload
 
 

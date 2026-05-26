@@ -150,6 +150,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     payload = json.loads(run.output_paths["candidate_patch"].read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("llmff candidate_patch output must be a JSON object")
+    validate_json_artifact("candidate.raw.json", payload)
     _validate_reflections_from_payload(payload)
     return _candidate_from_payload(payload, audit_id=audit_id)
 
