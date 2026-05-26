@@ -826,6 +826,19 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "retention-report.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "mode", "status", "candidates", "deleted"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "mode": {"type": "string", "enum": ["dry-run", "apply"]},
+            "status": {"type": "string", "enum": ["planned", "complete"]},
+            "candidates": {"type": "array", "items": {"type": "string"}},
+            "deleted": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

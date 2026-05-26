@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import sys
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -257,10 +258,37 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "retention":
         repo = Path(args.repo)
-        result = apply_retention_policy(repo, load_policy(repo), dry_run=not args.apply)
+        policy = load_policy(repo)
+        if args.apply:
+            preflight = apply_retention_policy(repo, policy, dry_run=True)
+            report_path = _write_retention_report(
+                repo,
+                mode="apply",
+                status="planned",
+                candidates=preflight.candidates,
+                deleted=(),
+            )
+            result = apply_retention_policy(repo, policy, dry_run=False)
+            report_path = _write_retention_report(
+                repo,
+                mode="apply",
+                status="complete",
+                candidates=result.candidates,
+                deleted=result.deleted,
+            )
+        else:
+            result = apply_retention_policy(repo, policy, dry_run=True)
+            report_path = _write_retention_report(
+                repo,
+                mode="dry-run",
+                status="complete",
+                candidates=result.candidates,
+                deleted=result.deleted,
+            )
         print(f"retention_mode: {'apply' if args.apply else 'dry-run'}")
         print(f"candidates: {len(result.candidates)}")
         print(f"deleted: {len(result.deleted)}")
+        print(f"retention_report: {report_path}")
         for candidate in result.candidates:
             print(f"candidate: {candidate}")
         for deleted in result.deleted:
@@ -648,6 +676,34 @@ def _write_ops_command_bundle(path: Path, bundle: dict[str, object]) -> None:
     validate_json_artifact("ops-command-bundle.json", payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_retention_report(
+    repo: Path,
+    *,
+    mode: str,
+    status: str,
+    candidates: Sequence[str],
+    deleted: Sequence[str],
+) -> Path:
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": mode,
+        "status": status,
+        "candidates": list(candidates),
+        "deleted": list(deleted),
+    }
+    validate_json_artifact("retention-report.json", payload)
+    path = sidecar_dir(repo) / "ops" / "retention" / "retention-report.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        temp_path.replace(path)
+    except OSError:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return path
 
 
 def console_main() -> None:

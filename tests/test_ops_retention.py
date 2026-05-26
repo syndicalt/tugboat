@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import json
 import time
 from pathlib import Path
 
+import pytest
+
 from tugboat.models import Policy
-from tugboat.cli import main
+from tugboat.cli import _write_retention_report, main
 from tugboat.ops.retention import apply_retention_policy
 
 
@@ -120,9 +123,24 @@ retention:
         "retention_mode: dry-run",
         "candidates: 2",
         "deleted: 0",
+        f"retention_report: {tmp_path / '.sidecar' / 'ops' / 'retention' / 'retention-report.json'}",
         "candidate: .sidecar/runs/run-1/episode-audit/checkpoint.json",
         "candidate: .sidecar/runs/run-1/trace-input.jsonl",
     ]
+    assert json.loads(
+        (tmp_path / ".sidecar" / "ops" / "retention" / "retention-report.json").read_text(
+            encoding="utf-8"
+        )
+    ) == {
+        "schema_version": 1,
+        "mode": "dry-run",
+        "status": "complete",
+        "candidates": [
+            ".sidecar/runs/run-1/episode-audit/checkpoint.json",
+            ".sidecar/runs/run-1/trace-input.jsonl",
+        ],
+        "deleted": [],
+    }
     assert (run_dir / "trace-input.jsonl").exists()
     assert (run_dir / "episode-audit" / "checkpoint.json").exists()
 
@@ -152,10 +170,140 @@ retention:
         "retention_mode: apply",
         "candidates: 2",
         "deleted: 2",
+        f"retention_report: {tmp_path / '.sidecar' / 'ops' / 'retention' / 'retention-report.json'}",
         "candidate: .sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
         "candidate: .sidecar/runs/run-1/trace-redacted.jsonl",
         "deleted: .sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
         "deleted: .sidecar/runs/run-1/trace-redacted.jsonl",
     ]
+    assert json.loads(
+        (tmp_path / ".sidecar" / "ops" / "retention" / "retention-report.json").read_text(
+            encoding="utf-8"
+        )
+    ) == {
+        "schema_version": 1,
+        "mode": "apply",
+        "status": "complete",
+        "candidates": [
+            ".sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
+            ".sidecar/runs/run-1/trace-redacted.jsonl",
+        ],
+        "deleted": [
+            ".sidecar/runs/run-1/episode-audit/llmff-events.jsonl",
+            ".sidecar/runs/run-1/trace-redacted.jsonl",
+        ],
+    }
     assert not (run_dir / "trace-redacted.jsonl").exists()
     assert not (run_dir / "episode-audit" / "llmff-events.jsonl").exists()
+
+
+def test_retention_cli_apply_preflights_report_before_deleting(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+  checkpoints_days: 7
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    trace = run_dir / "trace-input.jsonl"
+    _touch_old(trace, days_old=15)
+
+    def fail_report(*args, **kwargs):
+        raise PermissionError("report destination unavailable")
+
+    monkeypatch.setattr("tugboat.cli._write_retention_report", fail_report)
+
+    with pytest.raises(PermissionError, match="report destination unavailable"):
+        main(["retention", "--repo", str(tmp_path), "--apply"])
+
+    assert trace.exists()
+
+
+def test_retention_cli_apply_leaves_planned_report_if_final_write_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    trace = run_dir / "trace-input.jsonl"
+    _touch_old(trace, days_old=15)
+
+    real_replace = Path.replace
+    replace_count = 0
+
+    def fail_final_retention_report_replace(self, target):
+        nonlocal replace_count
+        if Path(target).name == "retention-report.json":
+            replace_count += 1
+            if replace_count == 2:
+                raise PermissionError("final report unavailable")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_final_retention_report_replace)
+
+    with pytest.raises(PermissionError, match="final report unavailable"):
+        main(["retention", "--repo", str(tmp_path), "--apply"])
+
+    assert not trace.exists()
+    assert json.loads(
+        (tmp_path / ".sidecar" / "ops" / "retention" / "retention-report.json").read_text(
+            encoding="utf-8"
+        )
+    ) == {
+        "schema_version": 1,
+        "mode": "apply",
+        "status": "planned",
+        "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
+        "deleted": [],
+    }
+
+
+def test_retention_report_writes_use_unique_temp_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    real_replace = Path.replace
+    temp_names: list[str] = []
+
+    def record_replace(self, target):
+        if Path(target).name == "retention-report.json":
+            temp_names.append(self.name)
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", record_replace)
+
+    _write_retention_report(
+        tmp_path,
+        mode="dry-run",
+        status="complete",
+        candidates=(),
+        deleted=(),
+    )
+    _write_retention_report(
+        tmp_path,
+        mode="dry-run",
+        status="complete",
+        candidates=(".sidecar/runs/run-1/trace-input.jsonl",),
+        deleted=(),
+    )
+
+    assert len(temp_names) == 2
+    assert len(set(temp_names)) == 2
+    assert ".retention-report.json.tmp" not in temp_names

@@ -648,6 +648,46 @@ def test_validate_ops_command_bundle_rejects_command_without_argv():
         )
 
 
+def test_validate_retention_report_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "retention-report.json",
+        {
+            "schema_version": 1,
+            "mode": "dry-run",
+            "status": "complete",
+            "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
+            "deleted": [],
+        },
+    )
+
+
+def test_validate_retention_report_rejects_unknown_status():
+    with pytest.raises(ArtifactValidationError, match="status"):
+        validate_json_artifact(
+            "retention-report.json",
+            {
+                "schema_version": 1,
+                "mode": "apply",
+                "status": "maybe-complete",
+                "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
+                "deleted": [],
+            },
+        )
+
+
+def test_validate_retention_report_rejects_apply_mode_without_deleted_list():
+    with pytest.raises(ArtifactValidationError, match="deleted"):
+        validate_json_artifact(
+            "retention-report.json",
+            {
+                "schema_version": 1,
+                "mode": "apply",
+                "status": "complete",
+                "candidates": [".sidecar/runs/run-1/trace-input.jsonl"],
+            },
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 
