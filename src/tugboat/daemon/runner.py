@@ -116,6 +116,7 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
                     continue
                 if validation.resume is not None:
                     resume_jobs.append(validation.resume)
+                    continue
             final_job = process_daemon_job(repo, queue, job.id, now=config.now)
             if final_job.state is JobState.FAILED:
                 failed_jobs.append({"job_id": job.id, "reason": "job_failed"})

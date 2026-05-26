@@ -356,7 +356,7 @@ def test_run_daemon_cycle_fails_corrupt_queue_payload_without_crashing(
     assert tuple(row) == (JobState.FAILED.value, 0, None, None)
 
 
-def test_run_daemon_cycle_requeues_checkpoint_resume_when_manifest_hash_matches(tmp_path: Path):
+def test_run_daemon_cycle_leases_checkpoint_resume_when_manifest_hash_matches(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     checkpoint = run_dir / "checkpoint.json"
@@ -391,6 +391,14 @@ def test_run_daemon_cycle_requeues_checkpoint_resume_when_manifest_hash_matches(
             "manifest_hash": "abc123",
         }
     ]
+    assert result["failed_jobs"] == []
+    assert result["processed_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.get_job(1)
+    assert job is not None
+    assert job.state is JobState.INSPECTING
+    assert job.lease_owner == "worker-a"
+    assert job.lease_expires_at == _at(40)
 
 
 def test_run_daemon_cycle_fails_checkpoint_resume_on_manifest_mismatch(tmp_path: Path):
