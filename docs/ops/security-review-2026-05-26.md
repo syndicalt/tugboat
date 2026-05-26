@@ -9,7 +9,9 @@ verification_status: verified
 
 Release: Tugboat 0.1.0 proposal-only MVP.
 
-Commit reviewed: `73fa0bc`.
+Build/code artifact commit reviewed: `73fa0bc`.
+
+Release evidence is maintained in the release documentation commits after that build artifact.
 
 Wheel reviewed: `dist/tugboat-0.1.0-py3-none-any.whl`.
 
