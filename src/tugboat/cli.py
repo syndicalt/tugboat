@@ -1462,7 +1462,7 @@ def _write_apply_plan(
     if not bool(eval_report["passed"]):
         raise ValueError("eval report did not pass")
     _assert_eval_acceptance(eval_report, policy_gate)
-    explicit_human_review = _requires_explicit_human_review(candidate.risk_class)
+    explicit_human_review = bool(decision.review_required_reasons)
     if explicit_human_review and (not human_review or review_actor == "tugboat"):
         raise ValueError("Class C candidates require explicit human review")
     if auto_apply and mode != "commit":
@@ -2011,11 +2011,6 @@ def _apply_applied_event_payload(
 
 def _relative_repo_path(repo: Path, path: Path) -> str:
     return path.resolve().relative_to(repo.resolve()).as_posix()
-
-
-def _requires_explicit_human_review(risk_class: str) -> bool:
-    normalized = risk_class.strip().lower().replace("-", "_").replace(" ", "_")
-    return normalized in {"c", "class_c", "restricted_policy_change"}
 
 
 def _read_optional_json_object(path: Path) -> dict[str, object] | None:

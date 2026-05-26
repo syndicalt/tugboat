@@ -8,6 +8,8 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 import tugboat.cli as cli_module
 from tugboat.cli import main
 from tugboat.db import Store
@@ -1337,9 +1339,10 @@ def test_apply_pr_mode_cleans_generated_branch_when_commit_fails(
     assert not (run_dir / "apply-plan.json").exists()
 
 
-def test_apply_class_c_requires_explicit_human_review(tmp_path: Path):
+@pytest.mark.parametrize("risk_class", ["restricted_policy_change", "network_access"])
+def test_apply_class_c_requires_explicit_human_review(tmp_path: Path, risk_class: str):
     repo = _init_repo(tmp_path)
-    run_dir = _candidate_run(repo, risk_class="restricted_policy_change")
+    run_dir = _candidate_run(repo, risk_class=risk_class)
 
     assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
     assert not (run_dir / "apply-plan.json").exists()
