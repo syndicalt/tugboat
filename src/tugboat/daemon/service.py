@@ -53,6 +53,13 @@ def daemon_status(repo: Path, *, kill_switch: KillSwitch | None = None) -> dict[
 
 
 def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
+    if config.kill_switch is not None and config.kill_switch.is_enabled():
+        return {
+            "processed": False,
+            "job_id": None,
+            "final_state": None,
+            "recovered_jobs": [],
+        }
     queue = DaemonQueue.open_sidecar(repo)
     try:
         recovered = queue.mark_stale_leases(

@@ -206,6 +206,43 @@ def test_run_daemon_once_respects_read_only_kill_switch(tmp_path: Path):
         assert queue.get_job(job.id).state is JobState.QUEUED  # type: ignore[union-attr]
 
 
+def test_run_daemon_once_read_only_kill_switch_blocks_stale_lease_recovery(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+        queue.acquire_next(
+            lease_owner="worker-a",
+            lease_duration=timedelta(seconds=5),
+            now=_at(10),
+        )
+    kill_switch = tmp_path / ".sidecar" / "read-only.kill"
+    kill_switch.parent.mkdir(parents=True, exist_ok=True)
+    kill_switch.write_text("enabled\n", encoding="utf-8")
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-b",
+            lease_duration=timedelta(seconds=30),
+            kill_switch=FileKillSwitch(kill_switch),
+            now=_at(20),
+        ),
+    )
+
+    assert result == {
+        "processed": False,
+        "job_id": None,
+        "final_state": None,
+        "recovered_jobs": [],
+    }
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        leased = queue.get_job(job.id)
+        assert leased is not None
+        assert leased.state is JobState.INSPECTING
+        assert leased.lease_owner == "worker-a"
+
+
 def test_run_daemon_once_fails_unknown_job_kind_without_processing_success(
     tmp_path: Path,
 ):
