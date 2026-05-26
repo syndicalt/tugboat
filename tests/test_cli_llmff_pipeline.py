@@ -266,7 +266,10 @@ if args[:1] == ["run"]:
         else:
             outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
     elif manifest == "acceptance-summary":
-        outputs["acceptance_summary"].write_text(json.dumps(ACCEPTANCE_SUMMARY) + "\\n", encoding="utf-8")
+        if INVALID_JSON_OUTPUT == "acceptance_summary":
+            outputs["acceptance_summary"].write_text("{not json\\n", encoding="utf-8")
+        else:
+            outputs["acceptance_summary"].write_text(json.dumps(ACCEPTANCE_SUMMARY) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
@@ -3210,5 +3213,80 @@ llmff:
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "reviewer_checklist" in output
+    assert (run_dir / "acceptance-summary.raw.json").exists()
+    assert not (run_dir / "optimization-summary.json").exists()
+
+
+def test_optimize_rejects_invalid_json_acceptance_summary_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        invalid_json_output="acceptance_summary",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "acceptance-summary.raw.json contains invalid JSON" in output
+    assert (run_dir / "acceptance-summary.raw.json").exists()
+    assert not (run_dir / "optimization-summary.json").exists()
+
+
+def test_optimize_rejects_semantically_empty_acceptance_summary_output(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        acceptance_summary={
+            "decision_recommendation": "ship_it_anyway",
+            "reasons": [],
+            "evidence": [],
+            "reviewer_checklist": [],
+            "rollback_command": [],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "acceptance-summary.raw.json field has unsupported value: decision_recommendation" in output
     assert (run_dir / "acceptance-summary.raw.json").exists()
     assert not (run_dir / "optimization-summary.json").exists()

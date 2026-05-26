@@ -1021,11 +1021,18 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "rollback_command",
         ],
         "properties": {
-            "decision_recommendation": {"type": "string"},
-            "reasons": {"type": "array", "items": {"type": "string"}},
-            "evidence": {"type": "array", "items": {"type": "string"}},
-            "reviewer_checklist": {"type": "array", "items": {"type": "string"}},
-            "rollback_command": {"type": "array", "items": {"type": "string"}},
+            "decision_recommendation": {
+                "type": "string",
+                "enum": ["needs_review", "reject"],
+            },
+            "reasons": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "reviewer_checklist": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"},
+            },
+            "rollback_command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
         },
     },
     "decision.json": {
