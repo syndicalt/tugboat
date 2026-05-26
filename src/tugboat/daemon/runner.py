@@ -145,15 +145,21 @@ def default_runner_kill_switch(repo: Path) -> FileKillSwitch:
     return FileKillSwitch(repo / ".sidecar" / "read-only.kill")
 
 
-def _resume_metadata(repo: Path, job_id: int, payload: dict[str, Any]) -> ResumeValidation:
-    run_id = str(payload["run_id"])
+def _resume_metadata(repo: Path, job_id: int, payload: Any) -> ResumeValidation:
+    if not isinstance(payload, dict):
+        return ResumeValidation(resume=None, failure_reason="resume_payload_invalid")
+    run_id = _resume_payload_text(payload, "run_id")
+    checkpoint_ref = _resume_payload_text(payload, "checkpoint_path")
+    manifest_hash = _resume_payload_text(payload, "manifest_hash")
+    if run_id is None or checkpoint_ref is None or manifest_hash is None:
+        return ResumeValidation(resume=None, failure_reason="resume_payload_invalid")
     if not run_id or run_id in {".", ".."} or _SAFE_RUN_ID_PATTERN.fullmatch(run_id) is None:
         return ResumeValidation(resume=None, failure_reason="invalid_run_id")
     runs_root = (repo / ".sidecar" / "runs").resolve()
     run_dir = (runs_root / run_id).resolve()
     if not run_dir.is_relative_to(runs_root):
         return ResumeValidation(resume=None, failure_reason="run_dir_outside_runs")
-    checkpoint_path = Path(str(payload["checkpoint_path"])).expanduser().resolve()
+    checkpoint_path = Path(checkpoint_ref).expanduser().resolve()
     if not checkpoint_path.is_relative_to(run_dir):
         return ResumeValidation(resume=None, failure_reason="checkpoint_path_outside_run")
     try:
@@ -162,7 +168,6 @@ def _resume_metadata(repo: Path, job_id: int, payload: dict[str, Any]) -> Resume
         return ResumeValidation(resume=None, failure_reason="checkpoint_unreadable")
     if not isinstance(checkpoint, dict):
         return ResumeValidation(resume=None, failure_reason="checkpoint_unreadable")
-    manifest_hash = str(payload["manifest_hash"])
     if str(checkpoint.get("manifest_hash")) != manifest_hash:
         return ResumeValidation(resume=None, failure_reason="checkpoint_manifest_mismatch")
     return ResumeValidation(
@@ -173,6 +178,13 @@ def _resume_metadata(repo: Path, job_id: int, payload: dict[str, Any]) -> Resume
             "manifest_hash": manifest_hash,
         }
     )
+
+
+def _resume_payload_text(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        return None
+    return value
 
 
 def _queued_count(queue: DaemonQueue) -> int:

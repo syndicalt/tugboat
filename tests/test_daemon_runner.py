@@ -453,6 +453,63 @@ def test_run_daemon_cycle_fails_checkpoint_resume_when_run_dir_symlink_escapes(
         assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
 
 
+def test_run_daemon_cycle_fails_malformed_checkpoint_resume_payload_without_crashing(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload={
+                "run_id": "run-1",
+                "manifest_hash": "abc123",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "resume_payload_invalid"}]
+    assert result["resume_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_cycle_fails_non_object_checkpoint_resume_payload_without_crashing(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(
+            kind="llmff_resume",
+            payload=[],  # type: ignore[arg-type]
+            now=_at(0),
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "resume_payload_invalid"}]
+    assert result["resume_jobs"] == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.FAILED  # type: ignore[union-attr]
+
+
 def test_write_worktree_profile_records_local_observability_refs(tmp_path: Path):
     profile_path = write_worktree_profile(
         tmp_path,
