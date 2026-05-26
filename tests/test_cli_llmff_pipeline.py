@@ -52,6 +52,11 @@ def _write_fake_llmff(
                 "governance_passed": True,
                 "recommendation": "accept",
                 "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
             }
             if eval_passed
             else {
@@ -3114,6 +3119,14 @@ llmff:
             LIMIT 1
             """
         ).fetchone()
+        validation_splits = store.connection.execute(
+            """
+            SELECT split_name, case_ids_json
+            FROM validation_splits
+            WHERE suite_id = 'all'
+            ORDER BY split_name
+            """
+        ).fetchall()
 
     assert jobs[-2:] == [("patch-eval.yaml", "completed"), ("acceptance-summary.yaml", "completed")]
     assert acceptance_summary["decision_recommendation"] == "needs_review"
@@ -3123,6 +3136,12 @@ llmff:
     assert summary["acceptance_summary_path"] == (
         f".sidecar/runs/{run_dir.name}/acceptance-summary.raw.json"
     )
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert eval_report["validation_splits"] == {
+        "governance": ["governance:policy"],
+        "held_out": ["held-out:no-regression"],
+        "trigger": ["trigger:regression"],
+    }
     assert summary["accepted_bounded_edit_metadata"] == [
         {
             "changed_lines": 1,
@@ -3142,6 +3161,11 @@ llmff:
         "needs_review",
         "held_out_improved",
     )
+    assert {row[0]: json.loads(row[1]) for row in validation_splits} == {
+        "governance": ["governance:policy"],
+        "held_out": ["held-out:no-regression"],
+        "trigger": ["trigger:regression"],
+    }
 
 
 def test_eval_rejects_accept_recommendation_without_held_out_cases(
@@ -3193,6 +3217,106 @@ llmff:
     assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 
+def test_eval_rejects_accept_recommendation_without_validation_splits(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.7,
+            "held_out_score": 0.9,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert "llmff eval_report cannot accept without validation split provenance" in output
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+
+
+def test_eval_rejects_overlapping_trigger_and_held_out_validation_splits(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.7,
+            "held_out_score": 0.9,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["case:shared"],
+                "held_out": ["case:shared"],
+            },
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert "triggering validation cases overlap held-out validation cases" in output
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+
+
 def test_eval_rejects_file_backed_candidate_before_acceptance_summary_when_baseline_not_improved(
     tmp_path: Path,
 ):
@@ -3210,6 +3334,10 @@ def test_eval_rejects_file_backed_candidate_before_acceptance_summary_when_basel
             "governance_passed": True,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+            },
         },
         policy_decision={"allowed": True, "reasons": []},
     )
@@ -3427,6 +3555,10 @@ def test_optimize_rejects_candidate_when_held_out_does_not_beat_validation_basel
             "governance_passed": True,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+            },
         },
         policy_decision={"allowed": True, "reasons": []},
     )
@@ -3524,6 +3656,10 @@ def test_optimize_records_baseline_rejection_before_acceptance_summary_runs(
             "governance_passed": True,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+            },
         },
         policy_decision={"allowed": True, "reasons": []},
     )
@@ -3619,6 +3755,10 @@ def test_optimize_rejects_candidate_when_governance_gate_fails_despite_accept_re
             "governance_passed": False,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 1, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+            },
         },
         policy_decision={"allowed": False, "reasons": ["governance_regression"]},
     )

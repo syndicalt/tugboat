@@ -42,6 +42,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
     live_provider_required = False
     eval_failure_message: str | None = None
     policy_decision_payload: dict[str, object] | None = None
+    validation_splits: dict[str, tuple[str, ...]] | None = None
     offline_report = None
 
     if suite_id == "provider-smoke" and not (run_dir / "candidate.raw.json").exists():
@@ -112,6 +113,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 "recommendation",
                 "accept" if passed and governance_passed else "reject",
             )
+            validation_splits = _validation_splits_from_eval_payload(eval_payload)
             if not deterministic_decision.allowed:
                 passed = False
                 governance_passed = False
@@ -124,6 +126,12 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 eval_failure_message = (
                     "eval rejected: llmff eval_report cannot accept without held-out validation cases"
                 )
+            split_failure = _validation_split_failure(validation_splits)
+            if passed and recommendation == "accept" and split_failure is not None:
+                passed = False
+                governance_passed = False
+                recommendation = "reject"
+                eval_failure_message = f"eval rejected: {split_failure}"
         except ValueError as error:
             return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
         except RuntimeError as error:
@@ -143,6 +151,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         governance_passed=governance_passed,
         recommendation=recommendation,
         live_provider_required=live_provider_required,
+        validation_splits=validation_splits,
     )
     if policy_decision_payload is not None:
         _write_policy_gate(
@@ -172,6 +181,13 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                         split_name=split_name,
                         case_ids=case_ids,
                     )
+        if validation_splits is not None:
+            for split_name, case_ids in validation_splits.items():
+                store.record_validation_split(
+                    suite_id=suite_id,
+                    split_name=split_name,
+                    case_ids=case_ids,
+                )
         if not passed or recommendation == "reject":
             _record_rejected_candidate_memory(store, repo=repo, run_dir=run_dir, reason=recommendation)
     return EvalPipelineResult(
@@ -208,6 +224,46 @@ def _has_held_out_validation_cases(metrics: dict[str, object]) -> bool:
     if isinstance(raw, int | float):
         return raw > 0
     return False
+
+
+def _validation_splits_from_eval_payload(
+    payload: dict[str, object],
+) -> dict[str, tuple[str, ...]] | None:
+    raw_splits = payload.get("validation_splits")
+    if raw_splits is None:
+        return None
+    if not isinstance(raw_splits, dict):
+        raise ValueError("llmff eval_report.validation_splits must be a JSON object")
+    splits: dict[str, tuple[str, ...]] = {}
+    for split_name, raw_case_ids in raw_splits.items():
+        if not isinstance(split_name, str) or not split_name.strip():
+            raise ValueError("llmff eval_report.validation_splits keys must be non-empty strings")
+        if not isinstance(raw_case_ids, list) or not all(
+            isinstance(case_id, str) and case_id.strip() for case_id in raw_case_ids
+        ):
+            raise ValueError(
+                f"llmff eval_report.validation_splits.{split_name} must be a JSON list of strings"
+            )
+        splits[split_name] = tuple(dict.fromkeys(raw_case_ids))
+    return splits
+
+
+def _validation_split_failure(splits: dict[str, tuple[str, ...]] | None) -> str | None:
+    if splits is None:
+        return "llmff eval_report cannot accept without validation split provenance"
+    trigger_cases = set(splits.get("trigger", ()))
+    held_out_cases = set(splits.get("held_out", ()))
+    if not trigger_cases:
+        return "llmff eval_report cannot accept without triggering validation cases"
+    if not held_out_cases:
+        return "llmff eval_report cannot accept without held-out validation case IDs"
+    overlap = sorted(trigger_cases & held_out_cases)
+    if overlap:
+        return (
+            "llmff eval_report triggering validation cases overlap held-out validation cases: "
+            + ", ".join(overlap)
+        )
+    return None
 
 
 def _candidate_preview_root(repo: Path, run_dir: Path) -> Path:

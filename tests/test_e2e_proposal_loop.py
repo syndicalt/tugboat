@@ -111,6 +111,11 @@ if args[:1] == ["run"]:
             "governance_passed": True,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:e2e-regression"],
+                "held_out": ["held-out:e2e-no-regression"],
+                "governance": ["governance:e2e-policy"],
+            },
         }) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps({
             "allowed": True,

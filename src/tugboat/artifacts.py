@@ -444,6 +444,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "recommendation": {"type": "string"},
             "suite_id": {"type": "string"},
             "trigger_score": {"type": "number"},
+            "validation_splits": {
+                "type": "object",
+                "properties": {
+                    "trigger": {"type": "array", "items": {"type": "string"}},
+                    "held_out": {"type": "array", "items": {"type": "string"}},
+                    "governance": {"type": "array", "items": {"type": "string"}},
+                },
+                "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            },
             "live_provider_required": {"type": "boolean"},
         },
     },
@@ -459,6 +468,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "governance_passed": {"type": "boolean"},
             "recommendation": {"type": "string"},
             "metrics": {"type": "object"},
+            "validation_splits": {
+                "type": "object",
+                "properties": {
+                    "trigger": {"type": "array", "items": {"type": "string"}},
+                    "held_out": {"type": "array", "items": {"type": "string"}},
+                    "governance": {"type": "array", "items": {"type": "string"}},
+                },
+                "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            },
             "live_provider_required": {"type": "boolean"},
         },
     },

@@ -132,6 +132,11 @@ if args[:1] == ["run"]:
             "governance_passed": True,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:mcp-regression"],
+                "held_out": ["held-out:mcp-no-regression"],
+                "governance": ["governance:mcp-policy"],
+            },
         }) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps({
             "allowed": True,

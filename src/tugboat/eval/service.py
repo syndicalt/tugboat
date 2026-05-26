@@ -21,6 +21,7 @@ def write_eval_report(
     governance_passed: bool,
     recommendation: str,
     live_provider_required: bool = False,
+    validation_splits: dict[str, tuple[str, ...]] | None = None,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -37,6 +38,11 @@ def write_eval_report(
         "trigger_score": trigger_score,
         "live_provider_required": live_provider_required,
     }
+    if validation_splits is not None:
+        payload["validation_splits"] = {
+            split_name: list(case_ids)
+            for split_name, case_ids in sorted(validation_splits.items())
+        }
     validate_json_artifact("eval-report.json", payload)
     report_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",

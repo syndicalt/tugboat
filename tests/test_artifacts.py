@@ -351,6 +351,20 @@ def test_validate_eval_raw_artifacts_accept_current_schema():
     )
 
 
+def test_validate_eval_raw_artifact_accepts_validation_splits():
+    payload = {
+        "passed": True,
+        "metrics": {"governance_regressions": 0, "held_out_cases": 1},
+        "validation_splits": {
+            "trigger": ["episode:trigger-1"],
+            "held_out": ["episode:held-out-1"],
+            "custom": ["case:custom"],
+        },
+    }
+
+    validate_json_artifact("eval-report.raw.json", payload)
+
+
 def test_validate_eval_raw_artifacts_reject_missing_required_typed_fields():
     with pytest.raises(ArtifactValidationError, match="required"):
         validate_json_artifact("eval-report.raw.json", {})
@@ -370,6 +384,18 @@ def test_validate_eval_raw_artifacts_reject_wrong_field_types():
         validate_json_artifact(
             "policy-decision.raw.json",
             {"allowed": "true", "reasons": []},
+        )
+
+
+def test_validate_eval_raw_artifact_rejects_malformed_validation_split_arrays():
+    with pytest.raises(ArtifactValidationError, match="validation_splits.trigger"):
+        validate_json_artifact(
+            "eval-report.raw.json",
+            {
+                "passed": True,
+                "metrics": {"governance_regressions": 0, "held_out_cases": 1},
+                "validation_splits": {"trigger": "episode:trigger-1"},
+            },
         )
 
 
