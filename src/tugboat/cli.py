@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from tugboat.artifacts import (
     ArtifactValidationError,
@@ -33,6 +34,7 @@ from tugboat.daemon.runner import (
     default_trace_dirs,
     run_daemon_cycle,
     run_daemon_loop,
+    write_worktree_profile,
 )
 from tugboat.daemon.service import (
     DaemonRunConfig,
@@ -41,6 +43,7 @@ from tugboat.daemon.service import (
     run_daemon_once,
     serve_daemon_socket,
 )
+from tugboat.daemon.queue import validate_local_bind_address
 from tugboat.db import Store
 from tugboat.eval.pipeline import run_eval_pipeline
 from tugboat.harness.checks import (
@@ -174,6 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
     read_only_action.add_argument("--enable", action="store_true")
     read_only_action.add_argument("--disable", action="store_true")
     read_only_action.add_argument("--status", action="store_true")
+    daemon_profile = daemon_subcommands.add_parser("profile")
+    daemon_profile.add_argument("--repo", required=True)
+    daemon_profile.add_argument("--app-boot-json", required=True)
+    daemon_profile.add_argument("--observability-ref", action="append", default=[])
 
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
@@ -498,6 +505,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "daemon" and args.daemon_command == "profile":
+        repo = Path(args.repo)
+        try:
+            app_boot = _parse_profile_app_boot(args.app_boot_json)
+            observability_refs = _validate_observability_refs(args.observability_ref)
+            profile_path = write_worktree_profile(
+                repo,
+                app_boot=app_boot,
+                observability_refs=observability_refs,
+            )
+        except ValueError as error:
+            print(f"daemon profile blocked: {error}")
+            return 1
+        print(f"worktree_profile: {profile_path}")
         return 0
 
     if args.command == "daemon" and args.daemon_command == "cycle":
@@ -2019,6 +2042,42 @@ def _merge_json(path: Path, updates: dict[str, object]) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload.update(updates)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _parse_profile_app_boot(raw: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("app boot metadata must be a JSON object") from error
+    if not isinstance(payload, dict):
+        raise ValueError("app boot metadata must be a JSON object")
+    return payload
+
+
+def _validate_observability_refs(refs: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for ref in refs:
+        value = ref.strip()
+        if not value:
+            raise ValueError("observability refs must be local-only")
+        parsed = urlparse(value)
+        if parsed.scheme in {"http", "https"}:
+            host = parsed.hostname or ""
+            port = f":{parsed.port}" if parsed.port is not None else ""
+            _validate_local_observability_ref(f"{host}{port}")
+        elif parsed.scheme and parsed.scheme != "unix":
+            raise ValueError("observability refs must be local-only")
+        else:
+            _validate_local_observability_ref(value)
+        normalized.append(value)
+    return normalized
+
+
+def _validate_local_observability_ref(value: str) -> None:
+    try:
+        validate_local_bind_address(value)
+    except ValueError as error:
+        raise ValueError("observability refs must be local-only") from error
 
 
 if __name__ == "__main__":

@@ -112,6 +112,80 @@ def test_daemon_status_read_only_kill_switch_does_not_initialize_missing_queue(
     assert not (tmp_path / ".sidecar" / "daemon.sqlite").exists()
 
 
+def test_daemon_profile_cli_writes_worktree_local_run_profile(tmp_path: Path, capsys):
+    assert (
+        main(
+            [
+                "daemon",
+                "profile",
+                "--repo",
+                str(tmp_path),
+                "--app-boot-json",
+                '{"command":"python -m app","healthcheck":"http://127.0.0.1:8000/health"}',
+                "--observability-ref",
+                "http://127.0.0.1:8000/health",
+                "--observability-ref",
+                "unix:/tmp/tugboat-app.sock",
+            ]
+        )
+        == 0
+    )
+
+    profile_path = tmp_path / ".sidecar" / "worktree-profile.json"
+    assert f"worktree_profile: {profile_path}" in capsys.readouterr().out
+    assert json.loads(profile_path.read_text(encoding="utf-8")) == {
+        "app_boot": {
+            "command": "python -m app",
+            "healthcheck": "http://127.0.0.1:8000/health",
+        },
+        "observability_refs": [
+            "http://127.0.0.1:8000/health",
+            "unix:/tmp/tugboat-app.sock",
+        ],
+        "runs_dir": ".sidecar/runs",
+    }
+
+
+def test_daemon_profile_cli_rejects_public_observability_refs(tmp_path: Path, capsys):
+    assert (
+        main(
+            [
+                "daemon",
+                "profile",
+                "--repo",
+                str(tmp_path),
+                "--app-boot-json",
+                '{"command":"python -m app"}',
+                "--observability-ref",
+                "http://0.0.0.0:8000/metrics",
+            ]
+        )
+        == 1
+    )
+
+    assert "daemon profile blocked: observability refs must be local-only" in capsys.readouterr().out
+    assert not (tmp_path / ".sidecar" / "worktree-profile.json").exists()
+
+
+def test_daemon_profile_cli_requires_app_boot_json_object(tmp_path: Path, capsys):
+    assert (
+        main(
+            [
+                "daemon",
+                "profile",
+                "--repo",
+                str(tmp_path),
+                "--app-boot-json",
+                '["python -m app"]',
+            ]
+        )
+        == 1
+    )
+
+    assert "daemon profile blocked: app boot metadata must be a JSON object" in capsys.readouterr().out
+    assert not (tmp_path / ".sidecar" / "worktree-profile.json").exists()
+
+
 def test_run_daemon_once_processes_one_job_through_waiting_review(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
