@@ -441,6 +441,8 @@ def _has_governance_regression(markdown: str) -> bool:
         return True
     if _has_poisoned_command_output_instruction(words):
         return True
+    if _has_malicious_issue_text_instruction(words):
+        return True
     deploy_approval_bypass = (
         "bypass" in words and "approval" in words and bool(words & {"deploy", "deployment"})
     )
@@ -483,6 +485,17 @@ def _has_poisoned_command_output_instruction(words: set[str]) -> bool:
     permissive = bool(words & {"allow", "allowed", "allows", "can", "follow", "may", "permit", "permitted"})
     restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
     return has_command_output and has_override and has_bypass and permissive and not restrictive
+
+
+def _has_malicious_issue_text_instruction(words: set[str]) -> bool:
+    has_issue_text = "issue" in words and bool(words & {"text", "body", "comment", "comments"})
+    has_override = bool(words & {"disregard", "ignore", "override"}) and bool(
+        words & {"codex", "agents", "instruction", "instructions", "policy", "policies", "approval", "approvals"}
+    )
+    has_bypass = bool(words & {"bypass", "disable", "skip"})
+    permissive = bool(words & {"allow", "allowed", "allows", "can", "follow", "may", "permit", "permitted"})
+    restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
+    return has_issue_text and has_override and has_bypass and permissive and not restrictive
 
 
 def _has_hidden_prompt_injection(markdown: str) -> bool:
