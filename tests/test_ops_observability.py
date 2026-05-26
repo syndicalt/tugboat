@@ -71,6 +71,11 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
             {"type": "user_correction", "content": "Use Zaxy memory first."},
             {"type": "tool_call", "content": "pytest"},
         ],
+        incidents=[
+            {"failure_class": "missing_tests"},
+            {"failure_class": "missing_tests"},
+            {"failure_class": "stale_runbook"},
+        ],
     )
 
     json.dumps(summary)
@@ -117,4 +122,10 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "correction_count": 3,
         "recurring_correction_count": 1,
         "unique_correction_count": 2,
+    }
+    assert summary["recurring_incident_rate"] == {
+        "incident_count": 3,
+        "recurring_incident_count": 2,
+        "rate": 0.666667,
+        "unique_incident_class_count": 2,
     }

@@ -16,6 +16,7 @@ def summarize_observability(
     corpus_snapshots: Iterable[dict[str, Any]] = (),
     harness_findings: Iterable[str] = (),
     trace_events: Iterable[dict[str, Any]] = (),
+    incidents: Iterable[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     run_items = list(runs)
     job_items = list(jobs)
@@ -31,6 +32,7 @@ def summarize_observability(
         "provider_backend_failure_rate": _provider_backend_failure_rate(run_items),
         "duplicate_rule_count": _duplicate_rule_count(harness_findings),
         "user_correction_recurrence": _user_correction_recurrence(trace_events),
+        "recurring_incident_rate": _recurring_incident_rate(incidents),
     }
 
 
@@ -44,6 +46,7 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
         audit_events = _audit_events(connection)
         evals = _sidecar_evals(connection)
         decisions = _sidecar_decisions(connection)
+        incidents = _sidecar_incidents(connection)
         harness_findings = [
             str(row["finding"])
             for row in connection.execute("SELECT finding FROM harness_findings ORDER BY id")
@@ -65,6 +68,7 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
         corpus_snapshots=corpus_snapshots,
         harness_findings=harness_findings,
         trace_events=trace_events,
+        incidents=incidents,
     )
 
 
@@ -123,6 +127,15 @@ def _sidecar_decisions(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             "state": row["decision"],
         }
         for row in connection.execute("SELECT decision FROM decisions ORDER BY id")
+    ]
+
+
+def _sidecar_incidents(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {
+            "failure_class": row["failure_class"],
+        }
+        for row in connection.execute("SELECT failure_class FROM audits ORDER BY id")
     ]
 
 
@@ -332,6 +345,23 @@ def _user_correction_recurrence(events: Iterable[dict[str, Any]]) -> dict[str, i
         "correction_count": len(corrections),
         "recurring_correction_count": sum(1 for count in counts.values() if count > 1),
         "unique_correction_count": len(counts),
+    }
+
+
+def _recurring_incident_rate(incidents: Iterable[dict[str, Any]]) -> dict[str, int | float]:
+    incident_classes = [
+        str(incident.get("failure_class", incident.get("incident_class", ""))).strip()
+        for incident in incidents
+    ]
+    incident_classes = [value for value in incident_classes if value]
+    counts = Counter(incident_classes)
+    recurring_count = sum(count for count in counts.values() if count > 1)
+    incident_count = len(incident_classes)
+    return {
+        "incident_count": incident_count,
+        "recurring_incident_count": recurring_count,
+        "rate": _round(recurring_count / incident_count) if incident_count else 0,
+        "unique_incident_class_count": len(counts),
     }
 
 

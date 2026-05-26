@@ -42,6 +42,30 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             status="completed",
             run_dir=run_dir,
         )
+        store.insert_audit(
+            run_id="run-2",
+            failure_class="missing_tests",
+            severity="medium",
+            confidence=0.9,
+            evidence_refs=["ev-1"],
+            instruction_refs=[],
+        )
+        store.insert_audit(
+            run_id="run-3",
+            failure_class="missing_tests",
+            severity="medium",
+            confidence=0.8,
+            evidence_refs=["ev-2"],
+            instruction_refs=[],
+        )
+        store.insert_audit(
+            run_id="run-4",
+            failure_class="stale_runbook",
+            severity="low",
+            confidence=0.7,
+            evidence_refs=["ev-3"],
+            instruction_refs=[],
+        )
         store.insert_eval(
             candidate_id=7,
             suite_id="all",
@@ -119,3 +143,9 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     assert summary["corpus_growth"] == {"earliest_count": 1, "latest_count": 1, "delta": 0}
     assert summary["duplicate_rule_count"] == 1
     assert summary["user_correction_recurrence"]["correction_count"] == 1
+    assert summary["recurring_incident_rate"] == {
+        "incident_count": 3,
+        "recurring_incident_count": 2,
+        "rate": 0.666667,
+        "unique_incident_class_count": 2,
+    }
