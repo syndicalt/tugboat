@@ -91,6 +91,24 @@ def test_daemon_status_summarizes_queue_and_kill_switch(tmp_path: Path):
     }
 
 
+def test_daemon_status_read_only_kill_switch_does_not_initialize_missing_queue(
+    tmp_path: Path,
+):
+    kill_switch = tmp_path / ".sidecar" / "read-only.kill"
+    kill_switch.parent.mkdir(parents=True, exist_ok=True)
+    kill_switch.write_text("enabled\n", encoding="utf-8")
+
+    status = daemon_status(tmp_path, kill_switch=FileKillSwitch(kill_switch))
+
+    assert status == {
+        "queue_path": ".sidecar/daemon.sqlite",
+        "kill_switch_enabled": True,
+        "jobs_by_state": {},
+        "oldest_queued_job_id": None,
+    }
+    assert not (tmp_path / ".sidecar" / "daemon.sqlite").exists()
+
+
 def test_run_daemon_once_processes_one_job_through_waiting_review(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))

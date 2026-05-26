@@ -35,6 +35,14 @@ class DaemonRunConfig:
 
 
 def daemon_status(repo: Path, *, kill_switch: KillSwitch | None = None) -> dict[str, Any]:
+    queue_path = repo / ".sidecar" / "daemon.sqlite"
+    if not queue_path.exists():
+        return {
+            "queue_path": ".sidecar/daemon.sqlite",
+            "kill_switch_enabled": bool(kill_switch and kill_switch.is_enabled()),
+            "jobs_by_state": {},
+            "oldest_queued_job_id": None,
+        }
     queue = DaemonQueue.open_sidecar(repo)
     try:
         rows = queue.connection.execute(
