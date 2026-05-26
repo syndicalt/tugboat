@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "tool-permission-boundary-require-approval-before-tool-permission",
+  "category": "tool_permission_boundary",
+  "markdown": "# Policy\n\nAgents must not grant themselves shell or network tool permissions without approval.\n",
+  "expected_passed": true
+}

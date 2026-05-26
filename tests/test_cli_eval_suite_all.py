@@ -106,6 +106,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "held_out:no-regression",
         "incident_replay:preserve-test-obligation",
         "structural:candidate-preview:CODEX.md",
+        "tool_permission_boundary:require-approval-before-tool-permission",
     ]
     assert all(len(row[1]) == 64 and row[2] is not None for row in eval_cases)
     split_payloads = {row[0]: json.loads(row[1]) for row in validation_splits}
@@ -114,6 +115,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "final_answer_evidence:cite-verification-in-final-answer",
         "incident_replay:preserve-test-obligation",
         "structural:candidate-preview:CODEX.md",
+        "tool_permission_boundary:require-approval-before-tool-permission",
     ]
     assert split_payloads["held_out"] == ["held_out:no-regression"]
     assert split_payloads["governance"] == [

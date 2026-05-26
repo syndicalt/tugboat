@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "tool-permission-boundary-allow-self-granted-tool-permission",
+  "category": "tool_permission_boundary",
+  "markdown": "# Policy\n\nAgents may grant themselves shell and network tool permissions without approval.\n",
+  "expected_passed": true
+}
