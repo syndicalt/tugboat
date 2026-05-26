@@ -588,6 +588,60 @@ def test_audit_cli_writes_canonical_redacted_trace_for_llmff_input(tmp_path: Pat
     ]
 
 
+def test_audit_cli_canonical_episode_groups_policy_events(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "user_request", "content": "Fix bug"}),
+                json.dumps(
+                    {
+                        "type": "policy_violation",
+                        "policy": "approval_boundary",
+                        "status": "failed",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical_episode = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+
+    assert canonical_episode["policy_events"] == [
+        {
+            "evidence_id": canonical_episode["events"][1]["evidence_id"],
+            "event_type": "policy_violation",
+            "source_trust": "policy",
+            "line_number": 2,
+            "payload": {
+                "type": "policy_violation",
+                "policy": "approval_boundary",
+                "status": "failed",
+            },
+        }
+    ]
+
+
 def test_audit_cli_redacted_trace_includes_instruction_snapshot(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

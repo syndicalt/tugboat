@@ -166,6 +166,7 @@ def test_validate_canonical_episode_artifact_accepts_current_schema():
             "command_outputs": [],
             "diffs": [],
             "test_results": [],
+            "policy_events": [],
             "user_corrections": [],
             "subagent_reports": [],
             "events": [
@@ -196,6 +197,7 @@ def test_validate_canonical_episode_artifact_requires_final_answer():
                 "command_outputs": [],
                 "diffs": [],
                 "test_results": [],
+                "policy_events": [],
                 "user_corrections": [],
                 "subagent_reports": [],
                 "events": [

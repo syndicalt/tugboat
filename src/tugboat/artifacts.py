@@ -152,6 +152,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "command_outputs",
             "diffs",
             "test_results",
+            "policy_events",
             "user_corrections",
             "subagent_reports",
             "final_answer",
@@ -169,6 +170,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "command_outputs": {"type": "array", "items": {"type": "object"}},
             "diffs": {"type": "array", "items": {"type": "object"}},
             "test_results": {"type": "array", "items": {"type": "object"}},
+            "policy_events": {"type": "array", "items": {"type": "object"}},
             "user_corrections": {"type": "array", "items": {"type": "object"}},
             "subagent_reports": {"type": "array", "items": {"type": "object"}},
             "events": {

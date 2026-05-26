@@ -490,6 +490,7 @@ def _write_canonical_episode(bundle, path: Path) -> None:
         "command_outputs": _event_group_json(episode.command_outputs),
         "diffs": _event_group_json(episode.diffs),
         "test_results": _event_group_json(episode.test_results),
+        "policy_events": _event_group_json(episode.policy_events),
         "user_corrections": _event_group_json(episode.user_corrections),
         "subagent_reports": _event_group_json(episode.subagent_reports),
         "events": _event_group_json(episode.redacted_events()),
