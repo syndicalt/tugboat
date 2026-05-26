@@ -240,6 +240,48 @@ def test_harness_legibility_flags_broken_repo_local_links_inside_referenced_docs
     ]
 
 
+def test_harness_legibility_flags_broken_repo_local_file_links_inside_referenced_docs(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\n"
+        "owner: platform\n"
+        "verification_status: verified\n"
+        "---\n"
+        "# Runbook\n\n"
+        "Run [setup](../scripts/setup.sh) before adoption.\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+
+    result = check_harness_legibility(repo)
+    report = generate_harness_report(repo)
+
+    expected = "docs/runbook.md references missing repo-local file ../scripts/setup.sh."
+    assert result.passed is False
+    assert result.findings == [expected]
+    assert report.stale_docs == [expected]
+    assert report.doc_gardening_tasks == [
+        "Add or fix ../scripts/setup.sh referenced by docs/runbook.md."
+    ]
+    assert [candidate.to_json_dict() for candidate in generate_cleanup_candidates(repo)] == [
+        {
+            "candidate_id": "harness-cleanup-1",
+            "risk_class": "review_required",
+            "auto_apply": False,
+            "task": "Add or fix ../scripts/setup.sh referenced by docs/runbook.md.",
+            "source_findings": [expected],
+            "required_eval_suites": ["structural"],
+        }
+    ]
+
+
 def test_harness_legibility_flags_docs_older_than_declared_source_files(tmp_path: Path):
     repo = tmp_path
     docs = repo / "docs"

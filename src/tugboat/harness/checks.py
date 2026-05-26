@@ -83,6 +83,9 @@ def check_harness_legibility(
             )
         _collect_rules(text, rule_counts, must_rules, never_rules)
 
+        for ref in _repo_local_file_refs(text):
+            findings.extend(_file_ref_findings(repo, path, ref))
+
         local_markdown_refs = _repo_local_markdown_refs(text)
         if not local_markdown_refs:
             if not is_monolithic:
@@ -129,6 +132,15 @@ def generate_harness_report(repo: Path) -> HarnessReport:
         )
         if refs:
             knowledge_map[relative_path] = refs
+        for file_ref in _repo_local_file_refs(path.read_text(encoding="utf-8")):
+            for finding in _file_ref_findings(repo, path, file_ref):
+                stale_docs.append(finding)
+                missing_file_match = re.match(
+                    r"(.+) references missing repo-local file (.+)\.", finding
+                )
+                if missing_file_match:
+                    doc_path, missing_ref = missing_file_match.groups()
+                    doc_gardening_tasks.append(f"Add or fix {missing_ref} referenced by {doc_path}.")
         for markdown_ref in markdown_refs:
             ref_path = markdown_ref.path.as_posix()
             referenced_docs.add(ref_path)
@@ -156,6 +168,12 @@ def generate_harness_report(repo: Path) -> HarnessReport:
                 )
                 if missing_link_match:
                     doc_path, missing_ref = missing_link_match.groups()
+                    doc_gardening_tasks.append(f"Add or fix {missing_ref} referenced by {doc_path}.")
+                missing_file_match = re.match(
+                    r"(.+) references missing repo-local file (.+)\.", finding
+                )
+                if missing_file_match:
+                    doc_path, missing_ref = missing_file_match.groups()
                     doc_gardening_tasks.append(f"Add or fix {missing_ref} referenced by {doc_path}.")
                 freshness_match = re.match(r"(.+) is older than source file (.+)\.", finding)
                 if freshness_match:
@@ -258,6 +276,8 @@ def _metadata_findings(repo: Path, path: Path) -> list[str]:
             findings.append(f"{relative_path} is older than source file {source_ref}.")
     for ref in _repo_local_markdown_refs(text):
         findings.extend(_markdown_ref_findings(repo, path, ref))
+    for ref in _repo_local_file_refs(text):
+        findings.extend(_file_ref_findings(repo, path, ref))
     return findings
 
 
@@ -277,6 +297,31 @@ def _markdown_ref_findings(repo: Path, source_path: Path, ref: MarkdownRef) -> l
             f"{relative_path} references missing repo-local markdown anchor "
             f"{ref.path.as_posix()}#{ref.anchor}."
         ]
+    return []
+
+
+def _repo_local_file_refs(text: str) -> list[Path]:
+    refs: list[Path] = []
+    for match in MARKDOWN_LINK_PATTERN.finditer(text):
+        raw_target = match.group(1).strip()
+        target = _link_destination(raw_target)
+        if target is None:
+            continue
+
+        path = Path(target.path)
+        if path.suffix.lower() != ".md":
+            refs.append(path)
+
+    return refs
+
+
+def _file_ref_findings(repo: Path, source_path: Path, ref: Path) -> list[str]:
+    relative_path = source_path.relative_to(repo).as_posix()
+    target = (source_path.parent / ref).resolve()
+    if not _is_relative_to(target, repo.resolve()):
+        return [f"{relative_path} references file outside the repo: {ref.as_posix()}."]
+    if not target.is_file():
+        return [f"{relative_path} references missing repo-local file {ref.as_posix()}."]
     return []
 
 
@@ -419,6 +464,12 @@ def _finding_by_cleanup_task(report: HarnessReport) -> dict[str, list[str]]:
         )
         if missing_link_match:
             doc_path, missing_ref = missing_link_match.groups()
+            mapping[f"Add or fix {missing_ref} referenced by {doc_path}."] = [finding]
+        missing_file_match = re.match(
+            r"(.+) references missing repo-local file (.+)\.", finding
+        )
+        if missing_file_match:
+            doc_path, missing_ref = missing_file_match.groups()
             mapping[f"Add or fix {missing_ref} referenced by {doc_path}."] = [finding]
         missing_anchor_match = re.match(
             r"(.+) references missing repo-local markdown anchor (.+)\.", finding
