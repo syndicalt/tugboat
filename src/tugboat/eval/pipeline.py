@@ -40,6 +40,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
     governance_passed = True
     recommendation = "accept"
     live_provider_required = False
+    eval_failure_message: str | None = None
     policy_decision_payload: dict[str, object] | None = None
     offline_report = None
 
@@ -106,6 +107,13 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 "recommendation",
                 "accept" if passed and governance_passed else "reject",
             )
+            if passed and recommendation == "accept" and not _has_held_out_validation_cases(metrics):
+                passed = False
+                governance_passed = False
+                recommendation = "reject"
+                eval_failure_message = (
+                    "eval rejected: llmff eval_report cannot accept without held-out validation cases"
+                )
         except ValueError as error:
             return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
         except RuntimeError as error:
@@ -159,7 +167,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
     return EvalPipelineResult(
         0 if passed else 1,
         run_dir,
-        f"eval suite: {suite_id} {'passed' if passed else 'failed'}",
+        eval_failure_message or f"eval suite: {suite_id} {'passed' if passed else 'failed'}",
     )
 
 
@@ -181,6 +189,15 @@ def _resolve_candidate_run_dir(repo: Path, candidate_ref: str) -> Path:
     if row is None:
         return direct_run_dir
     return Path(str(row[0])).resolve().parent
+
+
+def _has_held_out_validation_cases(metrics: dict[str, object]) -> bool:
+    raw = metrics.get("held_out_cases")
+    if isinstance(raw, bool):
+        return False
+    if isinstance(raw, int | float):
+        return raw > 0
+    return False
 
 
 def _candidate_preview_root(repo: Path, run_dir: Path) -> Path:
