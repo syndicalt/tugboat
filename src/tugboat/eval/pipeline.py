@@ -184,6 +184,8 @@ def _candidate_preview_root(repo: Path, run_dir: Path) -> Path:
         raise ValueError("candidate preview path must resolve inside candidate-preview")
     if not preview_path.exists():
         raise ValueError("candidate preview file is missing")
+    if CandidatePatch.hash_file(preview_path) != manifest["preview_hash"]:
+        raise ValueError("candidate preview hash does not match preview file")
     return preview_root
 
 

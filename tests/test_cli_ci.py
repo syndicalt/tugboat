@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from shutil import copytree
@@ -16,6 +17,7 @@ def _write_candidate_preview(run_dir: Path, text: str) -> None:
     preview_root = run_dir / "candidate-preview"
     preview_root.mkdir(parents=True)
     (preview_root / "CODEX.md").write_text(text, encoding="utf-8")
+    preview_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     (run_dir / "candidate-preview.json").write_text(
         json.dumps(
             {
@@ -24,7 +26,7 @@ def _write_candidate_preview(run_dir: Path, text: str) -> None:
                 "base_hash": "base",
                 "diff_hash": "diff",
                 "preview_path": f".sidecar/runs/{run_dir.name}/candidate-preview/CODEX.md",
-                "preview_hash": "preview",
+                "preview_hash": preview_hash,
             }
         )
         + "\n",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -12,10 +13,11 @@ from tugboat.cli import main
 FIXTURES = Path(__file__).parent / "fixtures" / "evals"
 
 
-def _write_candidate_preview(run_dir: Path, text: str) -> None:
+def _write_candidate_preview(run_dir: Path, text: str, *, preview_hash: str | None = None) -> None:
     preview_root = run_dir / "candidate-preview"
     preview_root.mkdir(parents=True)
     (preview_root / "CODEX.md").write_text(text, encoding="utf-8")
+    preview_hash = preview_hash or hashlib.sha256(text.encode("utf-8")).hexdigest()
     (run_dir / "candidate-preview.json").write_text(
         json.dumps(
             {
@@ -24,7 +26,7 @@ def _write_candidate_preview(run_dir: Path, text: str) -> None:
                 "base_hash": "base",
                 "diff_hash": "diff",
                 "preview_path": f".sidecar/runs/{run_dir.name}/candidate-preview/CODEX.md",
-                "preview_hash": "preview",
+                "preview_hash": preview_hash,
             }
         )
         + "\n",
@@ -192,6 +194,29 @@ def test_eval_suite_all_rejects_missing_candidate_preview_without_repo_fallback(
     )
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    assert not (run_dir / "eval-report.json").exists()
+
+
+def test_eval_suite_all_rejects_candidate_preview_hash_mismatch(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nYou must run tests before final answers.\n",
+        preview_hash="not-the-preview-hash",
+    )
     (run_dir / "candidate.json").write_text(
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
         encoding="utf-8",
