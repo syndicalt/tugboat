@@ -322,6 +322,177 @@ def test_policy_gate_rejects_changes_to_protected_heading_sections(tmp_path: Pat
     assert decision.reasons == ("protected_heading_changed",)
 
 
+def test_policy_gate_allows_changes_to_policy_editable_protected_heading(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "# Operating Constraints\n"
+        "\n"
+        "Keep this exact section intact.\n"
+        "\n"
+        "## Local Fixtures\n"
+        "\n"
+        "Fixture path: old.jsonl\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " ## Local Fixtures\n"
+            " \n"
+            "-Fixture path: old.jsonl\n"
+            "+Fixture path: new.jsonl\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(
+                    path="CODEX.md",
+                    kind="agent_policy",
+                    precedence=70,
+                    protected=True,
+                ),
+            ),
+            editable_headings=("Operating Constraints / Local Fixtures",),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is True
+    assert "protected_heading_changed" not in decision.reasons
+
+
+def test_policy_gate_rejects_renaming_editable_heading_to_protected_heading(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "# Operating Constraints\n"
+        "\n"
+        "Keep this exact section intact.\n"
+        "\n"
+        "## Local Fixtures\n"
+        "\n"
+        "Fixture path: old.jsonl\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            "-## Local Fixtures\n"
+            "+## Security Policy\n"
+            " \n"
+            " Fixture path: old.jsonl\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy("CODEX.md", "agent_policy", 70, True),
+            ),
+            editable_headings=("Operating Constraints / Local Fixtures",),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("protected_heading_changed",)
+
+
+def test_policy_gate_rejects_new_protected_heading_under_editable_heading(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "# Operating Constraints\n"
+        "\n"
+        "Keep this exact section intact.\n"
+        "\n"
+        "## Local Fixtures\n"
+        "\n"
+        "Fixture path: old.jsonl\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " ## Local Fixtures\n"
+            " \n"
+            " Fixture path: old.jsonl\n"
+            "+\n"
+            "+### Security Policy\n"
+            "+Do not add policy here.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy("CODEX.md", "agent_policy", 70, True),
+            ),
+            editable_headings=("Operating Constraints / Local Fixtures",),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("protected_heading_changed",)
+
+
+def test_policy_gate_treats_editable_headings_as_exact_paths_not_globs(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "# Operating Constraints\n"
+        "\n"
+        "Keep this exact section intact.\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " # Operating Constraints\n"
+            " \n"
+            "-Keep this exact section intact.\n"
+            "+Keep this section mostly intact.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy("CODEX.md", "agent_policy", 70, True),
+            ),
+            editable_headings=("*",),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("protected_heading_changed",)
+
+
 @pytest.mark.parametrize(
     "removed_line",
     [

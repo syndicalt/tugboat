@@ -75,6 +75,16 @@ def _as_risk_class_changed_line_budgets(raw: Any) -> dict[str, int]:
     }
 
 
+def _as_string_tuple(raw: Any, field_name: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list | tuple):
+        raise ValueError(f"{field_name} must be a list")
+    if not all(isinstance(item, str) for item in raw):
+        raise ValueError(f"{field_name} entries must be strings")
+    return tuple(raw)
+
+
 def load_policy(repo: Path) -> Policy:
     path = repo / ".sidecar" / "policy.yaml"
     if not path.exists():
@@ -138,6 +148,7 @@ def load_policy(repo: Path) -> Policy:
         risk_class_changed_line_budgets=_as_risk_class_changed_line_budgets(
             raw.get("risk_class_changed_line_budgets", {})
         ),
+        editable_headings=_as_string_tuple(raw.get("editable_headings", []), "editable_headings"),
         auto_apply_minimum_burn_in_days=_as_non_negative_days(
             auto_apply.get(
                 "minimum_burn_in_days",

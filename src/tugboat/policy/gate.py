@@ -190,7 +190,7 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
     if _is_markdown_file(candidate.base_file) and _is_relative_to(base_path, repo_root):
         found_reasons.update(_markdown_validation_reasons(base_path, candidate.diff))
         if _is_protected_instruction_file(candidate.base_file, policy):
-            found_reasons.update(_protected_heading_reasons(base_path, candidate.diff))
+            found_reasons.update(_protected_heading_reasons(base_path, candidate.diff, policy))
     has_modal_weakening = _has_modal_weakening(candidate.diff)
     if _removes_governance_constraint(candidate.diff, policy) and not has_modal_weakening:
         found_reasons.add("governance_constraint_removed")
@@ -320,7 +320,7 @@ def _has_yaml_frontmatter(text: str) -> bool:
     return any(line.strip() == "---" for line in lines[1:])
 
 
-def _protected_heading_reasons(base_path: Path, diff: str) -> set[str]:
+def _protected_heading_reasons(base_path: Path, diff: str, policy: Policy) -> set[str]:
     if not base_path.exists():
         return set()
 
@@ -328,30 +328,52 @@ def _protected_heading_reasons(base_path: Path, diff: str) -> set[str]:
     preview = apply_unified_diff(base_text, diff)
     if preview is None:
         return set()
-    if _protected_heading_sections_changed(base_text, preview):
+    if _protected_heading_sections_changed(base_text, preview, policy):
         return {"protected_heading_changed"}
     return set()
 
 
-def _protected_heading_sections_changed(base_text: str, preview: str) -> bool:
+def _protected_heading_sections_changed(base_text: str, preview: str, policy: Policy) -> bool:
     base_sections = _markdown_heading_sections(base_text)
     if not base_sections:
-        return False
+        return any(_is_protected_heading_path(section[0]) for section in _markdown_heading_sections(preview))
 
     preview_sections = _markdown_heading_sections(preview)
     if len(preview_sections) < len(base_sections):
         return True
 
+    for index, base_section in enumerate(base_sections):
+        if index >= len(preview_sections):
+            return True
+        preview_section = preview_sections[index]
+        if base_section[0] != preview_section[0]:
+            if _is_protected_heading_path(base_section[0]) or _is_protected_heading_path(preview_section[0]):
+                return True
+        if (
+            _is_protected_heading_path(base_section[0])
+            and not _is_editable_heading_path(base_section[0], policy)
+            and preview_section != base_section
+        ):
+            return True
+
     return any(
-        _is_protected_heading_path(base_section[0])
-        and (index >= len(preview_sections) or preview_sections[index] != base_section)
-        for index, base_section in enumerate(base_sections)
+        _is_protected_heading_path(section[0])
+        for section in preview_sections[len(base_sections) :]
     )
 
 
 def _is_protected_heading_path(heading_path: tuple[str, ...]) -> bool:
     heading_text = " / ".join(heading_path).lower()
     return any(term in heading_text for term in PROTECTED_HEADING_TERMS)
+
+
+def _is_editable_heading_path(heading_path: tuple[str, ...], policy: Policy) -> bool:
+    heading_text = _normalized_heading_path(" / ".join(heading_path))
+    return heading_text in {_normalized_heading_path(pattern) for pattern in policy.editable_headings}
+
+
+def _normalized_heading_path(value: str) -> str:
+    return " / ".join(part.strip().lower() for part in value.split("/") if part.strip())
 
 
 def _markdown_heading_sections(text: str) -> tuple[tuple[tuple[str, ...], str], ...]:

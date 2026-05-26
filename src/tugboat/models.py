@@ -61,6 +61,7 @@ class Policy:
     roadmap_learning_rate_max_normative_changes: int = 2
     roadmap_learning_rate_operator_risk_limits: dict[str, int] = field(default_factory=dict)
     risk_class_changed_line_budgets: dict[str, int] = field(default_factory=dict)
+    editable_headings: tuple[str, ...] = field(default_factory=tuple)
     auto_apply_minimum_burn_in_days: int = 30
     auto_apply_maximum_rejection_rate: float = 0.05
     auto_apply_maximum_rollback_rate: float = 0.01
