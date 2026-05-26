@@ -516,14 +516,21 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
         if method == "tools/call":
             params = request.get("params", {})
             if not isinstance(params, dict):
-                raise ValueError("params must be an object")
+                return _jsonrpc_error(request_id, -32602, "invalid params: params must be an object")
             name = str(params.get("name", ""))
             arguments = params.get("arguments", {})
             if not isinstance(arguments, dict):
-                raise ValueError("arguments must be an object")
+                return _jsonrpc_error(
+                    request_id,
+                    -32602,
+                    "invalid params: arguments must be an object",
+                )
             tool = MCP_TOOLS.get(name)
             if tool is None:
                 return _jsonrpc_error(request_id, -32601, f"unknown MCP tool: {name}")
+            invalid_params = _validate_tool_arguments(name, arguments)
+            if invalid_params is not None:
+                return _jsonrpc_error(request_id, -32602, f"invalid params: {invalid_params}")
             result = tool(**arguments)
             return {
                 "jsonrpc": "2.0",
@@ -574,6 +581,33 @@ def run_stdio_server(input_stream, output_stream) -> int:
 
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    schema = MCP_TOOL_INPUT_SCHEMAS[tool_name]
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+    for name in required:
+        if name not in arguments:
+            return f"missing required argument: {name}"
+    for name, value in sorted(arguments.items()):
+        expected = properties.get(name)
+        if expected is None:
+            return f"unknown argument: {name}"
+        expected_type = expected.get("type")
+        if expected_type == "string" and not isinstance(value, str):
+            return f"{name} must be string"
+        if expected_type == "integer" and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            return f"{name} must be integer"
+        minimum = expected.get("minimum")
+        if minimum is not None and isinstance(value, int) and value < int(minimum):
+            return f"{name} must be >= {minimum}"
+        maximum = expected.get("maximum")
+        if maximum is not None and isinstance(value, int) and value > int(maximum):
+            return f"{name} must be <= {maximum}"
+    return None
 
 
 def _audit_call(

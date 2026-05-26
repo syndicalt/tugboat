@@ -1270,6 +1270,94 @@ def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):
     assert "unknown MCP tool" in response["error"]["message"]
 
 
+def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
+    missing_repo = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_status",
+                "arguments": {},
+            },
+        }
+    )
+    wrong_candidate_type = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_candidate_report",
+                "arguments": {"repo": str(tmp_path), "candidate_id": "7"},
+            },
+        }
+    )
+    unknown_argument = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_status",
+                "arguments": {"repo": str(tmp_path), "extra": "ignored?"},
+            },
+        }
+    )
+    limit_below_minimum = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_latest_runs",
+                "arguments": {"repo": str(tmp_path), "limit": 0},
+            },
+        }
+    )
+    non_object_arguments = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_status",
+                "arguments": [],
+            },
+        }
+    )
+
+    assert missing_repo == {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "error": {"code": -32602, "message": "invalid params: missing required argument: repo"},
+    }
+    assert wrong_candidate_type == {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "error": {
+            "code": -32602,
+            "message": "invalid params: candidate_id must be integer",
+        },
+    }
+    assert unknown_argument == {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "error": {"code": -32602, "message": "invalid params: unknown argument: extra"},
+    }
+    assert limit_below_minimum == {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "error": {"code": -32602, "message": "invalid params: limit must be >= 1"},
+    }
+    assert non_object_arguments == {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "error": {"code": -32602, "message": "invalid params: arguments must be an object"},
+    }
+    assert _mcp_events(tmp_path) == []
+
+
 def test_mcp_jsonrpc_redacts_secret_bearing_error_messages(tmp_path: Path):
     response = handle_jsonrpc_request(
         {
