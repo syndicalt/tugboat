@@ -17,6 +17,7 @@ TRUST_BY_EVENT_TYPE = {
     "test_result": "artifact",
     "instruction_snapshot": "artifact",
     "final_answer": "agent",
+    "subagent_report": "agent",
     "outcome_label": "verifier",
     "verifier_score": "verifier",
     "policy_violation": "policy",
