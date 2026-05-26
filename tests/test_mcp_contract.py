@@ -15,6 +15,7 @@ from tugboat.mcp import (
     tugboat_active_instructions,
     tugboat_candidate,
     tugboat_harness_findings,
+    tugboat_latest_audit,
     tugboat_instruction_graph,
     tugboat_latest_runs,
     tugboat_record_episode,
@@ -313,6 +314,108 @@ def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
         {"kind": "audit", "path": ".sidecar/runs/run-3/audit.json"},
         {"kind": "optimization_summary", "path": ".sidecar/runs/run-3/optimization-summary.json"},
     ]
+
+
+def test_latest_audit_returns_sanitized_newest_audit_summary_and_audits(tmp_path: Path):
+    repo = tmp_path
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        for run_id, stage in (("run-1", "audit"), ("run-2", "audit"), ("run-3", "optimize")):
+            run_dir = runs_dir(repo) / run_id
+            run_dir.mkdir(parents=True)
+            if stage == "audit":
+                (run_dir / "audit.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "audit_id": 17 if run_id == "run-2" else 7,
+                            "edit_warranted": True,
+                            "evidence_refs": ["event:1", "sk-thissecretkeyvalue1234567890"],
+                            "failure_class": "instruction_missing",
+                            "severity": "medium",
+                            "confidence": 0.75,
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (run_dir / "audit.raw.json").write_text(
+                    '{"model_payload":"sk-thissecretkeyvalue1234567890"}\n',
+                    encoding="utf-8",
+                )
+            store.insert_run(
+                run_id=run_id,
+                stage=stage,
+                manifest_hash=f"hash-{run_id}",
+                status="completed",
+                run_dir=run_dir,
+            )
+
+    result = tugboat_latest_audit(repo)
+
+    assert result == {
+        "audit": {
+            "run": {"run_id": "run-2", "status": "completed"},
+            "artifacts": [{"kind": "audit", "path": ".sidecar/runs/run-2/audit.json"}],
+            "summary": {
+                "audit_id": 17,
+                "edit_warranted": True,
+                "failure_class": "instruction_missing",
+                "severity": "medium",
+                "confidence": 0.75,
+                "evidence_ref_count": 2,
+            },
+        }
+    }
+    serialized = json.dumps(result, sort_keys=True)
+    assert "audit.raw" not in serialized
+    assert "sk-thissecret" not in serialized
+    assert "run-3" not in serialized
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_latest_audit"
+
+
+def test_latest_audit_tie_breaks_equal_created_at_by_updated_at(tmp_path: Path):
+    repo = tmp_path
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        for run_id in ("run-1", "run-2"):
+            run_dir = runs_dir(repo) / run_id
+            run_dir.mkdir(parents=True)
+            (run_dir / "audit.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "audit_id": 1 if run_id == "run-1" else 2,
+                        "edit_warranted": True,
+                        "evidence_refs": [],
+                        "failure_class": "instruction_missing",
+                        "severity": "medium",
+                        "confidence": 0.75,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            store.insert_run(
+                run_id=run_id,
+                stage="audit",
+                manifest_hash=f"hash-{run_id}",
+                status="completed",
+                run_dir=run_dir,
+            )
+        store.connection.execute(
+            "UPDATE runs SET created_at = '2026-05-26T00:00:00+00:00' WHERE id IN ('run-1', 'run-2')"
+        )
+        store.connection.execute(
+            "UPDATE runs SET updated_at = '2026-05-26T00:00:02+00:00' WHERE id = 'run-1'"
+        )
+        store.connection.execute(
+            "UPDATE runs SET updated_at = '2026-05-26T00:00:01+00:00' WHERE id = 'run-2'"
+        )
+        store.connection.commit()
+
+    result = tugboat_latest_audit(repo)
+
+    assert result["audit"]["run"]["run_id"] == "run-1"
+    assert result["audit"]["summary"]["audit_id"] == 1
 
 
 def test_run_report_summarizes_known_artifacts_without_raw_payloads(tmp_path: Path):
@@ -816,6 +919,7 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
 
     by_name = {tool["name"]: tool for tool in tools}
     assert "tugboat_active_instructions" in by_name
+    assert "tugboat_latest_audit" in by_name
     assert "tugboat_status" in by_name
     assert "tugboat_request_audit" in by_name
     assert by_name["tugboat_active_instructions"] == {
@@ -825,6 +929,11 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     }
     assert by_name["tugboat_status"] == {
         "name": "tugboat_status",
+        "mutates_instructions": False,
+        "write_intent": False,
+    }
+    assert by_name["tugboat_latest_audit"] == {
+        "name": "tugboat_latest_audit",
         "mutates_instructions": False,
         "write_intent": False,
     }
@@ -859,6 +968,24 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     assert response["id"] == 2
     assert response["result"]["content"][0]["type"] == "json"
     assert response["result"]["content"][0]["json"]["mode"] == "proposal_only"
+
+    latest_audit_response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_latest_audit",
+                "arguments": {"repo": str(repo)},
+            },
+        }
+    )
+
+    assert latest_audit_response == {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {"content": [{"type": "json", "json": {"audit": None}}]},
+    }
 
 
 def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):

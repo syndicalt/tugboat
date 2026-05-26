@@ -176,6 +176,35 @@ def tugboat_latest_runs(repo: str | Path, limit: int = 10) -> dict[str, Any]:
     return _audit_call(repo_path, "tugboat_latest_runs", {"limit": normalized_limit}, read)
 
 
+def tugboat_latest_audit(repo: str | Path) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
+            row = store.connection.execute(
+                """
+                SELECT id, status, run_dir
+                FROM runs
+                WHERE stage = 'audit'
+                ORDER BY created_at DESC, updated_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return {"audit": None}
+        run_dir = _stored_path(repo_path, row[2])
+        audit = {
+            "run": {"run_id": str(row[0]), "status": str(row[1])},
+            "artifacts": _run_artifact_refs(repo_path, run_dir),
+        }
+        summary = _audit_artifact_summary(run_dir / "audit.json")
+        if summary is not None:
+            audit["summary"] = summary
+        return {"audit": audit}
+
+    return _audit_call(repo_path, "tugboat_latest_audit", {}, read)
+
+
 def tugboat_run_report(repo: str | Path, run_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
     run_dir = _run_dir(repo_path, run_id)
@@ -347,6 +376,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_daemon_status": tugboat_daemon_status,
     "tugboat_harness_findings": tugboat_harness_findings,
     "tugboat_instruction_graph": tugboat_instruction_graph,
+    "tugboat_latest_audit": tugboat_latest_audit,
     "tugboat_latest_runs": tugboat_latest_runs,
     "tugboat_record_episode": tugboat_record_episode,
     "tugboat_request_audit": tugboat_request_audit,
