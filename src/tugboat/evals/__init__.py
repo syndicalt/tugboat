@@ -270,6 +270,7 @@ def run_provider_smoke_suite(
     opted_in: bool,
     provider: str | None = None,
     smoke_command: str | None = None,
+    allowed_providers: tuple[str, ...] = (),
 ) -> OfflineEvalReport:
     if not opted_in:
         return OfflineEvalReport(
@@ -298,6 +299,25 @@ def run_provider_smoke_suite(
                 "provider_smoke_opted_in": 1,
                 "provider_smoke_configured": 0,
                 "provider_smoke_missing_credentials": 1,
+            },
+            trigger_score=0.0,
+            held_out_score=0.0,
+            governance_passed=True,
+            recommendation="reject",
+            live_provider_required=True,
+        )
+    if provider not in set(allowed_providers):
+        return OfflineEvalReport(
+            suite_id="provider-smoke",
+            passed=False,
+            metrics={
+                "provider_smoke_cases": 1,
+                "provider_smoke_failures": 1,
+                "provider_smoke_skipped": 0,
+                "provider_smoke_opted_in": 1,
+                "provider_smoke_configured": 1,
+                "provider_smoke_missing_credentials": 0,
+                "provider_smoke_provider_allowed": 0,
             },
             trigger_score=0.0,
             held_out_score=0.0,

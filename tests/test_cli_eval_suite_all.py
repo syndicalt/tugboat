@@ -330,6 +330,9 @@ def test_eval_provider_smoke_policy_opt_in_reports_missing_provider_credentials(
     (sidecar / "policy.yaml").write_text(
         """
 version: 1
+llmff:
+  allowed_providers:
+    - openai
 provider_smoke:
   enabled: true
 """.lstrip(),
@@ -375,6 +378,9 @@ def test_eval_provider_smoke_policy_opt_in_runs_env_configured_smoke_command_and
     (sidecar / "policy.yaml").write_text(
         """
 version: 1
+llmff:
+  allowed_providers:
+    - openai
 provider_smoke:
   enabled: true
 """.lstrip(),
@@ -425,6 +431,9 @@ def test_eval_provider_smoke_can_be_enabled_by_repo_policy_without_env_flags(
     (sidecar / "policy.yaml").write_text(
         f"""
 version: 1
+llmff:
+  allowed_providers:
+    - grok
 provider_smoke:
   enabled: true
   provider: grok
@@ -449,6 +458,56 @@ provider_smoke:
     assert report["metrics"]["provider_smoke_runner_configured"] == 1
 
 
+def test_eval_provider_smoke_rejects_policy_provider_not_in_llmff_allowlist(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE", raising=False)
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", raising=False)
+    smoke = tmp_path / "provider_smoke.py"
+    smoke.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  allowed_providers:
+    - openai
+provider_smoke:
+  enabled: true
+  provider: anthropic
+  command: "{sys.executable} {smoke}"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
+
+    report_text = (run_dir / "eval-report.json").read_text(encoding="utf-8")
+    report = json.loads(report_text)
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert report["metrics"] == {
+        "provider_smoke_cases": 1,
+        "provider_smoke_failures": 1,
+        "provider_smoke_skipped": 0,
+        "provider_smoke_opted_in": 1,
+        "provider_smoke_configured": 1,
+        "provider_smoke_missing_credentials": 0,
+        "provider_smoke_provider_allowed": 0,
+    }
+    assert "anthropic" not in report_text
+
+
 def test_eval_provider_smoke_failure_records_sanitized_metrics_without_raw_provider_output(
     tmp_path: Path,
     monkeypatch,
@@ -469,6 +528,9 @@ def test_eval_provider_smoke_failure_records_sanitized_metrics_without_raw_provi
     (sidecar / "policy.yaml").write_text(
         """
 version: 1
+llmff:
+  allowed_providers:
+    - anthropic
 provider_smoke:
   enabled: true
 """.lstrip(),

@@ -56,6 +56,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 or policy.provider_smoke_command
                 or None
             ),
+            allowed_providers=policy.llmff_allowed_providers,
         )
         passed = offline_report.passed
         metrics = offline_report.metrics
