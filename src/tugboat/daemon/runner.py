@@ -56,8 +56,14 @@ def discover_trace_jobs(
     planned_registry = set(registry)
     discovered = 0
     skipped = 0
+    repo_root = repo.resolve()
     for trace_dir in trace_dirs:
-        for path in sorted(trace_dir.glob("*.jsonl")):
+        trace_dir_path = trace_dir.resolve()
+        trace_paths = sorted(trace_dir_path.glob("*.jsonl"))
+        if not trace_dir_path.is_relative_to(repo_root):
+            skipped += len(trace_paths)
+            continue
+        for path in trace_paths:
             trace_key = str(path.resolve())
             if trace_key in planned_registry:
                 skipped += 1

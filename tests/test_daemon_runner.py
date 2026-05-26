@@ -167,6 +167,28 @@ def test_discover_trace_jobs_deduplicates_overlapping_trace_dirs_in_one_pass(
         assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 1
 
 
+def test_discover_trace_jobs_skips_trace_dirs_outside_repo_without_queueing(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    trace_dir = tmp_path / "outside-traces"
+    trace_dir.mkdir()
+    trace = trace_dir / "episode.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    result = discover_trace_jobs(repo, [trace_dir], now=_at(0))
+
+    assert result == {"discovered": 0, "skipped": 1}
+    assert json.loads(
+        (repo / ".sidecar" / "discovered-traces.json").read_text(encoding="utf-8")
+    ) == {"schema_version": 1, "traces": []}
+    queue_path = repo / ".sidecar" / "daemon.sqlite"
+    if queue_path.exists():
+        with DaemonQueue.open_sidecar(repo) as queue:
+            assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+
+
 def test_discover_trace_jobs_validates_registry_before_queue_visibility(
     tmp_path: Path,
     monkeypatch,
