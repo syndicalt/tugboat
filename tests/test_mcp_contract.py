@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import tugboat.mcp.contracts as mcp_contracts
 from tugboat.daemon.service import DaemonRunConfig, run_daemon_once
 from tugboat.db import Store
 from tugboat.mcp import (
@@ -1696,6 +1697,37 @@ def test_mcp_jsonrpc_redacts_secret_bearing_error_messages(tmp_path: Path):
     assert response["error"]["code"] == -32000
     assert "sk-thissecret" not in response["error"]["message"]
     assert "[REDACTED:openai_api_key]" in response["error"]["message"]
+
+
+def test_mcp_jsonrpc_redacts_secret_bearing_tool_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_status(repo: str) -> dict[str, object]:
+        return {
+            "mode": "proposal_only",
+            "provider_token": "sk-thissecretkeyvalue1234567890",
+            "nested": {"log": "using sk-thissecretkeyvalue1234567890"},
+        }
+
+    monkeypatch.setitem(mcp_contracts.MCP_TOOLS, "tugboat_status", fake_status)
+
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_status",
+                "arguments": {"repo": str(tmp_path)},
+            },
+        }
+    )
+
+    serialized = json.dumps(response)
+    assert response["result"]["content"][0]["json"]["mode"] == "proposal_only"
+    assert "sk-thissecret" not in serialized
+    assert serialized.count("[REDACTED:openai_api_key]") == 2
 
 
 def test_mcp_stdio_returns_parse_error_for_malformed_json():

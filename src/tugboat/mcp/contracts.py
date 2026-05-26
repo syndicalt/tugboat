@@ -544,7 +544,7 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"content": [{"type": "json", "json": result}]},
+                "result": {"content": [{"type": "json", "json": redact_payload(result)}]},
             }
         return _jsonrpc_error(request_id, -32601, f"unknown JSON-RPC method: {method}")
     except Exception as error:
