@@ -98,6 +98,14 @@ if args[:1] == ["run"]:
             "allowed": True,
             "reasons": [],
         }) + "\\n", encoding="utf-8")
+    elif manifest == "acceptance-summary":
+        outputs["acceptance_summary"].write_text(json.dumps({
+            "decision_recommendation": "needs_review",
+            "reasons": ["policy gate and eval report passed"],
+            "evidence": ["audit:1"],
+            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+        }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
@@ -163,6 +171,8 @@ llmff:
     assert (run_dir / "candidate.json").exists()
     assert (run_dir / "policy-gate.json").exists()
     assert (run_dir / "eval-report.json").exists()
+    assert (run_dir / "acceptance-summary.raw.json").exists()
+    assert (run_dir / "optimization-summary.json").exists()
     assert (run_dir / "decision.json").exists()
     assert (run_dir / "report.md").exists()
     assert json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8")) == {
@@ -173,6 +183,9 @@ llmff:
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    optimization_summary = json.loads(
+        (run_dir / "optimization-summary.json").read_text(encoding="utf-8")
+    )
     decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
     assert audit["schema_version"] == 1
     assert candidate["schema_version"] == 1
@@ -180,6 +193,16 @@ llmff:
     assert decision["schema_version"] == 1
     assert candidate["audit_id"] == audit["audit_id"]
     assert eval_report["candidate_id"] == candidate["candidate_id"]
+    assert optimization_summary["decision"] == "needs_review"
+    assert optimization_summary["accepted_bounded_edit_metadata"] == [
+        {
+            "changed_lines": 1,
+            "file": "CODEX.md",
+            "normative_changes": 0,
+            "operator": "add",
+            "section": "Rules",
+        }
+    ]
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1

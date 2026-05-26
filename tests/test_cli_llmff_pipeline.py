@@ -2876,6 +2876,182 @@ llmff:
     assert output == ("acceptance_summary", str(run_dir / "acceptance-summary.raw.json"))
 
 
+def test_eval_runs_acceptance_summary_and_writes_optimization_summary_for_file_backed_candidate(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    acceptance_summary = json.loads((run_dir / "acceptance-summary.raw.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        baseline_payload = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'validation_baseline'
+              AND key = 'validation_baseline:all'
+            """
+        ).fetchone()[0]
+        gate_decision = store.connection.execute(
+            """
+            SELECT policy, decision, reason
+            FROM decisions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert jobs[-2:] == [("patch-eval.yaml", "completed"), ("acceptance-summary.yaml", "completed")]
+    assert acceptance_summary["decision_recommendation"] == "needs_review"
+    assert summary["decision"] == "needs_review"
+    assert summary["suite_id"] == "all"
+    assert summary["validation_baseline_score"] is None
+    assert summary["acceptance_summary_path"] == (
+        f".sidecar/runs/{run_dir.name}/acceptance-summary.raw.json"
+    )
+    assert summary["accepted_bounded_edit_metadata"] == [
+        {
+            "changed_lines": 1,
+            "file": "CODEX.md",
+            "normative_changes": 0,
+            "operator": "add",
+            "section": "Testing",
+        }
+    ]
+    assert json.loads(baseline_payload) == {
+        "candidate_id": summary["candidate_id"],
+        "held_out_score": 0.9,
+        "suite_id": "all",
+    }
+    assert gate_decision == (
+        "optimization_acceptance_gate",
+        "needs_review",
+        "held_out_improved",
+    )
+
+
+def test_eval_rejects_file_backed_candidate_before_acceptance_summary_when_baseline_not_improved(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.2,
+            "held_out_score": 0.3,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo.resolve()),
+            memory_type="validation_baseline",
+            key="validation_baseline:all",
+            payload={"suite_id": "all", "held_out_score": 0.4},
+        )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        baseline_payload = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'validation_baseline'
+              AND key = 'validation_baseline:all'
+            """
+        ).fetchone()[0]
+        gate_decision = store.connection.execute(
+            """
+            SELECT policy, decision, reason
+            FROM decisions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert jobs[-1] == ("patch-eval.yaml", "completed")
+    assert ("acceptance-summary.yaml", "completed") not in jobs
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+    assert summary["decision"] == "rejected"
+    assert summary["suite_id"] == "all"
+    assert summary["validation_baseline_score"] == 0.4
+    assert decision["policy_reasons"] == ["held-out eval score did not improve over baseline"]
+    assert json.loads(baseline_payload)["held_out_score"] == 0.4
+    assert gate_decision == (
+        "optimization_acceptance_gate",
+        "rejected",
+        "held-out eval score did not improve over baseline",
+    )
+
+
 def test_optimize_rejects_candidate_when_held_out_gate_fails(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

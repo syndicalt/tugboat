@@ -418,7 +418,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         result = run_eval_pipeline(repo, args.candidate, args.suite)
         print(result.message)
-        return result.exit_code
+        return _finalize_governed_candidate_evaluation(
+            repo,
+            result.run_dir,
+            suite_id=args.suite,
+            eval_exit_code=result.exit_code,
+        )
 
     if args.command == "optimize":
         repo = Path(args.repo)
@@ -439,28 +444,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = latest_run_dir(repo)
         if propose_exit != 0:
             return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
-        eval_exit = main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", args.suite])
-        if eval_exit == 0:
-            try:
-                eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
-                policy_gate = _read_optional_json_object(run_dir / "policy-gate.json")
-                _assert_eval_acceptance(
-                    eval_report,
-                    policy_gate,
-                    validation_baseline_score=_load_validation_baseline_score(
-                        repo,
-                        suite_id=args.suite,
-                    ),
-                )
-            except ValueError:
-                pass
-            else:
-                try:
-                    _run_acceptance_summary(repo, run_dir, load_policy(repo))
-                except (RuntimeError, ValueError) as error:
-                    print(str(error))
-                    return 1
-        return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
+        eval_result = run_eval_pipeline(repo, "latest", args.suite)
+        print(eval_result.message)
+        return _finalize_governed_candidate_evaluation(
+            repo,
+            run_dir,
+            suite_id=args.suite,
+            eval_exit_code=eval_result.exit_code,
+        )
 
     if args.command == "apply":
         repo = Path(args.repo)
@@ -1114,6 +1105,40 @@ def _record_optimization_slow_update(
             "note": f"{reason} for candidate {candidate_id} in suite {suite_id}",
         },
     )
+
+
+def _finalize_governed_candidate_evaluation(
+    repo: Path,
+    run_dir: Path,
+    *,
+    suite_id: str,
+    eval_exit_code: int,
+) -> int:
+    if not (run_dir / "candidate.raw.json").exists():
+        return eval_exit_code
+    if not (run_dir / "eval-report.json").exists():
+        return eval_exit_code
+    if eval_exit_code == 0:
+        try:
+            eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+            policy_gate = _read_optional_json_object(run_dir / "policy-gate.json")
+            _assert_eval_acceptance(
+                eval_report,
+                policy_gate,
+                validation_baseline_score=_load_validation_baseline_score(
+                    repo,
+                    suite_id=suite_id,
+                ),
+            )
+        except ValueError:
+            pass
+        else:
+            try:
+                _run_acceptance_summary(repo, run_dir, load_policy(repo))
+            except (RuntimeError, ValueError) as error:
+                print(str(error))
+                return 1
+    return _write_optimization_summary(repo, run_dir, suite_id=suite_id)
 
 
 def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, object]:
