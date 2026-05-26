@@ -63,6 +63,107 @@ def test_harness_legibility_flags_broken_repo_local_markdown_links(tmp_path: Pat
     ]
 
 
+def test_harness_legibility_flags_missing_repo_local_markdown_anchors(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "CODEX.md").write_text(
+        "# Codex Map\n\nSee [missing anchor](docs/runbook.md#missing-anchor).\n",
+        encoding="utf-8",
+    )
+
+    result = check_harness_legibility(repo)
+
+    assert result.passed is False
+    assert result.findings == [
+        "CODEX.md references missing repo-local markdown anchor docs/runbook.md#missing-anchor."
+    ]
+
+
+def test_harness_report_turns_missing_instruction_anchor_into_cleanup_task(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "CODEX.md").write_text(
+        "# Codex Map\n\nSee [missing anchor](docs/runbook.md#missing-anchor).\n",
+        encoding="utf-8",
+    )
+
+    report = generate_harness_report(repo)
+
+    expected = "CODEX.md references missing repo-local markdown anchor docs/runbook.md#missing-anchor."
+    assert report.stale_docs == [expected]
+    assert report.doc_gardening_tasks == [
+        "Add or fix docs/runbook.md#missing-anchor referenced by CODEX.md."
+    ]
+
+
+def test_harness_legibility_ignores_headings_inside_fenced_code_for_anchors(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\n"
+        "owner: platform\n"
+        "verification_status: verified\n"
+        "---\n"
+        "# Runbook\n\n"
+        "```md\n"
+        "# Missing Anchor\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    (repo / "CODEX.md").write_text(
+        "# Codex Map\n\nSee [missing anchor](docs/runbook.md#missing-anchor).\n",
+        encoding="utf-8",
+    )
+
+    result = check_harness_legibility(repo)
+
+    assert result.passed is False
+    assert result.findings == [
+        "CODEX.md references missing repo-local markdown anchor docs/runbook.md#missing-anchor."
+    ]
+
+
+def test_cleanup_candidate_for_missing_anchor_keeps_source_finding(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "CODEX.md").write_text(
+        "# Codex Map\n\nSee [missing anchor](docs/runbook.md#missing-anchor).\n",
+        encoding="utf-8",
+    )
+
+    candidates = generate_cleanup_candidates(repo)
+
+    assert [candidate.to_json_dict() for candidate in candidates] == [
+        {
+            "candidate_id": "harness-cleanup-1",
+            "risk_class": "review_required",
+            "auto_apply": False,
+            "task": "Add or fix docs/runbook.md#missing-anchor referenced by CODEX.md.",
+            "source_findings": [
+                "CODEX.md references missing repo-local markdown anchor "
+                "docs/runbook.md#missing-anchor.",
+            ],
+            "required_eval_suites": ["structural"],
+        }
+    ]
+
+
 def test_harness_legibility_flags_instruction_files_without_local_markdown_refs(tmp_path: Path):
     repo = tmp_path
     (repo / "SKILL.md").write_text(

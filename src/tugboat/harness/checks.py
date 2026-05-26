@@ -9,6 +9,10 @@ from typing import Any
 
 INSTRUCTION_FILES = ("AGENTS.md", "CODEX.md", "CLAUDE.md", "SKILL.md")
 MARKDOWN_LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+FENCE_PATTERN = re.compile(r"^[ \t]*(```|~~~)")
+ANCHOR_WORD_PATTERN = re.compile(r"[^a-z0-9 -]")
+ANCHOR_SPACE_PATTERN = re.compile(r"[ -]+")
 
 
 @dataclass(frozen=True)
@@ -89,19 +93,10 @@ def check_harness_legibility(
             continue
 
         for ref in local_markdown_refs:
-            target = (path.parent / ref).resolve()
-            if not _is_relative_to(target, repo):
-                findings.append(
-                    f"{relative_path} references markdown file outside the repo: {ref.as_posix()}."
-                )
-                continue
-
-            if not target.is_file():
-                findings.append(
-                    f"{relative_path} references missing repo-local markdown file {ref.as_posix()}."
-                )
-                continue
-            findings.extend(_metadata_findings(repo, target))
+            findings.extend(_markdown_ref_findings(repo, path, ref))
+            target = (path.parent / ref.path).resolve()
+            if _is_relative_to(target, repo) and target.is_file():
+                findings.extend(_metadata_findings(repo, target))
 
     for normalized_rule, count in sorted(rule_counts.items()):
         if count > 1:
@@ -125,22 +120,37 @@ def generate_harness_report(repo: Path) -> HarnessReport:
         path = repo / relative_path
         if not path.exists():
             continue
-        refs = sorted({ref.as_posix() for ref in _repo_local_markdown_refs(path.read_text(encoding="utf-8"))})
+        markdown_refs = sorted(
+            _repo_local_markdown_refs(path.read_text(encoding="utf-8")),
+            key=lambda ref: ref.path.as_posix(),
+        )
+        refs = sorted(
+            {ref.path.as_posix() for ref in markdown_refs}
+        )
         if refs:
             knowledge_map[relative_path] = refs
-        for ref in refs:
-            referenced_docs.add(ref)
-            target = (path.parent / ref).resolve()
+        for markdown_ref in markdown_refs:
+            ref_path = markdown_ref.path.as_posix()
+            referenced_docs.add(ref_path)
+            target = (path.parent / markdown_ref.path).resolve()
             if not _is_relative_to(target, repo) or not target.is_file():
-                missing_docs.add(ref)
-                doc_gardening_tasks.append(f"Add or fix {ref} referenced by {relative_path}.")
+                missing_docs.add(ref_path)
+                doc_gardening_tasks.append(f"Add or fix {ref_path} referenced by {relative_path}.")
                 continue
+            for finding in _markdown_ref_findings(repo, path, markdown_ref):
+                stale_docs.append(finding)
+                missing_anchor_match = re.match(
+                    r"(.+) references missing repo-local markdown anchor (.+)\.", finding
+                )
+                if missing_anchor_match:
+                    doc_path, missing_ref = missing_anchor_match.groups()
+                    doc_gardening_tasks.append(f"Add or fix {missing_ref} referenced by {doc_path}.")
             for finding in _metadata_findings(repo, target):
                 stale_docs.append(finding)
                 if "ownership metadata" in finding:
-                    doc_gardening_tasks.append(f"Add ownership metadata to {ref}.")
+                    doc_gardening_tasks.append(f"Add ownership metadata to {ref_path}.")
                 if "verification-status metadata" in finding:
-                    doc_gardening_tasks.append(f"Add verification-status metadata to {ref}.")
+                    doc_gardening_tasks.append(f"Add verification-status metadata to {ref_path}.")
                 missing_link_match = re.match(
                     r"(.+) references missing repo-local markdown file (.+)\.", finding
                 )
@@ -190,31 +200,44 @@ def generate_cleanup_candidates(repo: Path) -> list[CleanupCandidate]:
     return candidates
 
 
-def _repo_local_markdown_refs(text: str) -> list[Path]:
-    refs: list[Path] = []
+@dataclass(frozen=True)
+class MarkdownRef:
+    path: Path
+    anchor: str
+
+
+def _repo_local_markdown_refs(text: str) -> list[MarkdownRef]:
+    refs: list[MarkdownRef] = []
     for match in MARKDOWN_LINK_PATTERN.finditer(text):
         raw_target = match.group(1).strip()
         target = _link_destination(raw_target)
         if target is None:
             continue
 
-        path = Path(target)
+        path = Path(target.path)
         if path.suffix.lower() == ".md":
-            refs.append(path)
+            refs.append(MarkdownRef(path=path, anchor=target.anchor))
 
     return refs
 
 
-def _link_destination(raw_target: str) -> str | None:
+@dataclass(frozen=True)
+class LinkDestination:
+    path: str
+    anchor: str
+
+
+def _link_destination(raw_target: str) -> LinkDestination | None:
     if not raw_target or raw_target.startswith("#"):
         return None
 
     first_token = raw_target.split()[0]
-    target = first_token.split("#", 1)[0].split("?", 1)[0]
+    path_and_query, _, fragment = first_token.partition("#")
+    target = path_and_query.split("?", 1)[0]
     if not target or "://" in target or ":" in target or target.startswith("/"):
         return None
 
-    return target
+    return LinkDestination(path=target, anchor=fragment)
 
 
 def _metadata_findings(repo: Path, path: Path) -> list[str]:
@@ -234,17 +257,27 @@ def _metadata_findings(repo: Path, path: Path) -> list[str]:
         if path.stat().st_mtime < source_path.stat().st_mtime:
             findings.append(f"{relative_path} is older than source file {source_ref}.")
     for ref in _repo_local_markdown_refs(text):
-        target = (path.parent / ref).resolve()
-        if not _is_relative_to(target, repo.resolve()):
-            findings.append(
-                f"{relative_path} references markdown file outside the repo: {ref.as_posix()}."
-            )
-            continue
-        if not target.is_file():
-            findings.append(
-                f"{relative_path} references missing repo-local markdown file {ref.as_posix()}."
-            )
+        findings.extend(_markdown_ref_findings(repo, path, ref))
     return findings
+
+
+def _markdown_ref_findings(repo: Path, source_path: Path, ref: MarkdownRef) -> list[str]:
+    relative_path = source_path.relative_to(repo).as_posix()
+    target = (source_path.parent / ref.path).resolve()
+    if not _is_relative_to(target, repo.resolve()):
+        return [
+            f"{relative_path} references markdown file outside the repo: {ref.path.as_posix()}."
+        ]
+    if not target.is_file():
+        return [
+            f"{relative_path} references missing repo-local markdown file {ref.path.as_posix()}."
+        ]
+    if ref.anchor and ref.anchor not in _markdown_anchors(target.read_text(encoding="utf-8")):
+        return [
+            f"{relative_path} references missing repo-local markdown anchor "
+            f"{ref.path.as_posix()}#{ref.anchor}."
+        ]
+    return []
 
 
 def _frontmatter(text: str) -> dict[str, str]:
@@ -291,6 +324,41 @@ def _collect_rules(
             must_rules.add(rule)
         else:
             never_rules.add(rule)
+
+
+def _markdown_anchors(text: str) -> set[str]:
+    anchors: set[str] = set()
+    used: dict[str, int] = {}
+    in_fence = False
+    fence_marker = ""
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        fence_match = FENCE_PATTERN.match(stripped)
+        if fence_match:
+            marker = fence_match.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                in_fence = False
+                fence_marker = ""
+            continue
+        if in_fence:
+            continue
+        match = HEADING_PATTERN.match(line)
+        if not match:
+            continue
+        anchor = _anchor_for(match.group(2).strip())
+        count = used.get(anchor, 0)
+        used[anchor] = count + 1
+        anchors.add(anchor if count == 0 else f"{anchor}-{count}")
+    return anchors
+
+
+def _anchor_for(heading: str) -> str:
+    anchor = heading.lower().strip()
+    anchor = ANCHOR_WORD_PATTERN.sub("", anchor)
+    return ANCHOR_SPACE_PATTERN.sub("-", anchor).strip("-")
 
 
 def _dedupe(values: list[str]) -> list[str]:
@@ -351,6 +419,12 @@ def _finding_by_cleanup_task(report: HarnessReport) -> dict[str, list[str]]:
         )
         if missing_link_match:
             doc_path, missing_ref = missing_link_match.groups()
+            mapping[f"Add or fix {missing_ref} referenced by {doc_path}."] = [finding]
+        missing_anchor_match = re.match(
+            r"(.+) references missing repo-local markdown anchor (.+)\.", finding
+        )
+        if missing_anchor_match:
+            doc_path, missing_ref = missing_anchor_match.groups()
             mapping[f"Add or fix {missing_ref} referenced by {doc_path}."] = [finding]
     for orphan in report.orphaned_runbooks:
         task = f"Either reference {orphan} from an instruction map or remove/archive it."
