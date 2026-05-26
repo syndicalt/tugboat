@@ -67,7 +67,7 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
                 "recovered_jobs": list(recovered),
             }
         _record_job_state(repo, job.id, job.state)
-        final_job = _process_job(repo, queue, job.id, now=config.now)
+        final_job = process_daemon_job(repo, queue, job.id, now=config.now)
         return {
             "processed": True,
             "job_id": final_job.id,
@@ -138,7 +138,7 @@ def _handle_socket_request(
     return {"error": f"unknown daemon command: {command}"}
 
 
-def _process_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
+def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
     running = queue.transition(job_id, JobState.RUNNING, now=now)
     _record_job_state(repo, running.id, running.state)
     if running.kind == "trace_audit":

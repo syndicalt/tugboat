@@ -15,6 +15,56 @@ from tugboat.daemon.runner import (
 )
 
 
+def _write_fake_llmff(path: Path) -> Path:
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if args[:3] == ["inspect", "--format", "json"]:
+    print(json.dumps({"manifest": Path(args[3]).stem, "network_required": False}))
+    raise SystemExit(0)
+
+if args[:1] == ["run"]:
+    manifest = Path(args[1]).stem
+    trace = Path(args[args.index("--trace") + 1])
+    events = Path(args[args.index("--events") + 1])
+    checkpoint = Path(args[args.index("--checkpoint") + 1])
+    outputs = {}
+    index = 0
+    while index < len(args):
+        if args[index] == "--output":
+            outputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
+        index += 1
+    trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
+    events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
+    checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    if manifest == "instruction-index":
+        outputs["instruction_index"].write_text(json.dumps({
+            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "episode-audit":
+        outputs["audit_report"].write_text(json.dumps({
+            "edit_warranted": True,
+            "failure_class": "cycle_instruction_conflict",
+            "severity": "high",
+            "confidence": 0.92,
+            "evidence_refs": ["ev_cycle"],
+        }) + "\\n", encoding="utf-8")
+    raise SystemExit(0)
+
+raise SystemExit(64)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
 def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
     trace_dir = tmp_path / "traces"
     trace_dir.mkdir()
@@ -98,6 +148,20 @@ def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueu
 def test_run_daemon_cycle_updates_main_store_job_state_for_discovered_trace(
     tmp_path: Path,
 ):
+    (tmp_path / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
     trace_dir = tmp_path / "configured-traces"
     trace_dir.mkdir()
     (trace_dir / "episode.jsonl").write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
@@ -130,8 +194,24 @@ def test_run_daemon_cycle_updates_main_store_job_state_for_discovered_trace(
             ORDER BY sequence
             """
         ).fetchall()
+        llmff_jobs = connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            ORDER BY id
+            """
+        ).fetchall()
 
     assert ledger_job == ("1", "waiting_review")
+    run_dir = sorted((tmp_path / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "cycle_instruction_conflict"
+    assert audit["evidence_refs"] == ["ev_cycle"]
+    assert (run_dir / "audit.raw.json").exists()
+    assert llmff_jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+    ]
     assert transition_events == [
         ("daemon_job.state_changed", "inspecting"),
         ("daemon_job.state_changed", "running"),

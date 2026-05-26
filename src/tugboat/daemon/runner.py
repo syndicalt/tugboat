@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
+from tugboat.daemon.service import process_daemon_job
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 
@@ -85,12 +86,10 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
                     )
                     continue
                 resume_jobs.append(resume)
-            running = queue.transition(job.id, JobState.RUNNING, now=config.now)
-            _record_job_state(repo, running.id, running.state)
-            evaluating = queue.transition(job.id, JobState.EVALUATING, now=config.now)
-            _record_job_state(repo, evaluating.id, evaluating.state)
-            waiting_review = queue.transition(job.id, JobState.WAITING_REVIEW, now=config.now)
-            _record_job_state(repo, waiting_review.id, waiting_review.state)
+            final_job = process_daemon_job(repo, queue, job.id, now=config.now)
+            if final_job.state is JobState.FAILED:
+                failed_jobs.append({"job_id": job.id, "reason": "job_failed"})
+                continue
             processed_jobs.append(job.id)
         remaining_queued = _queued_count(queue)
 
