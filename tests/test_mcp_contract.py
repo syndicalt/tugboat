@@ -81,6 +81,9 @@ if args[:1] == ["run"]:
             "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add daemon proposed guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "daemon proposal from audited evidence",
+            "expected_behavior_change": "Agents add daemon-reviewed guidance before closing fixes.",
+            "evals_required": ["governance-regression"],
+            "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
             "sources": [{"source_id": "ev_mcp_daemon", "trusted": True}],
             "bounded_edit_metadata": [{
                 "operator": "add",

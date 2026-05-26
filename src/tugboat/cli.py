@@ -629,6 +629,9 @@ def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
         diff=diff,
         risk_class=str(metadata["risk_class"]),
         rationale=str(metadata["rationale"]),
+        expected_behavior_change=str(metadata.get("expected_behavior_change", "Not specified.")),
+        evals_required=tuple(str(item) for item in metadata.get("evals_required", [])),
+        rollback_plan=tuple(str(item) for item in metadata.get("rollback_plan", [])),
         sources=tuple(
             SourceRef(str(source["source_id"]), trusted=bool(source["trusted"]))
             for source in metadata.get("sources", [])

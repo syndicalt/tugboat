@@ -60,6 +60,9 @@ if args[:1] == ["run"]:
             "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add regression-test guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
+            "expected_behavior_change": "Agents add regression-test guidance before closing fixes.",
+            "evals_required": ["governance-regression"],
+            "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
             "sources": [{"source_id": "ev_e2e", "trusted": True}],
             "bounded_edit_metadata": [{
                 "operator": "add",

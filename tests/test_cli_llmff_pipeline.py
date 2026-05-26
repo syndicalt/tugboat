@@ -160,6 +160,9 @@ if args[:1] == ["run"]:
             "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add llmff proposed regression guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
+            "expected_behavior_change": "Agents add regression guidance before closing similar fixes.",
+            "evals_required": ["governance-regression"],
+            "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
             "sources": SOURCES,
             "reflections": REFLECTIONS,
             "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
@@ -565,6 +568,11 @@ llmff:
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
     assert candidate["rationale"] == "llmff proposed this from audited evidence"
+    assert candidate["expected_behavior_change"] == (
+        "Agents add regression guidance before closing similar fixes."
+    )
+    assert candidate["evals_required"] == ["governance-regression"]
+    assert candidate["rollback_plan"] == ["tugboat", "rollback", "--decision", "latest"]
     assert candidate["bounded_edit_metadata"] == [
         {
             "operator": "add",

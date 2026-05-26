@@ -117,6 +117,9 @@ class CandidatePatch:
     diff: str
     risk_class: str
     rationale: str
+    expected_behavior_change: str = "Not specified."
+    evals_required: tuple[str, ...] = ("governance-regression",)
+    rollback_plan: tuple[str, ...] = ("tugboat", "rollback", "--decision", "latest")
     sources: tuple[SourceRef, ...] = ()
     pending_audit_eval_definition_paths: tuple[str, ...] = ()
     bounded_edit_metadata: tuple[dict[str, object], ...] = ()
@@ -139,7 +142,10 @@ class CandidatePatch:
             "base_file": self.base_file,
             "base_hash": self.base_hash,
             "diff_hash": self.diff_hash,
+            "expected_behavior_change": self.expected_behavior_change,
+            "evals_required": list(self.evals_required),
             "rationale": self.rationale,
+            "rollback_plan": list(self.rollback_plan),
             "risk_class": self.risk_class,
             "sources": [
                 {"source_id": source.source_id, "trusted": source.trusted}

@@ -140,8 +140,11 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "base_file",
             "base_hash",
             "diff_hash",
+            "expected_behavior_change",
+            "evals_required",
             "risk_class",
             "rationale",
+            "rollback_plan",
             "sources",
         ],
         "properties": {
@@ -151,8 +154,11 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "base_file": {"type": "string"},
             "base_hash": {"type": "string"},
             "diff_hash": {"type": "string"},
+            "expected_behavior_change": {"type": "string"},
+            "evals_required": {"type": "array", "items": {"type": "string"}},
             "risk_class": {"type": "string"},
             "rationale": {"type": "string"},
+            "rollback_plan": {"type": "array", "items": {"type": "string"}},
             "sources": {
                 "type": "array",
                 "items": {

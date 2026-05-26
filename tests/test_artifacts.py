@@ -53,8 +53,11 @@ def test_validate_candidate_artifact_rejects_wrong_schema_version():
                 "base_file": "CODEX.md",
                 "base_hash": "abc",
                 "diff_hash": "def",
+                "expected_behavior_change": "Agents preserve regression-test guidance.",
+                "evals_required": ["governance-regression"],
                 "risk_class": "instruction_clarification",
                 "rationale": "because",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [],
             },
         )
@@ -357,9 +360,29 @@ def test_validate_candidate_artifact_rejects_malformed_sources():
                 "base_file": "CODEX.md",
                 "base_hash": "abc",
                 "diff_hash": "def",
+                "expected_behavior_change": "Agents preserve regression-test guidance.",
+                "evals_required": ["governance-regression"],
                 "risk_class": "instruction_clarification",
                 "rationale": "because",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [{"source_id": 123, "trusted": "yes"}],
+            },
+        )
+
+
+def test_validate_candidate_artifact_requires_proposal_metadata():
+    with pytest.raises(ArtifactValidationError, match="expected_behavior_change"):
+        validate_json_artifact(
+            "candidate.json",
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "def",
+                "risk_class": "instruction_clarification",
+                "rationale": "because",
+                "sources": [{"source_id": "ev_1", "trusted": True}],
             },
         )
 
@@ -371,8 +394,11 @@ def test_validate_candidate_artifact_rejects_malformed_bounded_edit_metadata():
         "base_file": "CODEX.md",
         "base_hash": "abc",
         "diff_hash": "def",
+        "expected_behavior_change": "Agents preserve regression-test guidance.",
+        "evals_required": ["governance-regression"],
         "risk_class": "instruction_clarification",
         "rationale": "because",
+        "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
         "sources": [{"source_id": "ev_1", "trusted": True}],
     }
 
@@ -416,8 +442,11 @@ def test_validate_candidate_artifact_accepts_bounded_edit_metadata():
             "base_file": "CODEX.md",
             "base_hash": "abc",
             "diff_hash": "def",
+            "expected_behavior_change": "Agents preserve regression-test guidance.",
+            "evals_required": ["governance-regression"],
             "risk_class": "instruction_clarification",
             "rationale": "because",
+            "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
             "sources": [{"source_id": "ev_1", "trusted": True}],
             "bounded_edit_metadata": [
                 {

@@ -222,6 +222,11 @@ def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> Can
         diff=_required_non_empty_string(payload, "diff", "candidate"),
         risk_class=_required_non_empty_string(payload, "risk_class", "candidate"),
         rationale=_required_non_empty_string(payload, "rationale", "candidate"),
+        expected_behavior_change=_required_non_empty_string(
+            payload, "expected_behavior_change", "candidate"
+        ),
+        evals_required=_required_non_empty_string_list(payload, "evals_required", "candidate"),
+        rollback_plan=_required_non_empty_string_list(payload, "rollback_plan", "candidate"),
         sources=_source_refs_from_payload(payload),
         bounded_edit_metadata=_bounded_edit_metadata_from_payload(payload),
     )
@@ -289,6 +294,17 @@ def _required_non_empty_string(item: dict[str, object], field: str, prefix: str)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{prefix}.{field} is required")
     return value
+
+
+def _required_non_empty_string_list(
+    item: dict[str, object], field: str, prefix: str
+) -> tuple[str, ...]:
+    value = item.get(field)
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{prefix}.{field} must be a non-empty JSON list of strings")
+    if not all(isinstance(entry, str) and entry.strip() for entry in value):
+        raise ValueError(f"{prefix}.{field} must be a non-empty JSON list of strings")
+    return tuple(value)
 
 
 def _required_non_negative_int(item: dict[str, object], field: str, prefix: str) -> int:
