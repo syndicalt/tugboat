@@ -47,6 +47,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         offline_report = run_provider_smoke_suite(
             opted_in=os.environ.get("TUGBOAT_PROVIDER_SMOKE") == "1",
             provider=os.environ.get("TUGBOAT_PROVIDER_SMOKE_PROVIDER"),
+            smoke_command=os.environ.get("TUGBOAT_PROVIDER_SMOKE_COMMAND"),
         )
         passed = offline_report.passed
         metrics = offline_report.metrics

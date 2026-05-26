@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 from contextlib import closing
 from pathlib import Path
 from shutil import copytree
@@ -317,3 +318,84 @@ def test_eval_provider_smoke_opt_in_reports_missing_provider_credentials(tmp_pat
         "provider_smoke_configured": 0,
         "provider_smoke_missing_credentials": 1,
     }
+
+
+def test_eval_provider_smoke_opt_in_runs_configured_smoke_command_and_passes(
+    tmp_path: Path,
+    monkeypatch,
+):
+    smoke = tmp_path / "provider_smoke.py"
+    smoke.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE", "1")
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", "openai")
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_COMMAND", f"{sys.executable} {smoke}")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 0
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is True
+    assert report["suite_id"] == "provider-smoke"
+    assert report["live_provider_required"] is True
+    assert report["trigger_score"] == 1.0
+    assert report["held_out_score"] == 1.0
+    assert report["governance_passed"] is True
+    assert report["recommendation"] == "accept"
+    assert report["metrics"] == {
+        "provider_smoke_cases": 1,
+        "provider_smoke_failures": 0,
+        "provider_smoke_skipped": 0,
+        "provider_smoke_opted_in": 1,
+        "provider_smoke_configured": 1,
+        "provider_smoke_missing_credentials": 0,
+        "provider_smoke_runner_configured": 1,
+        "provider_smoke_exit_code": 0,
+    }
+
+
+def test_eval_provider_smoke_failure_records_sanitized_metrics_without_raw_provider_output(
+    tmp_path: Path,
+    monkeypatch,
+):
+    smoke = tmp_path / "provider_smoke.py"
+    smoke.write_text(
+        "print('provider raw output sk-secret-provider-payload-1234567890')\n"
+        "raise SystemExit(42)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE", "1")
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", "anthropic")
+    monkeypatch.setenv("TUGBOAT_PROVIDER_SMOKE_COMMAND", f"{sys.executable} {smoke}")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
+
+    report_text = (run_dir / "eval-report.json").read_text(encoding="utf-8")
+    report = json.loads(report_text)
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert report["metrics"] == {
+        "provider_smoke_cases": 1,
+        "provider_smoke_failures": 1,
+        "provider_smoke_skipped": 0,
+        "provider_smoke_opted_in": 1,
+        "provider_smoke_configured": 1,
+        "provider_smoke_missing_credentials": 0,
+        "provider_smoke_runner_configured": 1,
+        "provider_smoke_exit_code": 42,
+    }
+    assert "sk-secret-provider-payload" not in report_text
