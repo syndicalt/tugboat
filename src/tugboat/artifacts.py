@@ -685,6 +685,16 @@ class ArtifactValidationError(ValueError):
     pass
 
 
+def load_json_object_artifact(path: Path, artifact_name: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ArtifactValidationError(f"{artifact_name} contains invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ArtifactValidationError(f"{artifact_name} must be a JSON object")
+    return payload
+
+
 def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
     schema = JSON_ARTIFACT_JSON_SCHEMAS.get(name)
     if schema is None:

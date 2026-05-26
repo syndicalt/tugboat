@@ -5,7 +5,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.artifacts import BOUNDED_EDIT_OPERATORS, SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import (
+    BOUNDED_EDIT_OPERATORS,
+    SCHEMA_VERSION,
+    load_json_object_artifact,
+    validate_json_artifact,
+)
 from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.llmff.runner import inspect_manifest, run_manifest
@@ -147,9 +152,10 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         raise RuntimeError(f"llmff patch-propose failed with exit code {run.exit_code}")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
-    payload = json.loads(run.output_paths["candidate_patch"].read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("llmff candidate_patch output must be a JSON object")
+    payload = load_json_object_artifact(
+        run.output_paths["candidate_patch"],
+        "candidate.raw.json",
+    )
     validate_json_artifact("candidate.raw.json", payload)
     _validate_reflections_from_payload(payload)
     return _candidate_from_payload(payload, audit_id=audit_id)
@@ -186,9 +192,7 @@ def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
             )
     if run.exit_code != 0:
         raise RuntimeError(f"llmff drift-detect failed with exit code {run.exit_code}")
-    payload = json.loads(output_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("llmff drift_clusters output must be a JSON object")
+    payload = load_json_object_artifact(output_path, "drift.raw.json")
     validate_json_artifact("drift.raw.json", payload)
     return output_path
 

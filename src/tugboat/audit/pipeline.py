@@ -6,7 +6,12 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.artifacts import ArtifactValidationError, SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import (
+    ArtifactValidationError,
+    SCHEMA_VERSION,
+    load_json_object_artifact,
+    validate_json_artifact,
+)
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
@@ -154,17 +159,11 @@ def run_audit_pipeline(
                 run_dir,
                 f"instruction index run failed: {index_run.exit_code}",
             )
-        raw_instruction_index = json.loads(
-            index_run.output_paths["instruction_index"].read_text(encoding="utf-8")
-        )
-        if not isinstance(raw_instruction_index, dict):
-            return _failed_instruction_index_result(
-                repo,
-                run_dir,
-                manifest_hash=index_inspect.manifest_hash,
-                message="instruction index rejected: llmff instruction_index output must be a JSON object",
-            )
         try:
+            raw_instruction_index = load_json_object_artifact(
+                index_run.output_paths["instruction_index"],
+                "instruction-index.raw.json",
+            )
             validate_json_artifact("instruction-index.raw.json", raw_instruction_index)
         except ArtifactValidationError as error:
             return _failed_instruction_index_result(
@@ -279,16 +278,11 @@ def run_audit_pipeline(
                 manifest_hash=inspect.manifest_hash,
                 result=run,
             )
-        raw_audit = json.loads(run.output_paths["audit_report"].read_text(encoding="utf-8"))
-        if not isinstance(raw_audit, dict):
-            return _failed_audit_result(
-                repo,
-                run_dir,
-                manifest_hash=inspect.manifest_hash,
-                episode_id=episode_id,
-                message="audit rejected: llmff audit_report output must be a JSON object",
-            )
         try:
+            raw_audit = load_json_object_artifact(
+                run.output_paths["audit_report"],
+                "audit.raw.json",
+            )
             validate_json_artifact("audit.raw.json", raw_audit)
         except ArtifactValidationError as error:
             return _failed_audit_result(

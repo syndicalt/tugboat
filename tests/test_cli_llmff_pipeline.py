@@ -23,6 +23,7 @@ def _write_fake_llmff(
     acceptance_summary: object | None = None,
     reflections: object | None = None,
     secret_artifact: str | None = None,
+    invalid_json_output: str | None = None,
 ) -> Path:
     if sources is None:
         sources = [{"source_id": "ev_fake", "trusted": True}]
@@ -107,6 +108,7 @@ ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
 REFLECTIONS = __REFLECTIONS__
 SECRET_ARTIFACT = __SECRET_ARTIFACT__
 SECRET_VALUE = "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx"
+INVALID_JSON_OUTPUT = __INVALID_JSON_OUTPUT__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -156,20 +158,31 @@ if args[:1] == ["run"]:
         }) + "\\n", encoding="utf-8")
         raise SystemExit(7)
     if manifest == "instruction-index":
-        outputs["instruction_index"].write_text(json.dumps(INSTRUCTION_INDEX) + "\\n", encoding="utf-8")
+        if INVALID_JSON_OUTPUT == "instruction_index":
+            outputs["instruction_index"].write_text("{not json\\n", encoding="utf-8")
+        else:
+            outputs["instruction_index"].write_text(json.dumps(INSTRUCTION_INDEX) + "\\n", encoding="utf-8")
     elif manifest == "episode-audit":
         if SECRET_ARTIFACT == "audit_report":
             outputs["audit_report"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
+        elif INVALID_JSON_OUTPUT == "audit_report":
+            outputs["audit_report"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["audit_report"].write_text(json.dumps(AUDIT_REPORT) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
-        outputs["drift_clusters"].write_text(json.dumps(DRIFT_CLUSTERS) + "\\n", encoding="utf-8")
+        if INVALID_JSON_OUTPUT == "drift_clusters":
+            outputs["drift_clusters"].write_text("{not json\\n", encoding="utf-8")
+        else:
+            outputs["drift_clusters"].write_text(json.dumps(DRIFT_CLUSTERS) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         import hashlib
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
         if SECRET_ARTIFACT == "candidate_patch":
             outputs["candidate_patch"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
+            raise SystemExit(0)
+        if INVALID_JSON_OUTPUT == "candidate_patch":
+            outputs["candidate_patch"].write_text("{not json\\n", encoding="utf-8")
             raise SystemExit(0)
         candidate_patch = {
             "base_file": "CODEX.md",
@@ -189,9 +202,14 @@ if args[:1] == ["run"]:
     elif manifest == "patch-eval":
         if SECRET_ARTIFACT == "eval_report":
             outputs["eval_report"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
+        elif INVALID_JSON_OUTPUT == "eval_report":
+            outputs["eval_report"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
-        outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
+        if INVALID_JSON_OUTPUT == "policy_decision":
+            outputs["policy_decision"].write_text("{not json\\n", encoding="utf-8")
+        else:
+            outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
     elif manifest == "acceptance-summary":
         outputs["acceptance_summary"].write_text(json.dumps(ACCEPTANCE_SUMMARY) + "\\n", encoding="utf-8")
     raise SystemExit(0)
@@ -219,6 +237,8 @@ raise SystemExit(64)
             "__REFLECTIONS__", repr(reflections)
         ).replace(
             "__SECRET_ARTIFACT__", repr(secret_artifact)
+        ).replace(
+            "__INVALID_JSON_OUTPUT__", repr(invalid_json_output)
         ),
         encoding="utf-8",
     )
@@ -384,6 +404,40 @@ llmff:
     assert run_status == "failed"
 
 
+def test_audit_rejects_invalid_json_raw_audit_output_without_normalizing(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="audit_report",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "audit rejected: audit.raw.json contains invalid JSON" in output
+    assert (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
 def test_audit_rejects_malformed_llmff_instruction_index_raw_output(
     tmp_path: Path, capsys
 ):
@@ -417,6 +471,41 @@ llmff:
         "instruction index rejected: instruction-index.raw.json field has wrong type: documents[0].path"
         in output
     )
+    assert (run_dir / "instruction-index.raw.json").exists()
+    assert not (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
+def test_audit_rejects_invalid_json_instruction_index_raw_output(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="instruction_index",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "instruction index rejected: instruction-index.raw.json contains invalid JSON" in output
     assert (run_dir / "instruction-index.raw.json").exists()
     assert not (run_dir / "audit.raw.json").exists()
     assert not (run_dir / "audit.json").exists()
@@ -724,6 +813,42 @@ llmff:
     assert not (run_dir / "candidate.diff").exists()
 
 
+def test_propose_rejects_invalid_json_candidate_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="candidate_patch",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "candidate.raw.json contains invalid JSON" in output
+    assert (run_dir / "candidate.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
 def test_propose_consumes_real_llmff_file_backed_candidate_output(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -912,6 +1037,42 @@ llmff:
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "drift.raw.json field has wrong type: clusters[0].evidence_refs[0]" in output
+    assert (run_dir / "drift.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
+def test_propose_rejects_invalid_json_drift_raw_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="drift_clusters",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "drift.raw.json contains invalid JSON" in output
     assert (run_dir / "drift.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
@@ -1384,6 +1545,78 @@ llmff:
     assert "eval rejected: secret scan failed" in output
     assert "openai_api_key" in output
     assert (run_dir / "eval-report.raw.json").exists()
+    assert not (run_dir / "eval-report.json").exists()
+
+
+def test_eval_rejects_invalid_json_eval_report_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="eval_report",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    capsys.readouterr()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "eval rejected: eval-report.raw.json contains invalid JSON" in output
+    assert (run_dir / "eval-report.raw.json").exists()
+    assert not (run_dir / "eval-report.json").exists()
+
+
+def test_eval_rejects_invalid_json_policy_decision_output(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        invalid_json_output="policy_decision",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    capsys.readouterr()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "eval rejected: policy-decision.raw.json contains invalid JSON" in output
+    assert (run_dir / "policy-decision.raw.json").exists()
     assert not (run_dir / "eval-report.json").exists()
 
 
