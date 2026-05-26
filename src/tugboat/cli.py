@@ -1136,6 +1136,25 @@ def _record_rejected_candidate_memory(
         )
 
 
+def _record_optimization_slow_update(
+    store: Store,
+    *,
+    repo: Path,
+    candidate_id: int,
+    suite_id: str,
+    category: str,
+    reason: str,
+) -> None:
+    note = f"{category}: {reason} for candidate {candidate_id} in suite {suite_id}"
+    key = f"slow_update:{candidate_id}:{suite_id}:{hashlib.sha256(note.encode('utf-8')).hexdigest()}"
+    store.record_optimizer_memory(
+        repo_path=str(repo),
+        memory_type="slow_update",
+        key=key,
+        payload={"note": note},
+    )
+
+
 def _rejected_memory_policy_reasons(repo: Path, candidate: CandidatePatch) -> list[str]:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         memory = OptimizationMemory.load(store, repo=repo)
@@ -1833,6 +1852,14 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
             actor="tugboat",
             policy="optimization_acceptance_gate",
             decision=decision,
+            reason=reason,
+        )
+        _record_optimization_slow_update(
+            store,
+            repo=repo,
+            candidate_id=candidate_id,
+            suite_id=suite_id,
+            category="successful" if decision == "needs_review" else "rejected",
             reason=reason,
         )
 

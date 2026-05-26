@@ -569,6 +569,14 @@ llmff:
             ORDER BY id
             """
         ).fetchall()
+        slow_update_notes = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'slow_update'
+            ORDER BY id
+            """
+        ).fetchall()
 
     assert jobs == [
         ("episode-audit.yaml", "completed"),
@@ -594,6 +602,10 @@ llmff:
         "needs_review",
         "held_out_improved",
     )
+    assert [json.loads(row[0])["note"] for row in slow_update_notes] == [
+        "successful: held_out_improved for candidate "
+        f"{decision['candidate_id']} in suite held-out"
+    ]
 
 
 def test_optimize_rejects_candidate_when_held_out_gate_fails(tmp_path: Path):
@@ -631,6 +643,14 @@ llmff:
             LIMIT 1
             """
         ).fetchone()
+        slow_update_notes = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'slow_update'
+            ORDER BY id
+            """
+        ).fetchall()
 
     assert summary["decision"] == "rejected"
     assert summary["recommendation"] == "reject"
@@ -642,3 +662,7 @@ llmff:
         "rejected",
         "eval report recommendation was reject",
     )
+    assert [json.loads(row[0])["note"] for row in slow_update_notes] == [
+        "rejected: eval report recommendation was reject for candidate "
+        f"{decision['candidate_id']} in suite held-out"
+    ]
