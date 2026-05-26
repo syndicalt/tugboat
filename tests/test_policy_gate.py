@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from tugboat.models import InstructionFilePolicy, Policy
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 
@@ -400,6 +402,68 @@ def test_policy_gate_rejects_class_d_as_prohibited(tmp_path: Path):
 
     assert decision.allowed is False
     assert "prohibited_risk_class" in decision.reasons
+
+
+@pytest.mark.parametrize(
+    "risk_class",
+    [
+        "tool_permissions",
+        "sandbox_behavior",
+        "approval_requirements",
+        "network_access",
+        "secrets_handling",
+        "memory_behavior",
+        "deployment_behavior",
+        "security_incident_response",
+        "model_provider_routing",
+        "sidecar_authority",
+    ],
+)
+def test_policy_gate_treats_spec_class_c_examples_as_restricted_review_required(
+    tmp_path: Path,
+    risk_class: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class=risk_class,
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+    assert decision.auto_apply_eligible is False
+
+
+@pytest.mark.parametrize(
+    "risk_class",
+    [
+        "higher_priority_policy_weakening",
+        "audit_history_edit",
+        "pending_eval_definition_bypass",
+        "approval_policy_self_apply",
+        "untrusted_trace_policy_adoption",
+        "arbitrary_repo_plugin_loading",
+    ],
+)
+def test_policy_gate_rejects_spec_class_d_examples_as_prohibited(
+    tmp_path: Path,
+    risk_class: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class=risk_class,
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("prohibited_risk_class",)
 
 
 def test_policy_gate_rejects_pending_candidate_eval_definition_edits(tmp_path: Path):

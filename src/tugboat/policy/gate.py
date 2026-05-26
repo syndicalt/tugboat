@@ -30,11 +30,34 @@ PROHIBITED_RISK_CLASSES = frozenset(
     {
         "class_d",
         "d",
+        "arbitrary_repo_plugin_loading",
+        "approval_policy_self_apply",
+        "audit_history_edit",
         "direct_instruction_mutation",
-        "vcs_apply",
-        "external_network",
         "credential_exposure",
+        "external_network",
+        "higher_priority_policy_weakening",
+        "pending_eval_definition_bypass",
         "secret_exposure",
+        "untrusted_trace_policy_adoption",
+        "vcs_apply",
+    }
+)
+RESTRICTED_RISK_CLASSES = frozenset(
+    {
+        "approval_requirements",
+        "class_c",
+        "c",
+        "deployment_behavior",
+        "memory_behavior",
+        "model_provider_routing",
+        "network_access",
+        "restricted_policy_change",
+        "sandbox_behavior",
+        "secrets_handling",
+        "security_incident_response",
+        "sidecar_authority",
+        "tool_permissions",
     }
 )
 STRONG_MODALS = re.compile(r"\b(must|never|required|shall)\b", re.IGNORECASE)
@@ -172,7 +195,7 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("prohibited_risk_class")
     if risk_class in {"b", "class_b"}:
         review_required_reasons.add("class_b_review_required")
-    if risk_class in {"c", "class_c", "restricted_policy_change"}:
+    if risk_class in RESTRICTED_RISK_CLASSES:
         review_required_reasons.add("class_c_explicit_human_review_required")
     reasons = tuple(reason for reason in DENIAL_REASON_ORDER if reason in found_reasons)
     review_reasons = tuple(
