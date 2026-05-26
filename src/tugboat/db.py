@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS decisions (
   rollback_ref TEXT NOT NULL DEFAULT '',
   audit_event_sequence INTEGER
 );
+CREATE TABLE IF NOT EXISTS rollbacks (
+  id INTEGER PRIMARY KEY,
+  decision_id TEXT NOT NULL,
+  candidate_id INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  revert_commit TEXT NOT NULL,
+  post_rollback_eval_result_json TEXT NOT NULL,
+  rollback_plan TEXT NOT NULL,
+  executed INTEGER NOT NULL,
+  audit_event_sequence INTEGER
+);
 CREATE TABLE IF NOT EXISTS audit_events (
   sequence INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL,
@@ -275,6 +286,7 @@ class Store:
         _ensure_column(connection, "candidates", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "evals", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "audit_event_sequence", "INTEGER")
+        _ensure_column(connection, "rollbacks", "audit_event_sequence", "INTEGER")
         _ensure_column(connection, "decisions", "applied_commit", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "decisions", "rollback_ref", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "llmff_jobs", "exit_code", "INTEGER")
@@ -1049,6 +1061,55 @@ class Store:
         )
         self.connection.commit()
         return int(cursor.lastrowid)
+
+    def record_rollback(
+        self,
+        *,
+        decision_id: str,
+        candidate_id: int,
+        reason: str,
+        revert_commit: str,
+        post_rollback_eval_result: dict[str, Any],
+        rollback_plan: str,
+        executed: bool,
+    ) -> int:
+        cursor = self.connection.execute(
+            """
+            INSERT INTO rollbacks(
+              decision_id, candidate_id, reason, revert_commit,
+              post_rollback_eval_result_json, rollback_plan, executed,
+              audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                decision_id,
+                candidate_id,
+                reason,
+                revert_commit,
+                json.dumps(post_rollback_eval_result, sort_keys=True),
+                rollback_plan,
+                int(executed),
+            ),
+        )
+        self.connection.commit()
+        rollback_id = int(cursor.lastrowid)
+        event = self.append_audit_event(
+            "rollback.recorded",
+            {
+                "rollback_id": rollback_id,
+                "decision_id": decision_id,
+                "candidate_id": candidate_id,
+                "rollback_plan": rollback_plan,
+                "executed": executed,
+            },
+        )
+        self.connection.execute(
+            "UPDATE rollbacks SET audit_event_sequence = ? WHERE id = ?",
+            (event.sequence, rollback_id),
+        )
+        self.connection.commit()
+        return rollback_id
 
     def record_candidate_edit(
         self,

@@ -1880,6 +1880,15 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
     validate_json_artifact("rollback-plan.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_rollback(
+            decision_id=str(apply_plan["decision_id"]),
+            candidate_id=int(apply_plan["candidate_id"]),
+            reason=f"rollback decision {apply_plan['decision_id']}",
+            revert_commit=revert_commit,
+            post_rollback_eval_result={"executed": execute},
+            rollback_plan=rollback_plan,
+            executed=execute,
+        )
         store.append_audit_event(
             "rollback.planned",
             {

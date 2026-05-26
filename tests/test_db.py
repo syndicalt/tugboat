@@ -20,6 +20,7 @@ def test_store_initializes_core_tables(tmp_path: Path):
             "candidates",
             "evals",
             "decisions",
+            "rollbacks",
             "audit_events",
         }.issubset(tables)
 
@@ -127,6 +128,45 @@ def test_insert_decision_stores_audit_event_sequence(tmp_path: Path):
         ).fetchone()
 
     assert row == (decision_id, row[1], "decision.recorded")
+    assert row[1] is not None
+
+
+def test_record_rollback_stores_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        rollback_id = store.record_rollback(
+            decision_id="run-1",
+            candidate_id=7,
+            reason="rollback decision run-1",
+            revert_commit="def456",
+            post_rollback_eval_result={"passed": True},
+            rollback_plan=".sidecar/runs/run-1/rollback-plan.json",
+            executed=True,
+        )
+        row = store.connection.execute(
+            """
+            SELECT rollbacks.id, rollbacks.audit_event_sequence, audit_events.event_type,
+                   rollbacks.decision_id, rollbacks.candidate_id, rollbacks.reason,
+                   rollbacks.revert_commit, rollbacks.post_rollback_eval_result_json,
+                   rollbacks.rollback_plan, rollbacks.executed
+            FROM rollbacks
+            JOIN audit_events ON audit_events.sequence = rollbacks.audit_event_sequence
+            WHERE rollbacks.id = ?
+            """,
+            (rollback_id,),
+        ).fetchone()
+
+    assert row == (
+        rollback_id,
+        row[1],
+        "rollback.recorded",
+        "run-1",
+        7,
+        "rollback decision run-1",
+        "def456",
+        '{"passed": true}',
+        ".sidecar/runs/run-1/rollback-plan.json",
+        1,
+    )
     assert row[1] is not None
 
 

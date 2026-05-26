@@ -424,9 +424,25 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
         row = connection.execute(
             "SELECT payload_json FROM audit_events WHERE event_type = 'rollback.applied'"
         ).fetchone()
+        rollback_row = connection.execute(
+            """
+            SELECT decision_id, candidate_id, reason, revert_commit,
+                   post_rollback_eval_result_json, rollback_plan, executed
+            FROM rollbacks
+            """
+        ).fetchone()
     assert row is not None
     payload = json.loads(row[0])
     assert payload["rollback_plan"] == ".sidecar/runs/20260525T000000000000Z/rollback-plan.json"
+    assert rollback_row == (
+        "20260525T000000000000Z",
+        7,
+        "rollback decision 20260525T000000000000Z",
+        rollback["revert_commit"],
+        '{"executed": true}',
+        ".sidecar/runs/20260525T000000000000Z/rollback-plan.json",
+        1,
+    )
 
 
 def test_apply_commit_mode_creates_branch_commit_and_rollback_command(tmp_path: Path):
