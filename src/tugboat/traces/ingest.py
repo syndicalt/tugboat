@@ -80,6 +80,7 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
         trace_path=bundle.trace_path,
         request=request,
         request_events=_events_of_type(bundle.events, "user_request"),
+        instruction_snapshot_events=_events_of_type(bundle.events, "instruction_snapshot"),
         instruction_snapshot=tuple(
             event.payload for event in bundle.events if event.event_type == "instruction_snapshot"
         ),

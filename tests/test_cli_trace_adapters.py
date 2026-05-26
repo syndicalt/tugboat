@@ -586,3 +586,71 @@ def test_audit_cli_writes_canonical_redacted_trace_for_llmff_input(tmp_path: Pat
         "tool_call",
         "tool_result",
     ]
+
+
+def test_audit_cli_redacted_trace_includes_instruction_snapshot(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "codex.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "base_instructions": {
+                                "source": "CODEX.md",
+                                "text": "Use tests and cite verification.",
+                            }
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix bug"}],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "codex",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical_rows = [
+        json.loads(line)
+        for line in (run_dir / "trace-redacted.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert [row["event_type"] for row in canonical_rows] == [
+        "instruction_snapshot",
+        "user_request",
+    ]
+    assert canonical_rows[0]["payload"] == {
+        "type": "instruction_snapshot",
+        "source": "CODEX.md",
+        "text": "Use tests and cite verification.",
+    }

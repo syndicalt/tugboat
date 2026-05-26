@@ -27,6 +27,7 @@ class CanonicalEpisode:
     trace_path: Path
     request: str | None
     request_events: tuple[TraceEvent, ...]
+    instruction_snapshot_events: tuple[TraceEvent, ...]
     instruction_snapshot: tuple[dict[str, Any], ...]
     tool_calls: tuple[TraceEvent, ...]
     command_outputs: tuple[TraceEvent, ...]
@@ -43,19 +44,6 @@ class CanonicalEpisode:
     verifier_scores: dict[str, float]
 
     def redacted_events(self) -> tuple[TraceEvent, ...]:
-        events = (
-            *self.request_events,
-            *self.tool_calls,
-            *self.command_outputs,
-            *self.diffs,
-            *self.test_results,
-            *self.policy_events,
-            *self.user_corrections,
-            *self.subagent_reports,
-            *self.final_answer_events,
-            *self.outcome_label_events,
-            *self.verifier_score_events,
-        )
         return tuple(
             TraceEvent(
                 evidence_id=event.evidence_id,
@@ -64,5 +52,26 @@ class CanonicalEpisode:
                 line_number=event.line_number,
                 payload=redact_payload(event.payload),
             )
-            for event in events
+            for event in self.all_events()
+        )
+
+    def all_events(self) -> tuple[TraceEvent, ...]:
+        return tuple(
+            sorted(
+                (
+                    *self.request_events,
+                    *self.instruction_snapshot_events,
+                    *self.tool_calls,
+                    *self.command_outputs,
+                    *self.diffs,
+                    *self.test_results,
+                    *self.policy_events,
+                    *self.user_corrections,
+                    *self.subagent_reports,
+                    *self.final_answer_events,
+                    *self.outcome_label_events,
+                    *self.verifier_score_events,
+                ),
+                key=lambda event: event.line_number,
+            )
         )

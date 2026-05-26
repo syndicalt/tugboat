@@ -122,6 +122,33 @@ def test_canonical_episode_exposes_redacted_events_for_model_payloads(tmp_path: 
     }
 
 
+def test_canonical_episode_redacted_events_include_instruction_snapshot(tmp_path: Path):
+    trace_path = tmp_path / "episode.jsonl"
+    _write_jsonl(
+        trace_path,
+        [
+            {
+                "type": "instruction_snapshot",
+                "source": "CODEX.md",
+                "text": "Use OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx",
+            },
+            {"type": "user_request", "content": "Fix bug"},
+        ],
+    )
+
+    episode = ingest_jsonl_trace_as_episode(trace_path)
+
+    assert [event.event_type for event in episode.redacted_events()] == [
+        "instruction_snapshot",
+        "user_request",
+    ]
+    assert episode.redacted_events()[0].payload == {
+        "type": "instruction_snapshot",
+        "source": "CODEX.md",
+        "text": "Use OPENAI_API_KEY=[REDACTED:openai_api_key]",
+    }
+
+
 def test_canonical_episode_artifact_redacts_top_level_summary_fields(tmp_path: Path):
     trace_path = tmp_path / "episode.jsonl"
     _write_jsonl(
