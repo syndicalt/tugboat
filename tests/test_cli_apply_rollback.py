@@ -195,6 +195,19 @@ def test_apply_rejects_dirty_target_before_writing_plan(tmp_path: Path):
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_unrelated_dirty_worktree_before_creating_branch(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    original_branch = _git(repo, "branch", "--show-current")
+    (repo / "README.md").write_text("# local notes\n", encoding="utf-8")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert not (run_dir / "apply-plan.json").exists()
+    assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
+
+
 def test_apply_rejects_stale_base_hash_before_writing_plan(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

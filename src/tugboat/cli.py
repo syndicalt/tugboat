@@ -1162,6 +1162,8 @@ def _write_apply_plan(
     adapter = VcsAdapter(repo)
     if auto_apply:
         _assert_auto_apply_user_worktree_clean(adapter)
+    elif mode in {"branch", "commit", "pr"}:
+        adapter.assert_clean_worktree()
     adapter.assert_target_files_clean(target_files)
     adapter.assert_base_hashes({candidate.base_file: candidate.base_hash})
     base_branch = adapter.current_branch()
