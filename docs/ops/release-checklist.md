@@ -25,12 +25,14 @@ tugboat doctor
 tugboat index --repo . --check
 tugboat harness check --repo .
 python -m pytest -q
+tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name>
 ```
 
 Before tagging:
 
 - Confirm `tugboat doctor` reports `proposal_only` and `auto_apply: disabled`.
 - Confirm CI retained the pytest log, harness output, and release artifact manifest.
+- Confirm `.sidecar/ops/release-artifact-manifest.json` records the wheel hash, retained evidence, commit, CI URL, and approver.
 - Confirm the security review for the release has no open critical or high findings.
 - Confirm generated artifacts under `.sidecar/runs` contain no raw secrets.
 - Record the release version, git commit, CI run URL, and approver.

@@ -1376,6 +1376,29 @@ def test_validate_rollback_plan_accepts_source_artifacts():
     )
 
 
+def test_validate_release_artifact_manifest_accepts_current_schema():
+    validate_json_artifact(
+        "release-artifact-manifest.json",
+        {
+            "schema_version": 1,
+            "artifact_kind": "release_artifact_manifest",
+            "package": {"name": "tugboat", "version": "0.1.0"},
+            "commit": "abc1234",
+            "ci_url": "https://ci.example/runs/1",
+            "approver": "release-owner",
+            "wheel": {
+                "path": "/repo/dist/tugboat-0.1.0-py3-none-any.whl",
+                "sha256": "a" * 64,
+                "size_bytes": 128,
+            },
+            "smoke_commands": ["tugboat doctor"],
+            "retained_evidence": [
+                {"path": "/repo/.sidecar/ci/pytest.log", "sha256": "b" * 64, "size_bytes": 12}
+            ],
+        },
+    )
+
+
 def test_validate_report_markdown_requires_sections():
     with pytest.raises(ArtifactValidationError, match="Rationale"):
         validate_report_markdown("# Tugboat Report\n\n- schema_version: 1\n- candidate: CODEX.md\n")

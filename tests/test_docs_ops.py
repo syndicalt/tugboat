@@ -20,9 +20,11 @@ DOC_CONTRACTS = {
         "required_text": [
             "tugboat doctor",
             "tugboat harness check --repo .",
+            "tugboat ops release-manifest --repo .",
             "python -m pytest -q",
             "proposal_only",
             "auto_apply: disabled",
+            ".sidecar/ops/release-artifact-manifest.json",
         ],
     },
     "docs/ci/ci-guide.md": {

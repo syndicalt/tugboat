@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import sys
+import tomllib
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
@@ -207,6 +208,13 @@ def build_parser() -> argparse.ArgumentParser:
     ops_observability = ops_subcommands.add_parser("observability")
     ops_observability.add_argument("--repo", required=True)
     ops_observability.add_argument("--output")
+    ops_release_manifest = ops_subcommands.add_parser("release-manifest")
+    ops_release_manifest.add_argument("--repo", required=True)
+    ops_release_manifest.add_argument("--wheel", required=True)
+    ops_release_manifest.add_argument("--commit", required=True)
+    ops_release_manifest.add_argument("--ci-url", required=True)
+    ops_release_manifest.add_argument("--approver", required=True)
+    ops_release_manifest.add_argument("--evidence", action="append", default=[])
     ops_restore = ops_subcommands.add_parser("restore")
     ops_restore.add_argument("--repo", required=True)
     ops_restore.add_argument("--archive", required=True)
@@ -717,6 +725,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"observability summary: {output_path}")
         return 0
 
+    if args.command == "ops" and args.ops_command == "release-manifest":
+        repo = Path(args.repo)
+        try:
+            output_path = _write_release_artifact_manifest(
+                repo=repo,
+                wheel_path=Path(args.wheel),
+                commit=args.commit,
+                ci_url=args.ci_url,
+                approver=args.approver,
+                evidence_paths=[Path(path) for path in args.evidence],
+            )
+        except (FileNotFoundError, ValueError, ArtifactValidationError) as error:
+            print(f"release manifest blocked: {error}")
+            return 1
+        print(f"release manifest: {output_path}")
+        return 0
+
     if args.command == "ops" and args.ops_command == "migrate":
         repo = Path(args.repo)
         plan = execute_migration_plan(repo) if args.apply else dry_run_migration_plan(repo)
@@ -762,6 +787,90 @@ def _write_ops_command_bundle(path: Path, bundle: dict[str, object]) -> None:
     validate_json_artifact("ops-command-bundle.json", payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_release_artifact_manifest(
+    *,
+    repo: Path,
+    wheel_path: Path,
+    commit: str,
+    ci_url: str,
+    approver: str,
+    evidence_paths: Sequence[Path],
+) -> Path:
+    resolved_repo = repo.resolve()
+    resolved_wheel = wheel_path.resolve()
+    if not resolved_wheel.exists():
+        raise FileNotFoundError("wheel does not exist")
+    if not resolved_wheel.is_file():
+        raise ValueError("wheel must be a file")
+    retained_evidence = []
+    for evidence_path in evidence_paths:
+        resolved_evidence = evidence_path.resolve()
+        if not resolved_evidence.exists():
+            raise FileNotFoundError(f"evidence does not exist: {evidence_path}")
+        if not resolved_evidence.is_file():
+            raise ValueError(f"evidence must be a file: {evidence_path}")
+        retained_evidence.append(_file_manifest_entry(resolved_evidence))
+
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_kind": "release_artifact_manifest",
+        "package": _project_package_metadata(resolved_repo),
+        "commit": commit,
+        "ci_url": ci_url,
+        "approver": approver,
+        "wheel": _file_manifest_entry(resolved_wheel),
+        "smoke_commands": [
+            "tugboat doctor",
+            "tugboat index --repo . --check",
+            "tugboat harness check --repo .",
+            "python -m pytest -q",
+        ],
+        "retained_evidence": retained_evidence,
+    }
+    validate_json_artifact("release-artifact-manifest.json", payload)
+    output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "release.manifest_written",
+            {
+                "artifact": ".sidecar/ops/release-artifact-manifest.json",
+                "artifact_sha256": CandidatePatch.hash_file(output_path),
+                "commit": commit,
+                "ci_url": ci_url,
+                "approver": approver,
+                "wheel_sha256": payload["wheel"]["sha256"],
+            },
+        )
+    return output_path
+
+
+def _file_manifest_entry(path: Path) -> dict[str, object]:
+    return {
+        "path": str(path),
+        "sha256": CandidatePatch.hash_file(path),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _project_package_metadata(repo: Path) -> dict[str, str]:
+    pyproject_path = repo / "pyproject.toml"
+    if not pyproject_path.exists():
+        raise FileNotFoundError("pyproject.toml does not exist")
+    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    project = pyproject.get("project")
+    if not isinstance(project, dict):
+        raise ValueError("pyproject.toml missing [project] metadata")
+    name = project.get("name")
+    version = project.get("version")
+    if not isinstance(name, str) or not name:
+        raise ValueError("pyproject.toml missing project.name")
+    if not isinstance(version, str) or not version:
+        raise ValueError("pyproject.toml missing project.version")
+    return {"name": name, "version": version}
 
 
 def _write_retention_report(

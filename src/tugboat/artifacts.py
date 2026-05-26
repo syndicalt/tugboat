@@ -758,6 +758,66 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "release-artifact-manifest.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "artifact_kind",
+            "package",
+            "commit",
+            "ci_url",
+            "approver",
+            "wheel",
+            "smoke_commands",
+            "retained_evidence",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "artifact_kind": {"type": "string", "const": "release_artifact_manifest"},
+            "package": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "version"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "version": {"type": "string"},
+                },
+            },
+            "commit": {"type": "string"},
+            "ci_url": {"type": "string"},
+            "approver": {"type": "string"},
+            "wheel": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "sha256", "size_bytes"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "sha256": {"type": "string"},
+                    "size_bytes": {"type": "integer"},
+                },
+            },
+            "smoke_commands": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"},
+            },
+            "retained_evidence": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "sha256", "size_bytes"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "sha256": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                    },
+                },
+            },
+        },
+    },
     "harness-cleanup-candidates.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
