@@ -11,6 +11,7 @@ def _write_fake_llmff(
     path: Path,
     *,
     eval_passed: bool = False,
+    fail_manifest: str | None = None,
     sources: object | None = None,
     bounded_edit_metadata: object | None = None,
     candidate_overrides: dict[str, object] | None = None,
@@ -60,6 +61,7 @@ import sys
 from pathlib import Path
 
 EVAL_PASSED = __EVAL_PASSED__
+FAIL_MANIFEST = __FAIL_MANIFEST__
 SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
@@ -96,6 +98,15 @@ if args[:1] == ["run"]:
     trace.write_text('{"event":"step","name":"episode-audit"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    if manifest == FAIL_MANIFEST:
+        events.write_text(json.dumps({
+            "event": "run_failed",
+            "run_failed": {
+                "failure_kind": "fixture_failure",
+                "failure_message": "fixture failed"
+            }
+        }) + "\\n", encoding="utf-8")
+        raise SystemExit(7)
     if manifest == "episode-audit":
         outputs["audit_report"].write_text(json.dumps({
             "edit_warranted": True,
@@ -130,6 +141,8 @@ if args[:1] == ["run"]:
 
 raise SystemExit(64)
 """.replace("__EVAL_PASSED__", repr(eval_passed)).replace(
+            "__FAIL_MANIFEST__", repr(fail_manifest)
+        ).replace(
             "__SOURCES__", repr(sources)
         ).replace(
             "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
@@ -674,6 +687,60 @@ llmff:
     assert stored_state == "rejected"
 
 
+def test_propose_records_llmff_failure_without_traceback(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", fail_manifest="patch-propose")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "llmff patch-propose failed with exit code 7" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+        job_row = store.connection.execute(
+            """
+            SELECT j.status, e.event_type, e.payload_json
+            FROM llmff_jobs j
+            JOIN llmff_events e ON e.job_id = j.id
+            WHERE j.run_id = ? AND j.manifest_name = 'patch-propose.yaml'
+            """,
+            (run_dir.name,),
+        ).fetchone()
+        candidate_count = store.connection.execute(
+            "SELECT COUNT(*) FROM candidates"
+        ).fetchone()[0]
+
+    assert run_row == ("propose", "failed")
+    assert job_row[0:2] == ("failed", "run_failed")
+    assert json.loads(job_row[2])["run_failed"]["failure_kind"] == "fixture_failure"
+    assert candidate_count == 0
+
+
 def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -802,6 +869,58 @@ llmff:
     assert not (run_dir / "eval-report.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         eval_count = store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0]
+    assert eval_count == 0
+
+
+def test_eval_records_llmff_failure_without_traceback(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", fail_manifest="patch-eval")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    capsys.readouterr()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "llmff patch-eval failed with exit code 7" in output
+    assert not (run_dir / "eval-report.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+        job_row = store.connection.execute(
+            """
+            SELECT j.status, e.event_type, e.payload_json
+            FROM llmff_jobs j
+            JOIN llmff_events e ON e.job_id = j.id
+            WHERE j.run_id = ? AND j.manifest_name = 'patch-eval.yaml'
+            """,
+            (run_dir.name,),
+        ).fetchone()
+        eval_count = store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0]
+
+    assert run_row == ("eval", "failed")
+    assert job_row[0:2] == ("failed", "run_failed")
+    assert json.loads(job_row[2])["run_failed"]["failure_kind"] == "fixture_failure"
     assert eval_count == 0
 
 

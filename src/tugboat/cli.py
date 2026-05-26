@@ -379,6 +379,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ValueError as error:
             print(f"candidate rejected: {error}")
             return 1
+        except RuntimeError as error:
+            print(str(error))
+            return 1
         decision = evaluate_candidate(repo, policy, candidate)
         memory_reasons = _rejected_memory_policy_reasons(repo, candidate)
         budget_reasons = _learning_rate_budget_policy_reasons(policy, candidate)
@@ -497,6 +500,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             except ValueError as error:
                 print(f"eval rejected: {error}")
+                return 1
+            except RuntimeError as error:
+                print(str(error))
                 return 1
         else:
             print(f"unsupported offline eval suite: {args.suite}")
@@ -1011,6 +1017,13 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
                 manifest_hash=inspect.manifest_hash,
                 result=run,
             )
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="propose",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
+            )
         raise RuntimeError(f"llmff patch-propose failed with exit code {run.exit_code}")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(
@@ -1293,6 +1306,13 @@ def _run_patch_eval(
                 run_id=run_dir.name,
                 manifest_hash=inspect.manifest_hash,
                 result=run,
+            )
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="eval",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
             )
         raise RuntimeError(f"llmff patch-eval failed with exit code {run.exit_code}")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
