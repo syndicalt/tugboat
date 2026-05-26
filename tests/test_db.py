@@ -26,6 +26,25 @@ def test_store_initializes_core_tables(tmp_path: Path):
         }.issubset(tables)
 
 
+def test_core_decision_tables_require_audit_event_sequence(tmp_path: Path):
+    core_tables = {"audits", "candidates", "evals", "decisions", "rollbacks"}
+    with Store.open(tmp_path / "db.sqlite") as store:
+        for table in core_tables:
+            columns = {
+                row[1]: row
+                for row in store.connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            foreign_keys = store.connection.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+
+            assert columns["audit_event_sequence"][3] == 1, table
+            assert any(
+                row[2] == "audit_events"
+                and row[3] == "audit_event_sequence"
+                and row[4] == "sequence"
+                for row in foreign_keys
+            ), table
+
+
 def test_store_initializes_roadmap_extension_tables(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         tables = store.table_names()
@@ -245,6 +264,88 @@ def test_store_rejects_legacy_orphan_audit_event_sequence(tmp_path: Path):
 
     with pytest.raises(ValueError, match="trace_events.audit_event_sequence has orphaned values"):
         Store.open(db_path)
+
+
+def test_insert_core_decision_rows_without_provenance_backfill(tmp_path: Path):
+    candidate = CandidatePatch(
+        audit_id=1,
+        base_file="CODEX.md",
+        base_hash="abc123",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+    diff_path = tmp_path / "candidate.diff"
+    diff_path.write_text(candidate.diff, encoding="utf-8")
+    eval_report = tmp_path / "eval-report.json"
+    eval_report.write_text("{}\n", encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["event:1"],
+            instruction_refs=["CODEX.md#rules"],
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        eval_id = store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={"held_out_score": 0.9},
+        )
+        decision_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="tugboat",
+            policy="deterministic_policy_gate",
+            decision="needs_review",
+            reason="policy passed",
+        )
+        rollback_id = store.record_rollback(
+            decision_id=str(decision_id),
+            candidate_id=candidate_id,
+            reason="operator requested rollback",
+            revert_commit="def456",
+            post_rollback_eval_result={"passed": True},
+            rollback_plan=".sidecar/runs/run-1/rollback-plan.json",
+            executed=False,
+        )
+        rows = [
+            store.connection.execute(
+                f"""
+                SELECT row.audit_event_sequence, event.event_type
+                FROM {table} row
+                JOIN audit_events event ON event.sequence = row.audit_event_sequence
+                WHERE row.id = ?
+                """,
+                (row_id,),
+            ).fetchone()
+            for table, row_id in (
+                ("audits", audit_id),
+                ("candidates", candidate_id),
+                ("evals", eval_id),
+                ("decisions", decision_id),
+                ("rollbacks", rollback_id),
+            )
+        ]
+
+    assert [row[1] for row in rows] == [
+        "audit.recorded",
+        "candidate.recorded",
+        "eval.recorded",
+        "decision.recorded",
+        "rollback.recorded",
+    ]
+    assert all(row[0] is not None for row in rows)
 
 
 def test_record_llmff_run_persists_exit_code(tmp_path: Path):

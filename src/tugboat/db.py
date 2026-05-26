@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS audits (
   confidence REAL NOT NULL,
   evidence_json TEXT NOT NULL,
   instruction_refs_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS candidates (
   id INTEGER PRIMARY KEY,
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS candidates (
   risk_class TEXT NOT NULL,
   rationale TEXT NOT NULL,
   state TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS evals (
   id INTEGER PRIMARY KEY,
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS evals (
   report_path TEXT NOT NULL,
   passed INTEGER NOT NULL,
   metrics_json TEXT NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS decisions (
   id INTEGER PRIMARY KEY,
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   created_at TEXT NOT NULL,
   applied_commit TEXT NOT NULL DEFAULT '',
   rollback_ref TEXT NOT NULL DEFAULT '',
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS rollbacks (
   id INTEGER PRIMARY KEY,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS rollbacks (
   post_rollback_eval_result_json TEXT NOT NULL,
   rollback_plan TEXT NOT NULL,
   executed INTEGER NOT NULL,
-  audit_event_sequence INTEGER
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS audit_events (
   sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,6 +258,15 @@ CREATE TABLE IF NOT EXISTS optimizer_memory (
 """
 
 
+CORE_DECISION_TABLES: tuple[str, ...] = (
+    "audits",
+    "candidates",
+    "evals",
+    "decisions",
+    "rollbacks",
+)
+
+
 ROADMAP_EXTENSION_TABLES: tuple[str, ...] = (
     "trace_events",
     "instruction_snapshots",
@@ -278,6 +287,9 @@ ROADMAP_EXTENSION_TABLES: tuple[str, ...] = (
     "doc_gardening_runs",
     "optimizer_memory",
 )
+
+
+AUDITED_PROVENANCE_TABLES: tuple[str, ...] = (*CORE_DECISION_TABLES, *ROADMAP_EXTENSION_TABLES)
 
 
 @dataclass(frozen=True)
@@ -322,10 +334,10 @@ class Store:
                 "source_trust",
                 "TEXT NOT NULL DEFAULT 'untrusted'",
             )
-            for table in ROADMAP_EXTENSION_TABLES:
+            for table in AUDITED_PROVENANCE_TABLES:
                 _ensure_column(connection, table, "audit_event_sequence", "INTEGER")
             connection.commit()
-            _repair_roadmap_audit_event_constraints(connection)
+            _repair_audit_event_constraints(connection)
             connection.commit()
             return cls(connection)
         except Exception:
@@ -612,26 +624,26 @@ class Store:
         evidence_refs: list[str],
         instruction_refs: list[str],
     ) -> int:
-        cursor = self.connection.execute(
+        audit_id = _next_integer_id(self.connection, "audits")
+        event = self.append_audit_event("audit.recorded", {"audit_id": audit_id, "run_id": run_id})
+        self.connection.execute(
             """
-            INSERT INTO audits(run_id, failure_class, severity, confidence, evidence_json, instruction_refs_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO audits(
+              id, run_id, failure_class, severity, confidence, evidence_json,
+              instruction_refs_json, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                audit_id,
                 run_id,
                 failure_class,
                 severity,
                 confidence,
                 json.dumps(evidence_refs, sort_keys=True),
                 json.dumps(instruction_refs, sort_keys=True),
+                event.sequence,
             ),
-        )
-        self.connection.commit()
-        audit_id = int(cursor.lastrowid)
-        event = self.append_audit_event("audit.recorded", {"audit_id": audit_id, "run_id": run_id})
-        self.connection.execute(
-            "UPDATE audits SET audit_event_sequence = ? WHERE id = ?",
-            (event.sequence, audit_id),
         )
         self.connection.commit()
         return audit_id
@@ -644,12 +656,21 @@ class Store:
         diff_path: Path,
         state: str,
     ) -> int:
-        cursor = self.connection.execute(
+        candidate_id = _next_integer_id(self.connection, "candidates")
+        event = self.append_audit_event(
+            "candidate.recorded",
+            {"candidate_id": candidate_id, "audit_id": audit_id},
+        )
+        self.connection.execute(
             """
-            INSERT INTO candidates(audit_id, base_file, base_hash, diff_hash, diff_path, risk_class, rationale, state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidates(
+              id, audit_id, base_file, base_hash, diff_hash, diff_path, risk_class,
+              rationale, state, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                candidate_id,
                 audit_id,
                 candidate.base_file,
                 candidate.base_hash,
@@ -658,17 +679,8 @@ class Store:
                 candidate.risk_class,
                 candidate.rationale,
                 state,
+                event.sequence,
             ),
-        )
-        self.connection.commit()
-        candidate_id = int(cursor.lastrowid)
-        event = self.append_audit_event(
-            "candidate.recorded",
-            {"candidate_id": candidate_id, "audit_id": audit_id},
-        )
-        self.connection.execute(
-            "UPDATE candidates SET audit_event_sequence = ? WHERE id = ?",
-            (event.sequence, candidate_id),
         )
         self.connection.commit()
         return candidate_id
@@ -693,23 +705,30 @@ class Store:
         passed: bool,
         metrics: dict[str, Any],
     ) -> int:
-        cursor = self.connection.execute(
-            """
-            INSERT INTO evals(candidate_id, suite_id, report_path, passed, metrics_json)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (candidate_id, suite_id, str(report_path), int(passed), json.dumps(metrics, sort_keys=True)),
-        )
-        self.connection.commit()
-        eval_id = int(cursor.lastrowid)
+        eval_id = _next_integer_id(self.connection, "evals")
         event = self.append_audit_event(
             "eval.recorded",
             {"eval_id": eval_id, "candidate_id": candidate_id},
         )
         self.connection.execute(
-            "UPDATE evals SET audit_event_sequence = ? WHERE id = ?",
-            (event.sequence, eval_id),
+            """
+            INSERT INTO evals(
+              id, candidate_id, suite_id, report_path, passed, metrics_json,
+              audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                eval_id,
+                candidate_id,
+                suite_id,
+                str(report_path),
+                int(passed),
+                json.dumps(metrics, sort_keys=True),
+                event.sequence,
+            ),
         )
+        self.connection.commit()
         eval_run_event = self.append_audit_event(
             "eval_run.recorded",
             {
@@ -802,15 +821,21 @@ class Store:
         applied_commit: str = "",
         rollback_ref: str = "",
     ) -> int:
-        cursor = self.connection.execute(
+        decision_id = _next_integer_id(self.connection, "decisions")
+        event = self.append_audit_event(
+            "decision.recorded",
+            {"decision_id": decision_id, "candidate_id": candidate_id},
+        )
+        self.connection.execute(
             """
             INSERT INTO decisions(
-              candidate_id, actor, policy, decision, reason, created_at,
+              id, candidate_id, actor, policy, decision, reason, created_at,
               applied_commit, rollback_ref, audit_event_sequence
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                decision_id,
                 candidate_id,
                 actor,
                 policy,
@@ -819,17 +844,8 @@ class Store:
                 _now(),
                 applied_commit,
                 rollback_ref,
+                event.sequence,
             ),
-        )
-        self.connection.commit()
-        decision_id = int(cursor.lastrowid)
-        event = self.append_audit_event(
-            "decision.recorded",
-            {"decision_id": decision_id, "candidate_id": candidate_id},
-        )
-        self.connection.execute(
-            "UPDATE decisions SET audit_event_sequence = ? WHERE id = ?",
-            (event.sequence, decision_id),
         )
         self.connection.commit()
         return decision_id
@@ -1121,27 +1137,7 @@ class Store:
         rollback_plan: str,
         executed: bool,
     ) -> int:
-        cursor = self.connection.execute(
-            """
-            INSERT INTO rollbacks(
-              decision_id, candidate_id, reason, revert_commit,
-              post_rollback_eval_result_json, rollback_plan, executed,
-              audit_event_sequence
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-            """,
-            (
-                decision_id,
-                candidate_id,
-                reason,
-                revert_commit,
-                json.dumps(post_rollback_eval_result, sort_keys=True),
-                rollback_plan,
-                int(executed),
-            ),
-        )
-        self.connection.commit()
-        rollback_id = int(cursor.lastrowid)
+        rollback_id = _next_integer_id(self.connection, "rollbacks")
         event = self.append_audit_event(
             "rollback.recorded",
             {
@@ -1153,8 +1149,25 @@ class Store:
             },
         )
         self.connection.execute(
-            "UPDATE rollbacks SET audit_event_sequence = ? WHERE id = ?",
-            (event.sequence, rollback_id),
+            """
+            INSERT INTO rollbacks(
+              id, decision_id, candidate_id, reason, revert_commit,
+              post_rollback_eval_result_json, rollback_plan, executed,
+              audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rollback_id,
+                decision_id,
+                candidate_id,
+                reason,
+                revert_commit,
+                json.dumps(post_rollback_eval_result, sort_keys=True),
+                rollback_plan,
+                int(executed),
+                event.sequence,
+            ),
         )
         self.connection.commit()
         return rollback_id
@@ -1253,15 +1266,22 @@ def _is_daemon_queue_database(connection: sqlite3.Connection) -> bool:
     }.issubset(columns) and "repo_path" not in columns
 
 
-def _repair_roadmap_audit_event_constraints(connection: sqlite3.Connection) -> None:
-    for table in ROADMAP_EXTENSION_TABLES:
+def _next_integer_id(connection: sqlite3.Connection, table: str) -> int:
+    row = connection.execute(
+        f"SELECT COALESCE(MAX(id), 0) + 1 FROM {_quote_identifier(table)}"
+    ).fetchone()
+    return int(row[0])
+
+
+def _repair_audit_event_constraints(connection: sqlite3.Connection) -> None:
+    for table in AUDITED_PROVENANCE_TABLES:
         if not _requires_audit_event_constraint_repair(connection, table):
             continue
         _validate_audit_event_reachability(connection, table)
         _rebuild_table_with_audit_event_constraint(connection, table)
     violations = connection.execute("PRAGMA foreign_key_check").fetchall()
     if violations:
-        raise ValueError(f"foreign key check failed after roadmap schema repair: {violations!r}")
+        raise ValueError(f"foreign key check failed after audit schema repair: {violations!r}")
 
 
 def _requires_audit_event_constraint_repair(connection: sqlite3.Connection, table: str) -> bool:

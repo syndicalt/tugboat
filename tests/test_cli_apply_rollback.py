@@ -146,26 +146,46 @@ def _seed_auto_apply_history(
     with closing(sqlite3.connect(db_path)) as connection:
         for index in range(reviewed):
             decision = "rejected" if index < rejected else "needs_review"
+            cursor = connection.execute(
+                """
+                INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+                VALUES ('decision.recorded', ?, '', ?)
+                """,
+                (
+                    json.dumps({"candidate_id": 1000 + index, "seed": index}, sort_keys=True),
+                    f"seeded-review-decision-{index}",
+                ),
+            )
             connection.execute(
                 """
                 INSERT INTO decisions(
                   candidate_id, actor, policy, decision, reason, created_at,
                   applied_commit, rollback_ref, audit_event_sequence
                 )
-                VALUES (?, 'tugboat', 'deterministic_policy_gate', ?, 'seeded', ?, '', '', NULL)
+                VALUES (?, 'tugboat', 'deterministic_policy_gate', ?, 'seeded', ?, '', '', ?)
                 """,
-                (1000 + index, decision, created_at),
+                (1000 + index, decision, created_at, int(cursor.lastrowid)),
             )
         for index in range(applied):
+            cursor = connection.execute(
+                """
+                INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+                VALUES ('decision.recorded', ?, '', ?)
+                """,
+                (
+                    json.dumps({"candidate_id": 2000 + index, "seed": index}, sort_keys=True),
+                    f"seeded-apply-decision-{index}",
+                ),
+            )
             connection.execute(
                 """
                 INSERT INTO decisions(
                   candidate_id, actor, policy, decision, reason, created_at,
                   applied_commit, rollback_ref, audit_event_sequence
                 )
-                VALUES (?, 'tugboat', 'apply_controller', 'applied', 'seeded', ?, 'abc', '[]', NULL)
+                VALUES (?, 'tugboat', 'apply_controller', 'applied', 'seeded', ?, 'abc', '[]', ?)
                 """,
-                (2000 + index, created_at),
+                (2000 + index, created_at, int(cursor.lastrowid)),
             )
         for index in range(rollbacks):
             connection.execute(
