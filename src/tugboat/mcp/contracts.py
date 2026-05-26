@@ -722,12 +722,12 @@ def _write_request_artifact(
             "artifact_ref": artifact_ref,
             **(queue_payload or payload),
         }
-        with DaemonQueue.open_sidecar(repo_path) as queue:
-            job = queue.enqueue_uncommitted(
-                kind=queue_kind or kind,
-                payload=daemon_payload,
-            )
-            try:
+        try:
+            with DaemonQueue.open_sidecar(repo_path) as queue:
+                job = queue.enqueue_uncommitted(
+                    kind=queue_kind or kind,
+                    payload=daemon_payload,
+                )
                 with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
                     store.record_daemon_job(
                         job_id=str(job.id),
@@ -735,10 +735,10 @@ def _write_request_artifact(
                         state=job.state.value,
                         payload=daemon_payload,
                     )
-            except Exception:
-                queue.connection.rollback()
-                raise
-            queue.connection.commit()
+                queue.connection.commit()
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
         return {
             "request_id": request_id,
             "kind": kind,

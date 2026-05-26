@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import tugboat.mcp.contracts as mcp_contracts
+from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import DaemonRunConfig, run_daemon_once
 from tugboat.db import Store
 from tugboat.mcp import (
@@ -1101,6 +1102,24 @@ def test_request_audit_validates_request_artifact_before_queue_visibility(
 
     assert not (sidecar_dir(repo) / "mcp" / "requests").exists()
     assert not (sidecar_dir(repo) / "daemon.sqlite").exists()
+
+
+def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path
+
+    def fail_enqueue(self, **kwargs):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(DaemonQueue, "enqueue_uncommitted", fail_enqueue)
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        tugboat_request_proposal(repo, "audit-7")
+
+    request_dir = sidecar_dir(repo) / "mcp" / "requests"
+    assert not request_dir.exists() or list(request_dir.glob("*.json")) == []
 
 
 @pytest.mark.parametrize(
