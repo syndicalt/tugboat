@@ -101,6 +101,53 @@ def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
         event = row.get("event")
         if event == "request":
             events.append({"type": "user_request", "content": row.get("text", "")})
+        elif event == "instruction.snapshot":
+            events.append(
+                {
+                    "type": "instruction_snapshot",
+                    "source": row.get("source", "mcp"),
+                    "text": row.get("text", ""),
+                }
+            )
+        elif event == "user.correction":
+            events.append({"type": "user_correction", "content": row.get("text", "")})
+        elif event == "subagent.report":
+            events.append(
+                {
+                    "type": "subagent_report",
+                    "agent": row.get("agent", "unknown"),
+                    "summary": row.get("summary", ""),
+                }
+            )
+        elif event == "diff.applied":
+            events.append(
+                {
+                    "type": "diff",
+                    "path": row.get("path", ""),
+                    "diff": row.get("diff", ""),
+                }
+            )
+        elif event == "test.result":
+            events.append(
+                {
+                    "type": "test_result",
+                    "suite": row.get("suite", "unknown"),
+                    "passed": _bool_from_mcp(row.get("passed", False)),
+                    "output": row.get("output", ""),
+                }
+            )
+        elif event == "outcome.label":
+            events.append({"type": "outcome_label", "label": row.get("label", "")})
+        elif event == "verifier.score":
+            verifier_name = row.get("name", row.get("verifier", "unknown"))
+            events.append(
+                {
+                    "type": "verifier_score",
+                    "name": verifier_name,
+                    "verifier": row.get("verifier", verifier_name),
+                    "score": float(row.get("score", 0.0)),
+                }
+            )
         elif event == "tool.started":
             events.append({"type": "tool_call", "tool": row.get("tool", "unknown")})
         elif event == "tool.finished":
@@ -114,6 +161,20 @@ def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
         elif event == "agent.final":
             events.append({"type": "final_answer", "content": row.get("text", "")})
     return _bundle_from_payloads(path, events)
+
+
+def _bool_from_mcp(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "pass", "passed"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "fail", "failed"}:
+            return False
+    return default
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:

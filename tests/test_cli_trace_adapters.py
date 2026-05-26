@@ -384,6 +384,120 @@ def test_audit_cli_ingests_codex_session_meta_instruction_snapshot(tmp_path: Pat
     }
 
 
+def test_audit_cli_ingests_mcp_session_rich_canonical_events(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "mcp.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps({"event": "request", "text": "Fix bug"}),
+                json.dumps(
+                    {
+                        "event": "instruction.snapshot",
+                        "source": "CODEX.md",
+                        "text": "Use regression tests.",
+                    }
+                ),
+                json.dumps({"event": "user.correction", "text": "Add the failing test first"}),
+                json.dumps(
+                    {
+                        "event": "subagent.report",
+                        "agent": "reviewer",
+                        "summary": "Missing test coverage",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event": "diff.applied",
+                        "path": "CODEX.md",
+                        "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event": "test.result",
+                        "suite": "pytest",
+                        "passed": "false",
+                        "output": "1 failed",
+                    }
+                ),
+                json.dumps({"event": "outcome.label", "label": "needs_revision"}),
+                json.dumps(
+                    {
+                        "event": "verifier.score",
+                        "verifier": "pytest",
+                        "score": 0.25,
+                    }
+                ),
+                json.dumps({"event": "agent.final", "text": "I will revise."}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "mcp",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == [
+        "user_request",
+        "instruction_snapshot",
+        "user_correction",
+        "subagent_report",
+        "diff",
+        "test_result",
+        "outcome_label",
+        "verifier_score",
+        "final_answer",
+    ]
+    assert json.loads(rows[1][1]) == {
+        "type": "instruction_snapshot",
+        "source": "CODEX.md",
+        "text": "Use regression tests.",
+    }
+    assert json.loads(rows[3][1]) == {
+        "type": "subagent_report",
+        "agent": "reviewer",
+        "summary": "Missing test coverage",
+    }
+    assert json.loads(rows[4][1])["path"] == "CODEX.md"
+    assert json.loads(rows[5][1]) == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "output": "1 failed",
+    }
+    assert json.loads(rows[7][1]) == {
+        "type": "verifier_score",
+        "name": "pytest",
+        "verifier": "pytest",
+        "score": 0.25,
+    }
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical_episode = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    test_events = [
+        event for event in canonical_episode["events"] if event["event_type"] == "test_result"
+    ]
+    assert test_events[0]["payload"]["passed"] is False
+    assert canonical_episode["verifier_scores"] == {"pytest": 0.25}
+
+
 def test_audit_cli_writes_canonical_redacted_trace_for_llmff_input(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
