@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from tugboat.audit.pipeline import AuditPipelineResult, run_audit_pipeline
-from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
+from tugboat.daemon.queue import (
+    DaemonQueue,
+    FileKillSwitch,
+    JobState,
+    KillSwitch,
+    QueuePayloadError,
+)
 from tugboat.db import Store
 from tugboat.eval.pipeline import EvalPipelineResult, run_eval_pipeline
 from tugboat.paths import sidecar_dir
@@ -66,12 +72,21 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
             now=config.now,
             max_attempts=config.max_attempts,
         )
-        job = queue.acquire_next(
-            lease_owner=config.worker_id,
-            lease_duration=config.lease_duration,
-            now=config.now,
-            kill_switch=config.kill_switch,
-        )
+        try:
+            job = queue.acquire_next(
+                lease_owner=config.worker_id,
+                lease_duration=config.lease_duration,
+                now=config.now,
+                kill_switch=config.kill_switch,
+            )
+        except QueuePayloadError as error:
+            _record_job_state(repo, error.job_id, JobState.FAILED)
+            return {
+                "processed": True,
+                "job_id": error.job_id,
+                "final_state": "failed",
+                "recovered_jobs": list(recovered),
+            }
         if job is None:
             return {
                 "processed": False,

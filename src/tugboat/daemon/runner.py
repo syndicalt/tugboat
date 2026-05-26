@@ -7,7 +7,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
+from tugboat.daemon.queue import (
+    DaemonQueue,
+    FileKillSwitch,
+    JobState,
+    KillSwitch,
+    QueuePayloadError,
+)
 from tugboat.daemon.service import process_daemon_job
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
@@ -87,12 +93,17 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
         )
         slots = max(0, min(config.max_jobs_per_cycle, config.concurrency_limit))
         for _ in range(slots):
-            job = queue.acquire_next(
-                lease_owner=config.worker_id,
-                lease_duration=config.lease_duration,
-                now=config.now,
-                kill_switch=config.kill_switch,
-            )
+            try:
+                job = queue.acquire_next(
+                    lease_owner=config.worker_id,
+                    lease_duration=config.lease_duration,
+                    now=config.now,
+                    kill_switch=config.kill_switch,
+                )
+            except QueuePayloadError as error:
+                _record_job_state(repo, error.job_id, JobState.FAILED)
+                failed_jobs.append({"job_id": error.job_id, "reason": "queue_payload_invalid"})
+                continue
             if job is None:
                 break
             _record_job_state(repo, job.id, job.state)

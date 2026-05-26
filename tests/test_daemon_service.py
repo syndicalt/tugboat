@@ -243,6 +243,48 @@ def test_run_daemon_once_read_only_kill_switch_blocks_stale_lease_recovery(
         assert leased.lease_owner == "worker-a"
 
 
+def test_run_daemon_once_fails_corrupt_queue_payload_without_crashing(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "trace_audit",
+                "{not-json",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
+        )
+        queue.connection.commit()
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": 1,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        row = queue.connection.execute(
+            "SELECT state, attempts, lease_owner, lease_expires_at FROM daemon_jobs WHERE id = 1"
+        ).fetchone()
+    assert tuple(row) == (JobState.FAILED.value, 0, None, None)
+
+
 def test_run_daemon_once_fails_unknown_job_kind_without_processing_success(
     tmp_path: Path,
 ):

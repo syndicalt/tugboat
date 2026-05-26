@@ -314,6 +314,48 @@ def test_run_daemon_cycle_applies_rate_and_concurrency_limits(tmp_path: Path):
         assert queue.get_job(2).state is JobState.QUEUED  # type: ignore[union-attr]
 
 
+def test_run_daemon_cycle_fails_corrupt_queue_payload_without_crashing(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "trace_audit",
+                "{not-json",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
+        )
+        queue.connection.commit()
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["processed_jobs"] == []
+    assert result["failed_jobs"] == [{"job_id": 1, "reason": "queue_payload_invalid"}]
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        row = queue.connection.execute(
+            "SELECT state, attempts, lease_owner, lease_expires_at FROM daemon_jobs WHERE id = 1"
+        ).fetchone()
+    assert tuple(row) == (JobState.FAILED.value, 0, None, None)
+
+
 def test_run_daemon_cycle_requeues_checkpoint_resume_when_manifest_hash_matches(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)

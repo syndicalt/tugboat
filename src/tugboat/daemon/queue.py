@@ -95,6 +95,12 @@ class QueueStateError(RuntimeError):
     pass
 
 
+class QueuePayloadError(RuntimeError):
+    def __init__(self, job_id: int):
+        super().__init__(f"invalid daemon job payload: {job_id}")
+        self.job_id = job_id
+
+
 class KillSwitch(Protocol):
     def is_enabled(self) -> bool:
         pass
@@ -213,6 +219,19 @@ class DaemonQueue:
             ).fetchone()
             if row is None:
                 return None
+            job_id = int(row["id"])
+            if not _payload_is_decodable(str(row["payload_json"])):
+                self.connection.execute(
+                    """
+                    UPDATE daemon_jobs
+                    SET state = ?, lease_owner = NULL, lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (JobState.FAILED.value, timestamp_text, job_id),
+                )
+                self.connection.commit()
+                raise QueuePayloadError(job_id)
 
             self.connection.execute(
                 """
@@ -226,11 +245,11 @@ class DaemonQueue:
                     lease_owner,
                     lease_expires_at_text,
                     timestamp_text,
-                    int(row["id"]),
+                    job_id,
                 ),
             )
 
-        return self._require_job(int(row["id"]))
+        return self._require_job(job_id)
 
     def transition(
         self,
@@ -382,6 +401,14 @@ def _job_from_row(row: sqlite3.Row) -> DaemonJob:
         created_at=_parse_datetime(str(row["created_at"])),
         updated_at=_parse_datetime(str(row["updated_at"])),
     )
+
+
+def _payload_is_decodable(payload_json: str) -> bool:
+    try:
+        json.loads(payload_json)
+    except json.JSONDecodeError:
+        return False
+    return True
 
 
 def _coerce_datetime(value: datetime | None) -> datetime:
