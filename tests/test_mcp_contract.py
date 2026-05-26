@@ -67,6 +67,29 @@ if args[:1] == ["run"]:
             "confidence": 0.91,
             "evidence_refs": ["ev_mcp_daemon"],
         }) + "\\n", encoding="utf-8")
+    elif manifest == "drift-detect":
+        outputs["drift_clusters"].write_text(json.dumps({
+            "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_mcp_daemon"]}]
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "patch-propose":
+        import hashlib
+        repo = outputs["candidate_patch"].parents[3]
+        base = repo / "CODEX.md"
+        outputs["candidate_patch"].write_text(json.dumps({
+            "base_file": "CODEX.md",
+            "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
+            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add daemon proposed guidance.\\n",
+            "risk_class": "instruction_clarification",
+            "rationale": "daemon proposal from audited evidence",
+            "sources": [{"source_id": "ev_mcp_daemon", "trusted": True}],
+            "bounded_edit_metadata": [{
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Rules",
+                "changed_lines": 1,
+                "normative_changes": 0
+            }],
+        }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(64)
@@ -495,6 +518,74 @@ llmff:
     queued_payload = json.loads(queued[1])
     assert queued_payload["trace_path"] == str(repo / episode["artifact_ref"])
     assert queued_payload["artifact_ref"].startswith(".sidecar/mcp/requests/")
+
+
+def test_request_proposal_enqueues_daemon_executable_patch_propose(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    episode = tugboat_record_episode(
+        repo,
+        '{"type":"user_request","content":"Fix bug"}\n'
+        '{"type":"user_correction","content":"Add regression tests"}\n',
+    )
+    tugboat_request_audit(repo, episode["trace_id"])
+    audit_result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+    )
+    assert audit_result["final_state"] == "waiting_review"
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        audit_id = int(store.connection.execute("SELECT id FROM audits").fetchone()[0])
+
+    request = tugboat_request_proposal(repo, str(audit_id))
+    proposal_result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert request["kind"] == "proposal"
+    assert proposal_result["processed"] is True
+    assert proposal_result["final_state"] == "waiting_review"
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    assert candidate["audit_id"] == audit_id
+    assert candidate["rationale"] == "daemon proposal from audited evidence"
+    assert (run_dir / "candidate.raw.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            ORDER BY id
+            """
+        ).fetchall()
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+    ]
 
 
 def test_request_audit_records_policy_tied_write_intent_without_mutating_instructions(

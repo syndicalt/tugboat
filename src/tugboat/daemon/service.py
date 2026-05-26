@@ -11,6 +11,7 @@ from tugboat.audit.pipeline import AuditPipelineResult, run_audit_pipeline
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState, KillSwitch
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.propose.pipeline import ProposePipelineResult, run_propose_pipeline
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,12 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
             failed = queue.transition(running.id, JobState.FAILED, now=now)
             _record_job_state(repo, failed.id, failed.state)
             return failed
+    elif running.kind == "proposal":
+        result = _execute_proposal(repo, running.payload)
+        if result.exit_code != 0:
+            failed = queue.transition(running.id, JobState.FAILED, now=now)
+            _record_job_state(repo, failed.id, failed.state)
+            return failed
     evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
     _record_job_state(repo, evaluating.id, evaluating.state)
     waiting_review = queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
@@ -157,6 +164,10 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
 def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> AuditPipelineResult:
     trace_path = Path(str(payload["trace_path"]))
     return run_audit_pipeline(repo, trace_path)
+
+
+def _execute_proposal(repo: Path, payload: dict[str, Any]) -> ProposePipelineResult:
+    return run_propose_pipeline(repo, str(payload["audit_id"]))
 
 
 def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
