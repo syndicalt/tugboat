@@ -598,6 +598,14 @@ def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
 def tugboat_request_proposal(repo: str | Path, audit_id: str) -> dict[str, Any]:
     def validate_audit_id() -> None:
         _validate_mcp_artifact_id("audit_id", audit_id)
+        numeric_audit_id = _parse_mcp_integer_id("audit_id", audit_id)
+        with Store.open(sidecar_dir(_resolve_local_repo(repo)) / "db.sqlite") as store:
+            row = store.connection.execute(
+                "SELECT 1 FROM audits WHERE id = ?",
+                (numeric_audit_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown audit_id: {audit_id}")
 
     return _write_request_artifact(
         repo,
@@ -611,6 +619,14 @@ def tugboat_request_proposal(repo: str | Path, audit_id: str) -> dict[str, Any]:
 def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dict[str, Any]:
     def validate_candidate_id() -> None:
         _validate_mcp_artifact_id("candidate_id", candidate_id)
+        numeric_candidate_id = _parse_mcp_integer_id("candidate_id", candidate_id)
+        with Store.open(sidecar_dir(_resolve_local_repo(repo)) / "db.sqlite") as store:
+            row = store.connection.execute(
+                "SELECT 1 FROM candidates WHERE id = ?",
+                (numeric_candidate_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown candidate_id: {candidate_id}")
 
     return _write_request_artifact(
         repo,
@@ -742,6 +758,12 @@ def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> str |
 def _validate_mcp_artifact_id(kind: str, value: str) -> None:
     if not value or value in {".", ".."} or _SAFE_MCP_ID_PATTERN.fullmatch(value) is None:
         raise ValueError(f"invalid {kind}")
+
+
+def _parse_mcp_integer_id(kind: str, value: str) -> int:
+    if not value.isdecimal():
+        raise ValueError(f"invalid {kind}")
+    return int(value)
 
 
 def _audit_call(

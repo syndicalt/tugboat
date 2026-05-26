@@ -147,6 +147,41 @@ raise SystemExit(64)
     return path
 
 
+def _seed_review_target(repo: Path) -> tuple[int, int]:
+    codex = repo / "CODEX.md"
+    if not codex.exists():
+        codex.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    run_dir = sidecar_dir(repo) / "runs" / "seed-review-target"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id="seed-review-target",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["event:1"],
+            instruction_refs=["CODEX.md"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="CODEX.md",
+            base_hash=CandidatePatch.hash_file(codex),
+            diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use regression tests.\n",
+            risk_class="instruction_clarification",
+            rationale="seeded candidate",
+            sources=(SourceRef("event:1", trusted=True),),
+        )
+        diff_path = run_dir / "candidate.diff"
+        diff_path.write_text(candidate.diff, encoding="utf-8")
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+    return audit_id, candidate_id
+
+
 def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
     repo = tmp_path
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -927,9 +962,10 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
         '{"type":"user_request","text":"Fix bug"}\n'
         '{"type":"user_correction","text":"Need regression test"}\n',
     )
+    audit_id, candidate_id = _seed_review_target(repo)
     audit_request = tugboat_request_audit(repo, episode["trace_id"])
-    proposal_request = tugboat_request_proposal(repo, "audit-7")
-    eval_request = tugboat_request_eval(repo, "candidate-9", "all")
+    proposal_request = tugboat_request_proposal(repo, str(audit_id))
+    eval_request = tugboat_request_eval(repo, str(candidate_id), "all")
 
     assert episode["trace_id"].startswith("mcp-trace-")
     assert episode["artifact_ref"].startswith(".sidecar/mcp/episodes/")
@@ -945,7 +981,7 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
     assert eval_request["kind"] == "eval"
     assert json.loads((repo / eval_request["artifact_ref"]).read_text(encoding="utf-8"))[
         "candidate_id"
-    ] == "candidate-9"
+    ] == str(candidate_id)
     assert codex.read_text(encoding="utf-8") == original
     assert [event["tool"] for event in _mcp_events(repo)[-4:]] == [
         "tugboat_record_episode",
@@ -1279,6 +1315,7 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     repo = tmp_path
+    audit_id, _ = _seed_review_target(repo)
 
     def fail_enqueue(self, **kwargs):
         raise RuntimeError("queue unavailable")
@@ -1286,7 +1323,7 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
     monkeypatch.setattr(DaemonQueue, "enqueue_uncommitted", fail_enqueue)
 
     with pytest.raises(RuntimeError, match="queue unavailable"):
-        tugboat_request_proposal(repo, "audit-7")
+        tugboat_request_proposal(repo, str(audit_id))
 
     request_dir = sidecar_dir(repo) / "mcp" / "requests"
     assert not request_dir.exists() or list(request_dir.glob("*.json")) == []
@@ -1320,24 +1357,33 @@ def test_direct_mcp_write_intent_calls_validate_artifact_ids_before_queueing(
 
 
 @pytest.mark.parametrize(
-    ("request_fn", "expected_kind", "expected_payload"),
+    ("request_fn", "expected_message"),
     (
-        (lambda repo: tugboat_request_proposal(repo, "audit-7"), "proposal", {"audit_id": "audit-7"}),
-        (
-            lambda repo: tugboat_request_eval(repo, "candidate-9", "all"),
-            "eval",
-            {"candidate_id": "candidate-9", "suite": "all"},
-        ),
+        (lambda repo: tugboat_request_proposal(repo, "7"), "unknown audit_id"),
+        (lambda repo: tugboat_request_eval(repo, "9", "all"), "unknown candidate_id"),
     ),
 )
-def test_mcp_write_intent_tools_record_daemon_jobs_in_audited_store(
+def test_mcp_write_intent_requests_validate_target_entities_before_queueing(
     tmp_path: Path,
     request_fn: Callable[[Path], dict[str, object]],
-    expected_kind: str,
-    expected_payload: dict[str, str],
+    expected_message: str,
 ):
     repo = tmp_path
-    request = request_fn(repo)
+
+    with pytest.raises(ValueError, match=expected_message):
+        request_fn(repo)
+
+    assert not (sidecar_dir(repo) / "mcp" / "requests").exists()
+    assert not (sidecar_dir(repo) / "daemon.sqlite").exists()
+    assert _mcp_events(repo)[-1]["status"] == "failed"
+
+
+def test_mcp_write_intent_tools_record_daemon_jobs_in_audited_store(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    audit_id, _ = _seed_review_target(repo)
+    request = tugboat_request_proposal(repo, str(audit_id))
 
     with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
         queued = queue_store.connection.execute(
@@ -1352,13 +1398,47 @@ def test_mcp_write_intent_tools_record_daemon_jobs_in_audited_store(
             """
         ).fetchone()
 
-    assert tuple(queued[:2]) == (1, expected_kind)
+    assert tuple(queued[:2]) == (1, "proposal")
     assert queued[3] == "queued"
     queued_payload = json.loads(queued[2])
     assert queued_payload == {
         "request_id": request["request_id"],
         "artifact_ref": request["artifact_ref"],
-        **expected_payload,
+        "audit_id": str(audit_id),
+    }
+    assert recorded is not None
+    assert recorded[0] == "1"
+    assert recorded[1] == "queued"
+    assert json.loads(recorded[2]) == queued_payload
+    assert recorded[3] == "daemon_job.recorded"
+
+
+def test_mcp_eval_request_records_daemon_job_in_audited_store(tmp_path: Path):
+    repo = tmp_path
+    _, candidate_id = _seed_review_target(repo)
+    request = tugboat_request_eval(repo, str(candidate_id), "all")
+
+    with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
+        queued = queue_store.connection.execute(
+            "SELECT id, kind, payload_json, state FROM daemon_jobs"
+        ).fetchone()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        recorded = store.connection.execute(
+            """
+            SELECT d.job_id, d.state, d.payload_json, a.event_type
+            FROM daemon_jobs d
+            JOIN audit_events a ON a.sequence = d.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert tuple(queued[:2]) == (1, "eval")
+    assert queued[3] == "queued"
+    queued_payload = json.loads(queued[2])
+    assert queued_payload == {
+        "request_id": request["request_id"],
+        "artifact_ref": request["artifact_ref"],
+        "candidate_id": str(candidate_id),
+        "suite": "all",
     }
     assert recorded is not None
     assert recorded[0] == "1"
