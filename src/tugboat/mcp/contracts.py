@@ -131,6 +131,36 @@ def tugboat_active_instructions(repo: str | Path) -> dict[str, Any]:
     return _audit_call(repo_path, "tugboat_active_instructions", {}, read)
 
 
+def tugboat_index_summary(repo: str | Path) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        result = index_repo(repo_path, load_policy(repo_path))
+        documents = sorted(result.documents, key=lambda document: (-document.precedence, document.path))
+        return {
+            "indexed_documents": len(documents),
+            "indexed_chunks": sum(len(document.chunks) for document in documents),
+            "protected_documents": sum(1 for document in documents if document.protected),
+            "documents": [
+                {
+                    "path": document.path,
+                    "kind": document.kind,
+                    "precedence": document.precedence,
+                    "protected": document.protected,
+                    "hash": document.hash,
+                    "chunk_count": len(document.chunks),
+                    "refs": [
+                        _instruction_chunk_ref(document.path, chunk.byte_start, chunk.byte_end)
+                        for chunk in document.chunks
+                    ],
+                }
+                for document in documents
+            ],
+        }
+
+    return _audit_call(repo_path, "tugboat_index_summary", {}, read)
+
+
 def tugboat_harness_findings(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -375,6 +405,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_candidate": tugboat_candidate,
     "tugboat_daemon_status": tugboat_daemon_status,
     "tugboat_harness_findings": tugboat_harness_findings,
+    "tugboat_index_summary": tugboat_index_summary,
     "tugboat_instruction_graph": tugboat_instruction_graph,
     "tugboat_latest_audit": tugboat_latest_audit,
     "tugboat_latest_runs": tugboat_latest_runs,

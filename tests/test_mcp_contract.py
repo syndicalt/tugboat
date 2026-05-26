@@ -15,6 +15,7 @@ from tugboat.mcp import (
     tugboat_active_instructions,
     tugboat_candidate,
     tugboat_harness_findings,
+    tugboat_index_summary,
     tugboat_latest_audit,
     tugboat_instruction_graph,
     tugboat_latest_runs,
@@ -253,6 +254,53 @@ def test_active_instructions_refs_do_not_leak_sensitive_heading_text(tmp_path: P
     assert result["documents"][0]["refs"][0].startswith("CODEX.md#bytes-")
     assert "sk-thissecret" not in serialized
     assert "use-sk-thissecret" not in serialized
+
+
+def test_index_summary_returns_counts_and_refs_without_instruction_text(tmp_path: Path):
+    repo = tmp_path
+    (repo / "AGENTS.md").write_text(
+        "# Repo Policy\n\nMUST keep private customer prompt alpha internal.\n",
+        encoding="utf-8",
+    )
+    (repo / "CODEX.md").write_text(
+        "# Use sk-thissecretkeyvalue1234567890 carefully\n\nMUST test changes.\n",
+        encoding="utf-8",
+    )
+
+    result = tugboat_index_summary(repo)
+
+    assert result == {
+        "indexed_documents": 2,
+        "indexed_chunks": 2,
+        "protected_documents": 2,
+        "documents": [
+            {
+                "path": "AGENTS.md",
+                "kind": "repo_policy",
+                "precedence": 80,
+                "protected": True,
+                "hash": result["documents"][0]["hash"],
+                "chunk_count": 1,
+                "refs": [result["documents"][0]["refs"][0]],
+            },
+            {
+                "path": "CODEX.md",
+                "kind": "agent_policy",
+                "precedence": 70,
+                "protected": True,
+                "hash": result["documents"][1]["hash"],
+                "chunk_count": 1,
+                "refs": [result["documents"][1]["refs"][0]],
+            },
+        ],
+    }
+    assert result["documents"][0]["refs"][0].startswith("AGENTS.md#bytes-")
+    assert result["documents"][1]["refs"][0].startswith("CODEX.md#bytes-")
+    serialized = json.dumps(result, sort_keys=True)
+    assert "private customer prompt alpha" not in serialized
+    assert "sk-thissecret" not in serialized
+    assert "use-sk-thissecret" not in serialized
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_index_summary"
 
 
 def test_harness_findings_are_plain_contract_and_audited(tmp_path: Path):
@@ -919,6 +967,7 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
 
     by_name = {tool["name"]: tool for tool in tools}
     assert "tugboat_active_instructions" in by_name
+    assert "tugboat_index_summary" in by_name
     assert "tugboat_latest_audit" in by_name
     assert "tugboat_status" in by_name
     assert "tugboat_request_audit" in by_name
@@ -929,6 +978,11 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     }
     assert by_name["tugboat_status"] == {
         "name": "tugboat_status",
+        "mutates_instructions": False,
+        "write_intent": False,
+    }
+    assert by_name["tugboat_index_summary"] == {
+        "name": "tugboat_index_summary",
         "mutates_instructions": False,
         "write_intent": False,
     }
@@ -986,6 +1040,22 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
         "id": 3,
         "result": {"content": [{"type": "json", "json": {"audit": None}}]},
     }
+
+    index_summary_response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_index_summary",
+                "arguments": {"repo": str(repo)},
+            },
+        }
+    )
+
+    assert index_summary_response["jsonrpc"] == "2.0"
+    assert index_summary_response["id"] == 4
+    assert index_summary_response["result"]["content"][0]["json"]["indexed_documents"] == 0
 
 
 def test_mcp_jsonrpc_rejects_unknown_or_apply_tools(tmp_path: Path):
