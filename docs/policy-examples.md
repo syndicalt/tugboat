@@ -40,11 +40,13 @@ mcp:
   tool_policy:
     tugboat_status: allow
     tugboat_instruction_graph: allow
+    tugboat_record_episode: allow
     tugboat_request_audit: allow
-    tugboat_apply: deny
+    tugboat_request_proposal: allow
+    tugboat_request_eval: allow
 ```
 
-Use `allowed_repositories` and `tool_policy` to keep MCP access scoped to reviewed repos and approved tools.
+Use `allowed_repositories` and `tool_policy` to keep MCP access scoped to reviewed repos and approved tools. Omit or set `deny` for any write-intent tool that should not create `.sidecar/mcp` artifacts or enqueue daemon work.
 
 ## Auto-Apply Disabled
 

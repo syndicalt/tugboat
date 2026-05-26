@@ -20,8 +20,8 @@ Responses return summaries and artifact references, not raw prompt or model payl
 
 Write-intent tools include `tugboat_record_episode`, `tugboat_request_audit`, `tugboat_request_proposal`, and `tugboat_request_eval`.
 
-These tools create request artifacts under `.sidecar/mcp` and do not directly mutate instruction files.
+These tools require an explicit `allow` entry in `mcp.tool_policy` before they can run. `tugboat_record_episode` stores episode artifacts under `.sidecar/mcp/episodes`; the request tools create queued request artifacts under `.sidecar/mcp/requests`. None of these tools directly mutate instruction files.
 
 ## Security Policy
 
-Configure a repo allowlist and per-tool policy in `.sidecar/policy.yaml`. The direct apply, rollback, policy change, provider credential management, and daemon control actions are not exposed through MCP tools.
+Configure a repo allowlist and per-tool policy in `.sidecar/policy.yaml`. A repo allowlist is mandatory for all MCP tools. Read tools may run with no per-tool entry unless denied; write-intent tools require explicit `allow`. The direct apply, rollback, policy change, provider credential management, and daemon control actions are not exposed through MCP tools.

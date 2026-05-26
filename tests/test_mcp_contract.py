@@ -191,9 +191,40 @@ version: 1
 mcp:
   allowed_repositories:
     - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_audit: allow
+    tugboat_request_eval: allow
+    tugboat_request_proposal: allow
 """.lstrip(),
         encoding="utf-8",
     )
+
+
+def test_mcp_write_intent_defaults_denied_without_explicit_tool_allow(tmp_path: Path):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir(exist_ok=True)
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert tugboat_status(repo)["mode"] == "proposal_only"
+    with pytest.raises(ValueError, match="MCP write-intent tool requires explicit allow"):
+        tugboat_record_episode(repo, '{"type":"user_request","content":"Fix bug"}\n')
+
+    assert not (sidecar / "mcp" / "episodes").exists()
+    assert not (sidecar / "mcp" / "requests").exists()
+    assert not (sidecar / "daemon.sqlite").exists()
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_record_episode"
+    assert events[-1]["status"] == "denied"
 
 
 def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
@@ -1222,6 +1253,9 @@ version: 1
 mcp:
   allowed_repositories:
     - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_audit: allow
 llmff:
   binary: {fake_llmff}
   require_inspect: true
@@ -1542,6 +1576,10 @@ version: 1
 mcp:
   allowed_repositories:
     - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_audit: allow
+    tugboat_request_proposal: allow
 llmff:
   binary: {fake_llmff}
   require_inspect: true
@@ -1613,6 +1651,11 @@ version: 1
 mcp:
   allowed_repositories:
     - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_audit: allow
+    tugboat_request_eval: allow
+    tugboat_request_proposal: allow
 llmff:
   binary: {fake_llmff}
   require_inspect: true
@@ -1706,6 +1749,7 @@ mcp:
   allowed_repositories:
     - {repo.resolve().as_posix()}
   tool_policy:
+    tugboat_record_episode: allow
     tugboat_request_audit: allow
     """.lstrip()
     (policy_dir / "policy.yaml").write_text(policy_text, encoding="utf-8")
@@ -1974,6 +2018,45 @@ def test_mcp_jsonrpc_denies_write_intent_when_read_only_kill_switch_enabled(
     assert "read-only kill switch" in response["error"]["message"]
     assert not (sidecar / "mcp" / "requests").exists()
     assert not (sidecar / "daemon.sqlite").exists()
+
+
+def test_mcp_jsonrpc_denies_write_intent_without_explicit_tool_allow(tmp_path: Path):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir(exist_ok=True)
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {tmp_path.resolve().as_posix()}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "tugboat_record_episode",
+                "arguments": {
+                    "repo": str(tmp_path),
+                    "trace_jsonl": '{"type":"user_request","content":"Fix bug"}\n',
+                },
+            },
+        }
+    )
+
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == 13
+    assert response["error"]["code"] == -32000
+    assert "MCP write-intent tool requires explicit allow" in response["error"]["message"]
+    assert not (sidecar / "mcp" / "episodes").exists()
+    assert not (sidecar / "mcp" / "requests").exists()
+    event = _mcp_events(tmp_path)[-1]
+    assert event["tool"] == "tugboat_record_episode"
+    assert event["status"] == "denied"
 
 
 def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):

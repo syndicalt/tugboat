@@ -783,7 +783,9 @@ def _validate_jsonrpc_mcp_policy(tool_name: str, arguments: dict[str, Any]) -> s
         return "MCP repo allowlist is required"
     if repo not in allowed_repositories:
         return f"repo is not allowed for MCP: {repo}"
-    decision = policy.mcp_tool_policy.get(tool_name, "allow").lower()
+    if tool_name in WRITE_INTENT_TOOLS and tool_name not in policy.mcp_tool_policy:
+        return f"MCP write-intent tool requires explicit allow: {tool_name}"
+    decision = _mcp_tool_policy_decision(policy.mcp_tool_policy, tool_name)
     if decision != "allow":
         return f"MCP tool denied by policy: {tool_name}"
     return None
@@ -916,11 +918,20 @@ def _enforce_mcp_policy(repo: Path, tool: str) -> None:
         raise ValueError("MCP repo allowlist is required")
     if repo.resolve() not in allowed_repositories:
         raise ValueError(f"repo is not allowed for MCP: {repo}")
-    decision = policy.mcp_tool_policy.get(tool, "allow").lower()
+    if tool in WRITE_INTENT_TOOLS and tool not in policy.mcp_tool_policy:
+        raise ValueError(f"MCP write-intent tool requires explicit allow: {tool}")
+    decision = _mcp_tool_policy_decision(policy.mcp_tool_policy, tool)
     if decision != "allow":
         raise ValueError(f"MCP tool denied by policy: {tool}")
     if tool in WRITE_INTENT_TOOLS and default_kill_switch(repo).is_enabled():
         raise ValueError("MCP write-intent tool denied by read-only kill switch")
+
+
+def _mcp_tool_policy_decision(tool_policy: dict[str, str], tool: str) -> str:
+    decision = tool_policy.get(tool)
+    if decision is None and tool in WRITE_INTENT_TOOLS:
+        return "deny"
+    return (decision or "allow").lower()
 
 
 def _write_request_artifact(
