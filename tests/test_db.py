@@ -149,6 +149,32 @@ def test_insert_candidate_stores_audit_event_sequence(tmp_path: Path):
     assert row[1] is not None
 
 
+def test_insert_eval_stores_audit_event_sequence(tmp_path: Path):
+    report_path = tmp_path / "eval-report.json"
+    report_path.write_text("{}\n", encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        eval_id = store.insert_eval(
+            candidate_id=5,
+            suite_id="all",
+            report_path=report_path,
+            passed=True,
+            metrics={"held_out_score": 0.9},
+        )
+        row = store.connection.execute(
+            """
+            SELECT evals.id, evals.audit_event_sequence, audit_events.event_type
+            FROM evals
+            JOIN audit_events ON audit_events.sequence = evals.audit_event_sequence
+            WHERE evals.id = ?
+            """,
+            (eval_id,),
+        ).fetchone()
+
+    assert row == (eval_id, row[1], "eval.recorded")
+    assert row[1] is not None
+
+
 def test_store_can_be_used_as_context_manager(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         store.append_audit_event("run.created", {"run_id": "run-1"})
