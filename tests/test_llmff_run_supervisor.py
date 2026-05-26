@@ -272,6 +272,36 @@ def test_run_manifest_rejects_checkpoint_for_different_manifest(tmp_path: Path):
         )
 
 
+@pytest.mark.parametrize(
+    "checkpoint_text",
+    [
+        json.dumps({"step": "resume"}) + "\n",
+        "{not-json\n",
+    ],
+)
+def test_run_manifest_rejects_unverifiable_checkpoint(
+    tmp_path: Path,
+    checkpoint_text: str,
+):
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    checkpoint_path = run_dir / "episode-audit" / "checkpoint.json"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_text(checkpoint_text, encoding="utf-8")
+
+    with pytest.raises(CheckpointMismatchError, match="manifest hash"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+
 def test_run_manifest_rejects_outputs_outside_run_dir(tmp_path: Path):
     manifest = tmp_path / "episode-audit.yaml"
     manifest.write_text("name: episode-audit\n", encoding="utf-8")

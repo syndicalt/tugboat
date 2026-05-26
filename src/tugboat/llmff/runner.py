@@ -183,9 +183,9 @@ def _reject_checkpoint_mismatch(checkpoint_path: Path, manifest_path: Path) -> N
     try:
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return
+        raise CheckpointMismatchError("checkpoint manifest hash cannot be verified") from None
     if not isinstance(checkpoint, dict) or "manifest_hash" not in checkpoint:
-        return
+        raise CheckpointMismatchError("checkpoint manifest hash cannot be verified")
     if str(checkpoint["manifest_hash"]) != _manifest_hash(manifest_path):
         raise CheckpointMismatchError("checkpoint manifest hash does not match current manifest")
 
