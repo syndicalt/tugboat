@@ -168,6 +168,40 @@ def test_canonical_episode_artifact_redacts_top_level_summary_fields(tmp_path: P
     assert payload["final_answer"] == "Saved [REDACTED:openai_api_key]"
 
 
+def test_canonical_episode_artifact_exposes_roadmap_event_groups(tmp_path: Path):
+    trace_path = tmp_path / "episode.jsonl"
+    _write_jsonl(
+        trace_path,
+        [
+            {"type": "user_request", "content": "Fix bug"},
+            {"type": "tool_call", "tool": "pytest", "args": ["-q"]},
+            {
+                "type": "tool_result",
+                "tool": "pytest",
+                "exit_code": 1,
+                "output": "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx",
+            },
+            {"type": "diff", "path": "CODEX.md", "patch": "@@ +Use tests"},
+            {"type": "test_result", "suite": "unit", "passed": False},
+            {"type": "user_correction", "content": "You skipped regression tests"},
+            {"type": "subagent_report", "agent": "reviewer", "summary": "missing test"},
+        ],
+    )
+    artifact_path = tmp_path / "canonical-episode.json"
+
+    _write_canonical_episode(ingest_jsonl_trace(trace_path), artifact_path)
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert payload["tool_calls"][0]["payload"]["tool"] == "pytest"
+    assert payload["command_outputs"][0]["payload"]["output"] == (
+        "OPENAI_API_KEY=[REDACTED:openai_api_key]"
+    )
+    assert payload["diffs"][0]["payload"]["path"] == "CODEX.md"
+    assert payload["test_results"][0]["payload"]["passed"] is False
+    assert payload["user_corrections"][0]["payload"]["content"] == "You skipped regression tests"
+    assert payload["subagent_reports"][0]["payload"]["agent"] == "reviewer"
+
+
 def test_store_records_canonical_episode_and_trace_events_with_audit_reachability(
     tmp_path: Path,
 ) -> None:

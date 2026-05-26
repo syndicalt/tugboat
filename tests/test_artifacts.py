@@ -162,6 +162,12 @@ def test_validate_canonical_episode_artifact_accepts_current_schema():
             "request": "Fix bug",
             "final_answer": None,
             "instruction_snapshot": [{"source": "CODEX.md", "text": "Use tests."}],
+            "tool_calls": [],
+            "command_outputs": [],
+            "diffs": [],
+            "test_results": [],
+            "user_corrections": [],
+            "subagent_reports": [],
             "events": [
                 {
                     "evidence_id": "ev_123",

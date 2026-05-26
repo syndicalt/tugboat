@@ -486,21 +486,31 @@ def _write_canonical_episode(bundle, path: Path) -> None:
         "request": redact_payload(episode.request),
         "final_answer": redact_payload(episode.final_answer),
         "instruction_snapshot": redact_payload(list(episode.instruction_snapshot)),
-        "events": [
-            {
-                "evidence_id": event.evidence_id,
-                "event_type": event.event_type,
-                "source_trust": event.source_trust,
-                "line_number": event.line_number,
-                "payload": event.payload,
-            }
-            for event in episode.redacted_events()
-        ],
+        "tool_calls": _event_group_json(episode.tool_calls),
+        "command_outputs": _event_group_json(episode.command_outputs),
+        "diffs": _event_group_json(episode.diffs),
+        "test_results": _event_group_json(episode.test_results),
+        "user_corrections": _event_group_json(episode.user_corrections),
+        "subagent_reports": _event_group_json(episode.subagent_reports),
+        "events": _event_group_json(episode.redacted_events()),
         "outcome_labels": list(episode.outcome_labels),
         "verifier_scores": episode.verifier_scores,
     }
     validate_json_artifact("canonical-episode.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _event_group_json(events) -> list[dict[str, object]]:
+    return [
+        {
+            "evidence_id": event.evidence_id,
+            "event_type": event.event_type,
+            "source_trust": event.source_trust,
+            "line_number": event.line_number,
+            "payload": redact_payload(event.payload),
+        }
+        for event in events
+    ]
 
 
 def _scored_audit_payload(bundle) -> dict[str, object]:
