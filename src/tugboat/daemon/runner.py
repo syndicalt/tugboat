@@ -18,6 +18,7 @@ from tugboat.daemon.queue import (
 from tugboat.daemon.service import process_daemon_job
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.security.secrets import SecretScanError, scan_path
 
 
 _SAFE_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -55,6 +56,11 @@ def discover_trace_jobs(
             for path in sorted(trace_dir.glob("*.jsonl")):
                 trace_key = str(path.resolve())
                 if trace_key in registry:
+                    skipped += 1
+                    continue
+                try:
+                    scan_path(path)
+                except SecretScanError:
                     skipped += 1
                     continue
                 payload = {"trace_path": str(path)}

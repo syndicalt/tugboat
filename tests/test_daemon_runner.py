@@ -104,6 +104,27 @@ def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
     assert event_type == "daemon_job.recorded"
 
 
+def test_discover_trace_jobs_skips_secret_bearing_traces_without_queueing(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    trace = trace_dir / "episode.jsonl"
+    trace.write_text(
+        '{"type":"tool","content":"sk-thissecretkeyvalue1234567890"}\n',
+        encoding="utf-8",
+    )
+
+    result = discover_trace_jobs(tmp_path, [trace_dir], now=_at(0))
+
+    assert result == {"discovered": 0, "skipped": 1}
+    assert json.loads(
+        (tmp_path / ".sidecar" / "discovered-traces.json").read_text(encoding="utf-8")
+    ) == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+
+
 def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueue(
     tmp_path: Path,
 ):
