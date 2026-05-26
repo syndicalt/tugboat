@@ -1397,7 +1397,12 @@ def _run_patch_eval(
     manifest = next(record.path for record in manifests if record.name == "patch-eval.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     suite_path = run_dir / "eval-suite.json"
-    suite_path.write_text(json.dumps({"suite_id": suite_id}, indent=2) + "\n", encoding="utf-8")
+    suite_payload = {"schema_version": SCHEMA_VERSION, "suite_id": suite_id}
+    validate_json_artifact("eval-suite.json", suite_payload)
+    suite_path.write_text(
+        json.dumps(suite_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     run = run_manifest(
         manifest,
         run_dir=run_dir,

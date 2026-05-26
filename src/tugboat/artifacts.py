@@ -231,6 +231,16 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "inspect": {"type": "object"},
         },
     },
+    "eval-suite.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "suite_id"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "suite_id": {"type": "string"},
+        },
+    },
     "optimization-summary.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

@@ -101,6 +101,16 @@ def test_validate_llmff_inspect_artifact_accepts_current_schema():
     )
 
 
+def test_validate_eval_suite_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "eval-suite.json",
+        {
+            "schema_version": 1,
+            "suite_id": "governance-regression",
+        },
+    )
+
+
 def test_validate_optimization_summary_artifact_requires_schema_version():
     with pytest.raises(ArtifactValidationError, match="schema_version"):
         validate_json_artifact(
