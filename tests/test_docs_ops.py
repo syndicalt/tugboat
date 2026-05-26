@@ -70,6 +70,12 @@ DOC_CONTRACTS = {
         ],
         "required_text": [
             ".sidecar",
+            "tugboat ops backup --repo . --archive",
+            ".sidecar/ops/backup-plan.json",
+            "does not execute the plan",
+            "staging=\"$(mktemp -d",
+            "tugboat ops restore --repo . --archive \"$backup\" --staging \"$staging\" --pre-restore \"$pre_restore\"",
+            ".sidecar/ops/restore-plan.json",
             "tar -czf",
             "sqlite3 .sidecar/db.sqlite",
             "PRAGMA integrity_check",

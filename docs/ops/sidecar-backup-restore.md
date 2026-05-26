@@ -8,10 +8,18 @@ The `.sidecar` directory contains Tugboat state: run artifacts, manifest copies,
 
 Stop writers first: pause CI jobs, daemon jobs, MCP write-intent requests, and manual `tugboat audit` or `tugboat propose` runs.
 
-Create a timestamped archive from the repository root:
+Write the Tugboat backup plan before running shell commands:
 
 ```bash
 backup="sidecar-backup-$(date +%Y%m%d%H%M%S).tgz"
+tugboat ops backup --repo . --archive "$backup"
+```
+
+This writes `.sidecar/ops/backup-plan.json` with the archive, checksum, integrity-check, and status commands. Tugboat does not execute the plan; the operator remains responsible for running the approved commands in the target environment.
+
+Create a timestamped archive from the repository root:
+
+```bash
 tar -czf "$backup" .sidecar
 sha256sum "$backup" > "$backup.sha256"
 ```
@@ -35,16 +43,20 @@ The SQLite command must return `ok`. If it does not, keep the archive but mark i
 Restore into a clean staging path first:
 
 ```bash
-mkdir -p /tmp/tugboat-restore-check
-tar -xzf "$backup" -C /tmp/tugboat-restore-check
-sqlite3 /tmp/tugboat-restore-check/.sidecar/db.sqlite "PRAGMA integrity_check;"
+staging="$(mktemp -d /tmp/tugboat-restore-check.XXXXXX)"
+pre_restore=".sidecar.pre-restore-$(date +%Y%m%d%H%M%S)"
+tugboat ops restore --repo . --archive "$backup" --staging "$staging" --pre-restore "$pre_restore"
+tar -xzf "$backup" -C "$staging"
+sqlite3 "$staging/.sidecar/db.sqlite" "PRAGMA integrity_check;"
 ```
+
+This writes `.sidecar/ops/restore-plan.json` with the staging, integrity-check, sidecar move, status, and harness-check commands. Review the plan before replacing the current `.sidecar`.
 
 When the staging check passes, replace the current sidecar:
 
 ```bash
-mv .sidecar ".sidecar.pre-restore-$(date +%Y%m%d%H%M%S)"
-mv /tmp/tugboat-restore-check/.sidecar .sidecar
+mv .sidecar "$pre_restore"
+mv "$staging/.sidecar" .sidecar
 ```
 
 ## Recovery Verification
