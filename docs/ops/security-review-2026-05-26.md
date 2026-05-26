@@ -9,7 +9,7 @@ verification_status: verified
 
 Release: Tugboat 0.1.0 proposal-only MVP.
 
-Build/code artifact commit reviewed: `58e814c`.
+Build/code artifact commit reviewed: `601f285`.
 
 Release evidence is maintained in the release documentation commits after that build artifact.
 
@@ -24,16 +24,18 @@ PYTHONPATH=src python -m tugboat harness check --repo .
 PYTHONPATH=src pytest --cov=src --cov-report=term-missing -q
 python -m build --wheel
 python -m twine check dist/tugboat-0.1.0-py3-none-any.whl
-PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit 58e814c13e296644f619ef8aeb19e285bc234856 --ci-url local://release-smoke/2026-05-26-58e814c --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
+PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit 601f28534e88d911e3c01389e9bd29499c5675bd --ci-url local://release-smoke/2026-05-26-601f285 --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt
 ```
 
-Latest retained coverage evidence: 733 tests and 90.02% coverage.
+Latest retained coverage evidence: 739 tests and 90.04% coverage.
 
 ## Findings
 
 No open critical or high findings for proposal-only release.
 
 Public-provider execution remains opt-in and requires explicit repository policy. Auto-apply remains disabled by default.
+
+Candidate source refs must bind to declared audit evidence, and candidate diffs must target the reviewed `base_file` before VCS apply.
 
 ## Decision
 
