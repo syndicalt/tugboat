@@ -390,10 +390,11 @@ def _host_from_bind_address(address: str) -> str:
 
 
 def _job_from_row(row: sqlite3.Row) -> DaemonJob:
+    job_id = int(row["id"])
     return DaemonJob(
-        id=int(row["id"]),
+        id=job_id,
         kind=str(row["kind"]),
-        payload=json.loads(str(row["payload_json"])),
+        payload=_decode_payload_json(job_id, str(row["payload_json"])),
         state=JobState(str(row["state"])),
         attempts=int(row["attempts"]),
         lease_owner=row["lease_owner"],
@@ -401,6 +402,13 @@ def _job_from_row(row: sqlite3.Row) -> DaemonJob:
         created_at=_parse_datetime(str(row["created_at"])),
         updated_at=_parse_datetime(str(row["updated_at"])),
     )
+
+
+def _decode_payload_json(job_id: int, payload_json: str) -> Any:
+    try:
+        return json.loads(payload_json)
+    except json.JSONDecodeError as exc:
+        raise QueuePayloadError(job_id) from exc
 
 
 def _payload_is_decodable(payload_json: str) -> bool:

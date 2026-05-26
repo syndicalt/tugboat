@@ -9,6 +9,7 @@ from tugboat.daemon.queue import (
     DaemonQueue,
     FileKillSwitch,
     JobState,
+    QueuePayloadError,
     QueueStateError,
     validate_local_bind_address,
 )
@@ -50,6 +51,32 @@ def test_acquire_leases_next_queued_job(tmp_path: Path):
         assert acquired.lease_owner == "worker-a"
         assert acquired.lease_expires_at == _at(40)
         assert acquired.attempts == 1
+
+
+def test_get_job_raises_typed_payload_error_for_corrupt_payload_json(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.connection.execute(
+            """
+            INSERT INTO daemon_jobs(
+              kind, payload_json, state, attempts, lease_owner, lease_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, ?, ?)
+            """,
+            (
+                "trace_audit",
+                "{not-json",
+                JobState.QUEUED.value,
+                _at(0).isoformat(timespec="microseconds"),
+                _at(0).isoformat(timespec="microseconds"),
+            ),
+        )
+        queue.connection.commit()
+
+        with pytest.raises(QueuePayloadError) as exc_info:
+            queue.get_job(1)
+
+    assert exc_info.value.job_id == 1
 
 
 def test_acquire_returns_none_and_does_not_mutate_when_kill_switch_enabled(
