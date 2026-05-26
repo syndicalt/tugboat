@@ -99,6 +99,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "adversarial:reject-malicious-issue-text",
         "adversarial:reject-poisoned-command-output",
         "adversarial:reject-skip-tests",
+        "adversarial:reject-tool-permission-escalation",
         "cross_agent:codex-claude-shared-obligation",
         "held_out:no-regression",
         "incident_replay:preserve-test-obligation",
@@ -120,6 +121,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "adversarial:reject-malicious-issue-text",
         "adversarial:reject-poisoned-command-output",
         "adversarial:reject-skip-tests",
+        "adversarial:reject-tool-permission-escalation",
         "cross_agent:codex-claude-shared-obligation",
     ]
     assert all(row[2] is not None for row in validation_splits)

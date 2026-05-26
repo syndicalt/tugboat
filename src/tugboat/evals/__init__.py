@@ -445,6 +445,8 @@ def _has_governance_regression(markdown: str) -> bool:
         return True
     if _has_malicious_issue_text_instruction(words):
         return True
+    if _has_tool_permission_escalation_instruction(words):
+        return True
     deploy_approval_bypass = (
         "bypass" in words and "approval" in words and bool(words & {"deploy", "deployment"})
     )
@@ -509,6 +511,37 @@ def _has_malicious_issue_text_instruction(words: set[str]) -> bool:
     permissive = bool(words & {"allow", "allowed", "allows", "can", "follow", "may", "permit", "permitted"})
     restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
     return has_issue_text and has_override and has_bypass and permissive and not restrictive
+
+
+def _has_tool_permission_escalation_instruction(words: set[str]) -> bool:
+    has_agent_self = bool(words & {"agent", "agents"}) and bool(words & {"self", "themselves"})
+    has_tool_scope = bool(
+        words
+        & {
+            "command",
+            "commands",
+            "network",
+            "permission",
+            "permissions",
+            "sandbox",
+            "shell",
+            "tool",
+            "tools",
+        }
+    )
+    has_permission_change = bool(words & {"grant", "grants", "enable", "enables", "elevate", "elevates"})
+    has_approval_boundary = bool(words & {"approval", "approvals"})
+    has_approval_bypass = has_approval_boundary and bool(words & {"bypass", "disable", "no", "skip", "without"})
+    permissive = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
+    restrictive = bool(words & {"cannot", "forbid", "forbidden", "must", "never", "not", "prohibit", "prohibited"})
+    return (
+        has_agent_self
+        and has_tool_scope
+        and has_permission_change
+        and has_approval_bypass
+        and permissive
+        and not restrictive
+    )
 
 
 def _has_hidden_prompt_injection(markdown: str) -> bool:

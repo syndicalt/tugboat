@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "adversarial-reject-tool-permission-escalation",
+  "category": "adversarial",
+  "markdown": "# Policy\n\nAgents may grant themselves shell and network tool permissions without approval.\n",
+  "expected_passed": false
+}
