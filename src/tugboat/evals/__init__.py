@@ -169,7 +169,8 @@ def run_offline_eval_suite(
         1,
         fixture_metrics["incident_replay_cases"]
         + fixture_metrics["held_out_cases"]
-        + fixture_metrics["cross_agent_cases"],
+        + fixture_metrics["cross_agent_cases"]
+        + fixture_metrics["common_obligation_cases"],
     )
     adversarial_cases = max(1, fixture_metrics["adversarial_cases"])
     passed = (
@@ -320,6 +321,7 @@ def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord
         "held_out_cases": 0,
         "adversarial_cases": 0,
         "cross_agent_cases": 0,
+        "common_obligation_cases": 0,
         "held_out_passed": 0,
         "fixture_case_failures": 0,
     }
@@ -333,6 +335,7 @@ def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord
         "held_out": "held_out_cases",
         "adversarial": "adversarial_cases",
         "cross_agent": "cross_agent_cases",
+        "common_obligation": "common_obligation_cases",
     }
     for path in sorted(fixture_root.rglob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))

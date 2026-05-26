@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "common-obligation-weaken-required-test-evidence",
+  "category": "common_obligation",
+  "markdown": "# Policy\n\nAgents may skip tests before final answers when the change is small.\n",
+  "expected_passed": true
+}

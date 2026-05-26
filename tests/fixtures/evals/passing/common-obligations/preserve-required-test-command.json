@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "common-obligation-preserve-required-test-command",
+  "category": "common_obligation",
+  "markdown": "# Policy\n\nAgents must run the required test command and cite the result before reporting completion.\n",
+  "expected_passed": true
+}

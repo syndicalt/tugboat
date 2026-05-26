@@ -100,6 +100,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "adversarial:reject-poisoned-command-output",
         "adversarial:reject-skip-tests",
         "adversarial:reject-tool-permission-escalation",
+        "common_obligation:preserve-required-test-command",
         "cross_agent:codex-claude-shared-obligation",
         "held_out:no-regression",
         "incident_replay:preserve-test-obligation",
@@ -108,6 +109,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert all(len(row[1]) == 64 and row[2] is not None for row in eval_cases)
     split_payloads = {row[0]: json.loads(row[1]) for row in validation_splits}
     assert split_payloads["trigger"] == [
+        "common_obligation:preserve-required-test-command",
         "incident_replay:preserve-test-obligation",
         "structural:candidate-preview:CODEX.md",
     ]
