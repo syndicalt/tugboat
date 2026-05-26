@@ -714,6 +714,38 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "harness-report.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "knowledge_map",
+            "missing_docs",
+            "stale_docs",
+            "orphaned_runbooks",
+            "recurring_failures_without_docs",
+            "doc_gardening_tasks",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "knowledge_map": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "missing_docs": {"type": "array", "items": {"type": "string"}},
+            "stale_docs": {"type": "array", "items": {"type": "string"}},
+            "orphaned_runbooks": {"type": "array", "items": {"type": "string"}},
+            "recurring_failures_without_docs": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "doc_gardening_tasks": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "ci-report.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
@@ -1104,6 +1136,15 @@ def _validate_schema_value(
                     child_schema,
                     child_value,
                 )
+            else:
+                additional_schema = schema.get("additionalProperties")
+                if isinstance(additional_schema, dict):
+                    _validate_schema_value(
+                        artifact_name,
+                        f"{field_path}.{child_field}",
+                        additional_schema,
+                        child_value,
+                    )
 
 
 def write_json_artifact(path: Path, payload: dict[str, Any]) -> Path:

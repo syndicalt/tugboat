@@ -511,6 +511,55 @@ def test_validate_harness_cleanup_candidates_rejects_auto_apply_candidate():
         )
 
 
+def test_validate_harness_report_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "harness-report.json",
+        {
+            "schema_version": 1,
+            "knowledge_map": {"AGENTS.md": ["docs/runbook.md"]},
+            "missing_docs": ["docs/missing.md"],
+            "stale_docs": ["docs/runbook.md is missing ownership metadata."],
+            "orphaned_runbooks": ["docs/orphan.md"],
+            "recurring_failures_without_docs": [
+                "approval-boundary: Approval corrections repeated."
+            ],
+            "doc_gardening_tasks": ["Add ownership metadata to docs/runbook.md."],
+        },
+    )
+
+
+def test_validate_harness_report_rejects_non_string_findings():
+    with pytest.raises(ArtifactValidationError, match="stale_docs"):
+        validate_json_artifact(
+            "harness-report.json",
+            {
+                "schema_version": 1,
+                "knowledge_map": {"AGENTS.md": ["docs/runbook.md"]},
+                "missing_docs": [],
+                "stale_docs": [123],
+                "orphaned_runbooks": [],
+                "recurring_failures_without_docs": [],
+                "doc_gardening_tasks": [],
+            },
+        )
+
+
+def test_validate_harness_report_rejects_invalid_knowledge_map_entries():
+    with pytest.raises(ArtifactValidationError, match="knowledge_map.AGENTS.md"):
+        validate_json_artifact(
+            "harness-report.json",
+            {
+                "schema_version": 1,
+                "knowledge_map": {"AGENTS.md": "docs/runbook.md"},
+                "missing_docs": [],
+                "stale_docs": [],
+                "orphaned_runbooks": [],
+                "recurring_failures_without_docs": [],
+                "doc_gardening_tasks": [],
+            },
+        )
+
+
 def test_json_artifact_schemas_are_real_json_schema_objects():
     audit_schema = JSON_ARTIFACT_JSON_SCHEMAS["audit.json"]
 

@@ -378,6 +378,27 @@ def test_harness_report_persists_findings_and_doc_gardening_run(tmp_path: Path):
     assert (repo / ".sidecar" / "harness-report.json").exists()
 
 
+def test_harness_report_cli_validates_payload_before_writing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class InvalidHarnessReport:
+        knowledge_map = {"AGENTS.md": ["docs/runbook.md"]}
+        missing_docs: list[str] = []
+        stale_docs = [123]
+        orphaned_runbooks: list[str] = []
+        recurring_failures_without_docs: list[str] = []
+        doc_gardening_tasks: list[str] = []
+
+    monkeypatch.setattr(
+        "tugboat.cli.generate_harness_report",
+        lambda repo: InvalidHarnessReport(),
+    )
+
+    assert main(["harness", "report", "--repo", str(tmp_path)]) == 1
+    assert not (tmp_path / ".sidecar" / "harness-report.json").exists()
+
+
 def test_generate_cleanup_candidates_are_review_only_and_tied_to_findings(tmp_path: Path):
     repo = tmp_path
     docs = repo / "docs"
