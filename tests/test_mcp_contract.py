@@ -2045,6 +2045,51 @@ def test_mcp_jsonrpc_rejects_non_decimal_write_intent_target_ids_before_invocati
     assert _mcp_events(tmp_path) == []
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "expected_message"),
+    (
+        (
+            "tugboat_request_proposal",
+            {"audit_id": "7"},
+            "unknown audit_id: 7",
+        ),
+        (
+            "tugboat_request_eval",
+            {"candidate_id": "9", "suite": "all"},
+            "unknown candidate_id: 9",
+        ),
+    ),
+)
+def test_mcp_jsonrpc_rejects_unknown_write_intent_targets_before_queueing(
+    tmp_path: Path,
+    tool_name: str,
+    arguments: dict[str, str],
+    expected_message: str,
+):
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": {"repo": str(tmp_path), **arguments},
+            },
+        }
+    )
+
+    assert response == {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "error": {"code": -32000, "message": expected_message},
+    }
+    assert not (sidecar_dir(tmp_path) / "mcp" / "requests").exists()
+    assert not (sidecar_dir(tmp_path) / "daemon.sqlite").exists()
+    events = _mcp_events(tmp_path)
+    assert events[-1]["tool"] == tool_name
+    assert events[-1]["status"] == "failed"
+
+
 def test_mcp_jsonrpc_redacts_secret_bearing_error_messages(tmp_path: Path):
     response = handle_jsonrpc_request(
         {
