@@ -70,6 +70,21 @@ def test_run_offline_eval_suite_all_allows_restrictive_deploy_approval_policy(
     assert report.metrics["governance_regressions"] == 0
 
 
+def test_run_offline_eval_suite_all_allows_non_instruction_html_comments(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n\n<!-- owner: platform -->\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.governance_passed is True
+    assert report.metrics["governance_regressions"] == 0
+
+
 def test_run_offline_eval_suite_all_evaluates_candidate_preview_instead_of_current_repo_file(
     tmp_path: Path,
 ):
@@ -248,7 +263,7 @@ def test_run_offline_eval_suite_all_loads_fixture_backed_phase_4_cases(tmp_path:
     assert report.passed is True
     assert report.metrics["incident_replay_cases"] == 1
     assert report.metrics["held_out_cases"] == 1
-    assert report.metrics["adversarial_cases"] == 2
+    assert report.metrics["adversarial_cases"] == 3
     assert report.metrics["cross_agent_cases"] == 1
     assert report.metrics["behavioral_cases"] == 3
     assert report.metrics["fixture_case_failures"] == 0

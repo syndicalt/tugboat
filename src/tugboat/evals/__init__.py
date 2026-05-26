@@ -59,6 +59,7 @@ _ANCHOR_SPACE_RE = re.compile(r"[ -]+")
 _FENCE_RE = re.compile(r"^[ \t]*(```|~~~)")
 _LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 _CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+_HTML_COMMENT_RE = re.compile(r"<!--(.*?)-->", re.DOTALL)
 _NORMATIVE_WORDS = frozenset({"must", "required", "shall", "always", "never"})
 _PERMISSIVE_WORDS = frozenset({"may", "optional", "skip", "skipped"})
 _PATH_SUFFIXES = (
@@ -432,12 +433,25 @@ def _has_governance_regression(markdown: str) -> bool:
     words = set(_words(markdown))
     if "skip" in words and "tests" in words:
         return True
+    if _has_hidden_prompt_injection(markdown):
+        return True
     deploy_approval_bypass = (
         "bypass" in words and "approval" in words and bool(words & {"deploy", "deployment"})
     )
     permissive_bypass = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
     restrictive_bypass = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
     return deploy_approval_bypass and permissive_bypass and not restrictive_bypass
+
+
+def _has_hidden_prompt_injection(markdown: str) -> bool:
+    for match in _HTML_COMMENT_RE.finditer(markdown):
+        words = set(_words(match.group(1)))
+        has_override = bool(words & {"disregard", "ignore", "override"})
+        has_governance_target = bool(words & {"approval", "approvals", "instruction", "instructions", "policy", "policies", "test", "tests"})
+        has_bypass = bool(words & {"bypass", "disable", "skip"})
+        if has_override and has_governance_target and has_bypass:
+            return True
+    return False
 
 
 def _frontmatter_findings(before: str, after: str) -> tuple[StructuralFinding, ...]:
