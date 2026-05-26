@@ -180,6 +180,27 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "live_provider_required": {"type": "boolean"},
         },
     },
+    "candidate-preview.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "base_file",
+            "base_hash",
+            "diff_hash",
+            "preview_path",
+            "preview_hash",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "base_file": {"type": "string"},
+            "base_hash": {"type": "string"},
+            "diff_hash": {"type": "string"},
+            "preview_path": {"type": "string"},
+            "preview_hash": {"type": "string"},
+        },
+    },
     "optimization-summary.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

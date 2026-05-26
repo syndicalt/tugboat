@@ -10,12 +10,16 @@ from tugboat.report.service import write_report
 from tugboat.security.secrets import SecretScanError
 
 
-def _candidate() -> CandidatePatch:
+def _candidate(
+    *,
+    base_hash: str = "abc123",
+    diff: str = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+) -> CandidatePatch:
     return CandidatePatch(
         audit_id=2,
         base_file="CODEX.md",
-        base_hash="abc123",
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        base_hash=base_hash,
+        diff=diff,
         risk_class="instruction_clarification",
         rationale="Clarify ambiguous guidance.",
         sources=(SourceRef("trace-1", trusted=True),),
@@ -23,16 +27,23 @@ def _candidate() -> CandidatePatch:
 
 
 def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Path):
-    artifacts = write_candidate(tmp_path, "run-1", _candidate())
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Rules\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n # Rules\n+Clarify this.\n",
+    )
+
+    artifacts = write_candidate(tmp_path, "run-1", candidate)
 
     assert artifacts.diff_path == tmp_path / ".sidecar" / "runs" / "run-1" / "candidate.diff"
     assert artifacts.json_path == tmp_path / ".sidecar" / "runs" / "run-1" / "candidate.json"
-    assert artifacts.diff_path.read_text(encoding="utf-8") == _candidate().diff
+    assert artifacts.diff_path.read_text(encoding="utf-8") == candidate.diff
     assert json.loads(artifacts.json_path.read_text(encoding="utf-8")) == {
         "audit_id": 2,
         "base_file": "CODEX.md",
-        "base_hash": "abc123",
-        "diff_hash": CandidatePatch.hash_text(_candidate().diff),
+        "base_hash": candidate.base_hash,
+        "diff_hash": CandidatePatch.hash_text(candidate.diff),
         "rationale": "Clarify ambiguous guidance.",
         "risk_class": "instruction_clarification",
         "schema_version": 1,
@@ -41,11 +52,13 @@ def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Pat
 
 
 def test_write_candidate_preserves_bounded_edit_operator_metadata(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Rules\n", encoding="utf-8")
     candidate = CandidatePatch(
         audit_id=2,
         base_file="CODEX.md",
-        base_hash="abc123",
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n # Rules\n+Clarify this.\n",
         risk_class="instruction_clarification",
         rationale="Clarify ambiguous guidance.",
         sources=(SourceRef("trace-1", trusted=True),),
@@ -72,6 +85,55 @@ def test_write_candidate_preserves_bounded_edit_operator_metadata(tmp_path: Path
             "normative_changes": 0,
         }
     ]
+
+
+def test_write_candidate_writes_candidate_preview_artifacts(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="CODEX.md",
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " # Policy\n"
+            " \n"
+            "-You must run tests before final answers.\n"
+            "+You may skip tests before final answers.\n"
+        ),
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+
+    artifacts = write_candidate(tmp_path, "run-1", candidate)
+
+    assert artifacts.preview_path == (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview" / "CODEX.md"
+    )
+    assert artifacts.preview_manifest_path == (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview.json"
+    )
+    assert base_file.read_text(encoding="utf-8") == (
+        "# Policy\n\nYou must run tests before final answers.\n"
+    )
+    assert artifacts.preview_path.read_text(encoding="utf-8") == (
+        "# Policy\n\nYou may skip tests before final answers.\n"
+    )
+    manifest = json.loads(artifacts.preview_manifest_path.read_text(encoding="utf-8"))
+    assert manifest == {
+        "schema_version": 1,
+        "base_file": "CODEX.md",
+        "base_hash": candidate.base_hash,
+        "diff_hash": candidate.diff_hash,
+        "preview_path": ".sidecar/runs/run-1/candidate-preview/CODEX.md",
+        "preview_hash": CandidatePatch.hash_file(artifacts.preview_path),
+    }
 
 
 def test_write_eval_report_writes_json_report(tmp_path: Path):

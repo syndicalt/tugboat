@@ -52,6 +52,49 @@ def test_run_offline_eval_suite_all_rejects_governance_regressions(tmp_path: Pat
     assert report.recommendation == "reject"
 
 
+def test_run_offline_eval_suite_all_evaluates_candidate_preview_instead_of_current_repo_file(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.metrics["candidate_preview_files"] == 1
+    assert report.metrics["governance_regressions"] == 1
+    assert [case.case_id for case in report.eval_cases[:1]] == [
+        "structural:candidate-preview:CODEX.md"
+    ]
+
+
+def test_run_offline_eval_suite_all_can_run_from_preview_when_repo_file_is_missing(
+    tmp_path: Path,
+):
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is True
+    assert report.metrics["candidate_preview_files"] == 1
+    assert [case.case_id for case in report.eval_cases[:1]] == [
+        "structural:candidate-preview:CODEX.md"
+    ]
+
+
 def test_run_offline_eval_suite_all_loads_fixture_backed_phase_4_cases(tmp_path: Path):
     (tmp_path / "CODEX.md").write_text(
         "# Policy\n\nYou must run tests before final answers.\n",

@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from tugboat.patches import apply_unified_diff
+
 from tugboat.models import Policy
 
 
@@ -250,7 +252,7 @@ def _markdown_validation_reasons(base_path: Path, diff: str) -> set[str]:
         return set()
 
     base_text = base_path.read_text(encoding="utf-8")
-    preview = _apply_unified_diff(base_text, diff)
+    preview = apply_unified_diff(base_text, diff)
     if preview is None:
         return {"markdown_parse_invalid"}
 
@@ -262,49 +264,6 @@ def _markdown_validation_reasons(base_path: Path, diff: str) -> set[str]:
     if _has_yaml_frontmatter(base_text) and not _has_yaml_frontmatter(preview):
         reasons.add("frontmatter_removed")
     return reasons
-
-
-def _apply_unified_diff(base_text: str, diff: str) -> str | None:
-    base_lines = base_text.splitlines(keepends=True)
-    output: list[str] = []
-    position = 0
-    in_hunk = False
-
-    for line in diff.splitlines(keepends=True):
-        if not in_hunk and line.startswith(("---", "+++")):
-            continue
-        if line.startswith("@@"):
-            in_hunk = True
-            continue
-        if not in_hunk or line.startswith("\\"):
-            continue
-
-        marker = line[:1]
-        body = line[1:]
-        if marker in {" ", "-"}:
-            aligned = _align_base_line(base_lines, position, body)
-            if aligned is None:
-                return None
-            output.extend(base_lines[position:aligned])
-            position = aligned
-            if marker == " ":
-                output.append(base_lines[position])
-            position += 1
-            continue
-        if marker == "+":
-            output.append(body)
-            continue
-        return None
-
-    output.extend(base_lines[position:])
-    return "".join(output)
-
-
-def _align_base_line(base_lines: list[str], position: int, expected: str) -> int | None:
-    for index in range(position, len(base_lines)):
-        if base_lines[index] == expected:
-            return index
-    return None
 
 
 def _has_invalid_markdown_text(text: str) -> bool:
@@ -348,7 +307,7 @@ def _protected_heading_reasons(base_path: Path, diff: str) -> set[str]:
         return set()
 
     base_text = base_path.read_text(encoding="utf-8")
-    preview = _apply_unified_diff(base_text, diff)
+    preview = apply_unified_diff(base_text, diff)
     if preview is None:
         return set()
     if _protected_heading_sections_changed(base_text, preview):

@@ -460,7 +460,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             recommendation = offline_report.recommendation
             live_provider_required = offline_report.live_provider_required
         elif args.suite == "all" and not (run_dir / "candidate.raw.json").exists():
-            offline_report = run_offline_eval_suite(repo, suite_id=args.suite)
+            try:
+                preview_root = _candidate_preview_root(repo, run_dir)
+            except ValueError as error:
+                print(f"eval rejected: {error}")
+                return 1
+            offline_report = run_offline_eval_suite(
+                repo,
+                suite_id=args.suite,
+                preview_root=preview_root,
+            )
             passed = offline_report.passed
             metrics = offline_report.metrics
             trigger_score = offline_report.trigger_score
@@ -984,6 +993,21 @@ def _score_outcome_json(outcome: ScoreOutcome) -> dict[str, object]:
         "metrics": outcome.metrics,
         "evidence": list(outcome.evidence),
     }
+
+
+def _candidate_preview_root(repo: Path, run_dir: Path) -> Path:
+    manifest_path = run_dir / "candidate-preview.json"
+    if not manifest_path.exists():
+        raise ValueError("candidate preview artifact is required for offline eval suite all")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_json_artifact("candidate-preview.json", manifest)
+    preview_path = (repo / str(manifest["preview_path"])).resolve()
+    preview_root = (run_dir / "candidate-preview").resolve()
+    if not preview_path.is_relative_to(preview_root):
+        raise ValueError("candidate preview path must resolve inside candidate-preview")
+    if not preview_path.exists():
+        raise ValueError("candidate preview file is missing")
+    return preview_root
 
 
 def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> CandidatePatch:

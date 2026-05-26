@@ -120,16 +120,36 @@ def evaluate_markdown_candidate(markdown: str, *, root: Path | None = None) -> S
     return evaluate_markdown_pair(markdown, markdown, root=root)
 
 
-def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
+def run_offline_eval_suite(
+    root: Path,
+    *,
+    suite_id: str,
+    preview_root: Path | None = None,
+) -> OfflineEvalReport:
     if suite_id != "all":
         raise ValueError("only offline suite 'all' is supported")
 
-    policy_text = _read_optional(root / "CODEX.md") or _read_optional(root / "AGENTS.md") or ""
+    policy_root = preview_root or root
+    policy_file = _first_policy_file(policy_root)
+    policy_text = _read_optional(policy_file) if policy_file is not None else ""
     structural = evaluate_markdown_candidate(policy_text, root=root)
     governance_regressions = int(_has_governance_regression(policy_text))
     fixture_metrics, fixture_cases = _run_fixture_cases(root)
+    structural_case_id = "structural:current-policy"
+    candidate_preview_files = 0
+    if preview_root is not None:
+        candidate_preview_files = sum(
+            1
+            for path in (preview_root / "CODEX.md", preview_root / "AGENTS.md")
+            if path.exists()
+        )
+        structural_case_id = (
+            f"structural:candidate-preview:{policy_file.relative_to(preview_root).as_posix()}"
+            if policy_file is not None
+            else "structural:candidate-preview"
+        )
     structural_case = EvalCaseRecord(
-        case_id="structural:current-policy",
+        case_id=structural_case_id,
         case_hash=_text_hash(policy_text),
         split_name="trigger",
     )
@@ -153,6 +173,7 @@ def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
         "structural_cases": structural_cases,
         "behavioral_cases": behavioral_cases,
         "adversarial_cases": adversarial_cases,
+        "candidate_preview_files": candidate_preview_files,
         "governance_regressions": governance_regressions,
         "structural_findings": len(structural.findings),
     }
@@ -173,6 +194,14 @@ def run_offline_eval_suite(root: Path, *, suite_id: str) -> OfflineEvalReport:
         eval_cases=eval_cases,
         validation_splits=validation_splits,
     )
+
+
+def _first_policy_file(root: Path) -> Path | None:
+    for filename in ("CODEX.md", "AGENTS.md"):
+        path = root / filename
+        if path.exists():
+            return path
+    return None
 
 
 def run_provider_smoke_suite(*, opted_in: bool, provider: str | None = None) -> OfflineEvalReport:

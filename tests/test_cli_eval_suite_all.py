@@ -12,6 +12,26 @@ from tugboat.cli import main
 FIXTURES = Path(__file__).parent / "fixtures" / "evals"
 
 
+def _write_candidate_preview(run_dir: Path, text: str) -> None:
+    preview_root = run_dir / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(text, encoding="utf-8")
+    (run_dir / "candidate-preview.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "base",
+                "diff_hash": "diff",
+                "preview_path": f".sidecar/runs/{run_dir.name}/candidate-preview/CODEX.md",
+                "preview_hash": "preview",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -21,6 +41,10 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     )
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nYou must run tests before final answers.\n",
+    )
     (run_dir / "candidate.json").write_text(
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
         encoding="utf-8",
@@ -69,13 +93,13 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "cross_agent:codex-claude-shared-obligation",
         "held_out:no-regression",
         "incident_replay:preserve-test-obligation",
-        "structural:current-policy",
+        "structural:candidate-preview:CODEX.md",
     ]
     assert all(len(row[1]) == 64 and row[2] is not None for row in eval_cases)
     split_payloads = {row[0]: json.loads(row[1]) for row in validation_splits}
     assert split_payloads["trigger"] == [
         "incident_replay:preserve-test-obligation",
-        "structural:current-policy",
+        "structural:candidate-preview:CODEX.md",
     ]
     assert split_payloads["held_out"] == ["held_out:no-regression"]
     assert split_payloads["governance"] == [
@@ -94,6 +118,10 @@ def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path
     )
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nYou may skip tests before final answers.\n",
+    )
     (run_dir / "candidate.json").write_text(
         json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
         encoding="utf-8",
@@ -105,6 +133,73 @@ def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path
     assert report["passed"] is False
     assert report["metrics"]["governance_regressions"] == 1
     assert report["recommendation"] == "reject"
+
+
+def test_eval_suite_all_uses_candidate_preview_artifact_for_report_and_db_rows(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nYou may skip tests before final answers.\n",
+    )
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert report["metrics"]["candidate_preview_files"] == 1
+    assert report["metrics"]["governance_regressions"] == 1
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        eval_cases = connection.execute(
+            """
+            SELECT case_id, audit_event_sequence
+            FROM eval_cases
+            WHERE suite_id = 'all'
+            """
+        ).fetchall()
+        eval_run = connection.execute(
+            """
+            SELECT status, audit_event_sequence
+            FROM eval_runs
+            """
+        ).fetchone()
+
+    assert ("structural:candidate-preview:CODEX.md", eval_cases[0][1]) in eval_cases
+    assert eval_run[0] == "failed"
+    assert eval_run[1] is not None
+
+
+def test_eval_suite_all_rejects_missing_candidate_preview_without_repo_fallback(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    assert not (run_dir / "eval-report.json").exists()
 
 
 def test_eval_rejects_unsupported_offline_suite_without_accepting_report(tmp_path: Path):
