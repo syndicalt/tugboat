@@ -439,7 +439,14 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
         7,
         "rollback decision 20260525T000000000000Z",
         rollback["revert_commit"],
-        '{"executed": true}',
+        json.dumps(
+            {
+                "executed": True,
+                "restored_pre_hashes": True,
+                "target_files": ["CODEX.md"],
+            },
+            sort_keys=True,
+        ),
         ".sidecar/runs/20260525T000000000000Z/rollback-plan.json",
         1,
     )

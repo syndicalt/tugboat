@@ -1852,6 +1852,16 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
             branch_name=str(apply_plan["branch_name"]),
             commit_sha=commit_sha,
         )
+    post_rollback_eval_result = {
+        "executed": execute,
+        "restored_pre_hashes": _rollback_restored_pre_hashes(
+            repo,
+            target_files=target_files,
+            pre_hashes=apply_plan.get("pre_hashes", {}),
+            executed=execute,
+        ),
+        "target_files": list(target_files),
+    }
     source_artifacts = {
         "apply_plan": {
             "path": _relative_repo_path(repo, run_dir / "apply-plan.json"),
@@ -1885,7 +1895,7 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
             candidate_id=int(apply_plan["candidate_id"]),
             reason=f"rollback decision {apply_plan['decision_id']}",
             revert_commit=revert_commit,
-            post_rollback_eval_result={"executed": execute},
+            post_rollback_eval_result=post_rollback_eval_result,
             rollback_plan=rollback_plan,
             executed=execute,
         )
@@ -1912,6 +1922,24 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                 },
             )
     return path
+
+
+def _rollback_restored_pre_hashes(
+    repo: Path,
+    *,
+    target_files: tuple[str, ...],
+    pre_hashes: object,
+    executed: bool,
+) -> bool:
+    if not executed or not isinstance(pre_hashes, dict):
+        return False
+    for target_file in target_files:
+        expected_hash = pre_hashes.get(target_file)
+        if not isinstance(expected_hash, str):
+            return False
+        if CandidatePatch.hash_file(repo / target_file) != expected_hash:
+            return False
+    return True
 
 
 def _decision_json(
