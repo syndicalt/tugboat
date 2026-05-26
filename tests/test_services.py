@@ -140,6 +140,32 @@ def test_write_candidate_writes_candidate_preview_artifacts(tmp_path: Path):
     }
 
 
+def test_write_candidate_cleans_published_artifacts_when_preview_validation_fails(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " Missing context line\n"
+            "+Clarify this.\n"
+        ),
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(ValueError, match="candidate diff cannot be applied"):
+        write_candidate(tmp_path, "run-1", candidate)
+
+    assert not (run_dir / "candidate.diff").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate-preview.json").exists()
+    assert not (run_dir / "candidate-preview").exists()
+
+
 def test_write_eval_report_writes_json_report(tmp_path: Path):
     report_path = write_eval_report(
         tmp_path,
