@@ -115,6 +115,10 @@ if args[:1] == ["run"]:
             "confidence": 0.91,
             "evidence_refs": ["ev_fake"],
         }) + "\\n", encoding="utf-8")
+    elif manifest == "drift-detect":
+        outputs["drift_clusters"].write_text(json.dumps({
+            "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_fake"]}]
+        }) + "\\n", encoding="utf-8")
     elif manifest == "patch-propose":
         import hashlib
         repo = outputs["candidate_patch"].parents[3]
@@ -388,6 +392,65 @@ llmff:
         candidate_edit[4],
     )
     assert candidate_edit[4] is not None
+
+
+def test_propose_runs_drift_detect_before_patch_propose(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    llmff_inputs = json.loads((run_dir / "llmff-inputs.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+        output_names = [
+            row[0]
+            for row in store.connection.execute(
+                """
+                SELECT o.output_name
+                FROM llmff_outputs o
+                JOIN llmff_jobs j ON j.id = o.job_id
+                WHERE j.run_id = ?
+                ORDER BY o.id
+                """,
+                (run_dir.name,),
+            )
+        ]
+
+    assert jobs == [
+        ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+    ]
+    assert output_names == ["audit_report", "drift_clusters", "candidate_patch"]
+    assert Path(llmff_inputs["drift_clusters"]) == run_dir / "drift.raw.json"
+    assert (run_dir / "drift.raw.json").exists()
 
 
 def test_propose_rejects_malformed_llmff_bounded_edit_metadata(
@@ -805,11 +868,13 @@ llmff:
 
     assert jobs == [
         ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
         ("patch-eval.yaml", "completed"),
     ]
     assert output_names == [
         "audit_report",
+        "drift_clusters",
         "candidate_patch",
         "eval_report",
         "policy_decision",
@@ -979,6 +1044,7 @@ llmff:
 
     assert jobs == [
         ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
         ("patch-propose.yaml", "completed"),
         ("patch-eval.yaml", "completed"),
     ]

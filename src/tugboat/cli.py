@@ -990,6 +990,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     manifests = materialize_manifests(repo)
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
+    drift_clusters_path = _run_drift_detect(repo, run_dir, policy, manifests)
     manifest = next(record.path for record in manifests if record.name == "patch-propose.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     optimizer_memory_path = _write_optimizer_memory_artifact(repo, run_dir)
@@ -1003,7 +1004,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         checkpoint_path=run_dir / "checkpoint-patch-propose.json",
         input_paths={
             "instruction_index": run_dir / "instruction-snapshot",
-            "drift_clusters": run_dir / "audit.raw.json",
+            "drift_clusters": drift_clusters_path,
             "optimizer_notes": run_dir / "audit.json",
             "optimizer_memory": optimizer_memory_path,
             "policy": sidecar_dir(repo) / "policy.yaml",
@@ -1035,6 +1036,44 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     if not isinstance(payload, dict):
         raise ValueError("llmff candidate_patch output must be a JSON object")
     return _candidate_from_payload(payload, audit_id=audit_id)
+
+
+def _run_drift_detect(repo: Path, run_dir: Path, policy, manifests) -> Path:
+    manifest = next(record.path for record in manifests if record.name == "drift-detect.yaml")
+    inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
+    output_path = run_dir / "drift.raw.json"
+    run = run_manifest(
+        manifest,
+        run_dir=run_dir,
+        policy=policy,
+        timeout_ms=60_000,
+        retry_attempts=0,
+        retry_backoff_ms=0,
+        checkpoint_path=run_dir / "checkpoint-drift-detect.json",
+        input_paths={
+            "audit_reports": run_dir / "audit.raw.json",
+            "instruction_index": run_dir / "instruction-snapshot",
+            "policy": sidecar_dir(repo) / "policy.yaml",
+        },
+        output_paths={"drift_clusters": output_path},
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_llmff_run(
+            run_id=run_dir.name,
+            manifest_hash=inspect.manifest_hash,
+            result=run,
+        )
+        if run.exit_code != 0:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="drift_detect",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
+            )
+    if run.exit_code != 0:
+        raise RuntimeError(f"llmff drift-detect failed with exit code {run.exit_code}")
+    return output_path
 
 
 def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
