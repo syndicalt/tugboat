@@ -686,13 +686,13 @@ class Store:
         return candidate_id
 
     def update_candidate_state(self, *, candidate_id: int, state: str, reason: str) -> None:
-        self.append_audit_event(
+        event = self.append_audit_event(
             "candidate.state_updated",
             {"candidate_id": candidate_id, "state": state, "reason": reason},
         )
         self.connection.execute(
-            "UPDATE candidates SET state = ? WHERE id = ?",
-            (state, candidate_id),
+            "UPDATE candidates SET state = ?, audit_event_sequence = ? WHERE id = ?",
+            (state, event.sequence, candidate_id),
         )
         self.connection.commit()
 
@@ -971,6 +971,7 @@ class Store:
         job_id: str,
         repo_path: Path,
         state: str,
+        payload: dict[str, Any] | None = None,
     ) -> None:
         row = self.connection.execute(
             """
@@ -979,8 +980,6 @@ class Store:
             """,
             (job_id, str(repo_path)),
         ).fetchone()
-        if row is None:
-            return
         event = self.append_audit_event(
             "daemon_job.state_changed",
             {
@@ -989,6 +988,26 @@ class Store:
                 "state": state,
             },
         )
+        if row is None:
+            if payload is None:
+                return
+            self.connection.execute(
+                """
+                INSERT INTO daemon_jobs(
+                  job_id, repo_path, state, payload_json, audit_event_sequence
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    str(repo_path),
+                    state,
+                    json.dumps(payload, sort_keys=True),
+                    event.sequence,
+                ),
+            )
+            self.connection.commit()
+            return
         self.connection.execute(
             """
             UPDATE daemon_jobs

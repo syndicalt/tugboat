@@ -348,6 +348,58 @@ def test_insert_core_decision_rows_without_provenance_backfill(tmp_path: Path):
     assert all(row[0] is not None for row in rows)
 
 
+def test_update_candidate_state_moves_row_audit_link_to_state_update_event(tmp_path: Path):
+    candidate = CandidatePatch(
+        audit_id=1,
+        base_file="CODEX.md",
+        base_hash="abc123",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+    diff_path = tmp_path / "candidate.diff"
+    diff_path.write_text(candidate.diff, encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        candidate_id = store.insert_candidate(
+            audit_id=1,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        original_sequence = store.connection.execute(
+            "SELECT audit_event_sequence FROM candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()[0]
+
+        store.update_candidate_state(
+            candidate_id=candidate_id,
+            state="rejected",
+            reason="held_out_regressed",
+        )
+
+        row = store.connection.execute(
+            """
+            SELECT candidates.state, candidates.audit_event_sequence,
+                   audit_events.event_type, audit_events.payload_json
+            FROM candidates
+            JOIN audit_events ON audit_events.sequence = candidates.audit_event_sequence
+            WHERE candidates.id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+
+    assert row[0] == "rejected"
+    assert row[1] != original_sequence
+    assert row[2] == "candidate.state_updated"
+    assert json.loads(row[3]) == {
+        "candidate_id": candidate_id,
+        "state": "rejected",
+        "reason": "held_out_regressed",
+    }
+
+
 def test_record_llmff_run_persists_exit_code(tmp_path: Path):
     manifest = tmp_path / "patch-eval.yaml"
     manifest.write_text("name: patch-eval\n", encoding="utf-8")

@@ -213,6 +213,51 @@ def test_run_daemon_once_processes_one_job_through_waiting_review(tmp_path: Path
         assert queue.get_job(job.id).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
 
 
+def test_run_daemon_once_backfills_unmirrored_queue_job_into_audit_ledger(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["final_state"] == "waiting_review"
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT job.job_id, job.state, job.payload_json, event.event_type
+            FROM daemon_jobs job
+            JOIN audit_events event ON event.sequence = job.audit_event_sequence
+            WHERE job.job_id = ?
+            """,
+            (str(job.id),),
+        ).fetchone()
+        transition_states = connection.execute(
+            """
+            SELECT json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence
+            """
+        ).fetchall()
+
+    assert row is not None
+    assert row[0] == str(job.id)
+    assert row[1] == "waiting_review"
+    assert json.loads(row[2]) == {"trace_id": "trace-1"}
+    assert row[3] == "daemon_job.state_changed"
+    assert [state for (state,) in transition_states] == [
+        "inspecting",
+        "running",
+        "waiting_review",
+    ]
+
+
 def test_run_daemon_once_executes_trace_audit_job_through_storage_layer(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")

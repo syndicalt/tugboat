@@ -88,7 +88,12 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
                 kill_switch=config.kill_switch,
             )
         except QueuePayloadError as error:
-            _record_job_state(repo, error.job_id, JobState.FAILED)
+            _record_job_state(
+                repo,
+                error.job_id,
+                JobState.FAILED,
+                payload={"queue_payload_invalid": True},
+            )
             return {
                 "processed": True,
                 "job_id": error.job_id,
@@ -102,7 +107,7 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
                 "final_state": None,
                 "recovered_jobs": list(recovered),
             }
-        _record_job_state(repo, job.id, job.state)
+        _record_job_state(repo, job.id, job.state, payload=job.payload)
         final_job = process_daemon_job(repo, queue, job.id, now=config.now)
         return {
             "processed": True,
@@ -197,7 +202,7 @@ def _sidecar_relative_socket_path(repo: Path, socket_path: Path) -> str:
 
 def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:
     running = queue.transition(job_id, JobState.RUNNING, now=now)
-    _record_job_state(repo, running.id, running.state)
+    _record_job_state(repo, running.id, running.state, payload=running.payload)
     try:
         result: AuditPipelineResult | ProposePipelineResult | EvalPipelineResult | None = None
         if running.kind == "trace_audit":
@@ -215,14 +220,14 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
 
     if running.kind == "eval":
         evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
-        _record_job_state(repo, evaluating.id, evaluating.state)
+        _record_job_state(repo, evaluating.id, evaluating.state, payload=evaluating.payload)
         final_state = JobState.WAITING_REVIEW if result is not None and result.exit_code == 0 else JobState.REJECTED
         waiting_review = queue.transition(evaluating.id, final_state, now=now)
     else:
         if result is not None and result.exit_code != 0:
             return _fail_daemon_job(repo, queue, running.id, now=now)
         waiting_review = queue.transition(running.id, JobState.WAITING_REVIEW, now=now)
-    _record_job_state(repo, waiting_review.id, waiting_review.state)
+    _record_job_state(repo, waiting_review.id, waiting_review.state, payload=waiting_review.payload)
     return waiting_review
 
 
@@ -254,7 +259,7 @@ def _fail_daemon_job(
     now: datetime | None,
 ) -> Any:
     failed = queue.transition(job_id, JobState.FAILED, now=now)
-    _record_job_state(repo, failed.id, failed.state)
+    _record_job_state(repo, failed.id, failed.state, payload=failed.payload)
     return failed
 
 
@@ -267,10 +272,17 @@ def _required_payload_text(payload: Any, key: str) -> str:
     return value
 
 
-def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
+def _record_job_state(
+    repo: Path,
+    job_id: int,
+    state: JobState,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> None:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.update_daemon_job_state(
             job_id=str(job_id),
             repo_path=repo,
             state=state.value,
+            payload=payload,
         )

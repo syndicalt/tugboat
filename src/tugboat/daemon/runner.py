@@ -125,17 +125,22 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
                     kill_switch=config.kill_switch,
                 )
             except QueuePayloadError as error:
-                _record_job_state(repo, error.job_id, JobState.FAILED)
+                _record_job_state(
+                    repo,
+                    error.job_id,
+                    JobState.FAILED,
+                    payload={"queue_payload_invalid": True},
+                )
                 failed_jobs.append({"job_id": error.job_id, "reason": "queue_payload_invalid"})
                 continue
             if job is None:
                 break
-            _record_job_state(repo, job.id, job.state)
+            _record_job_state(repo, job.id, job.state, payload=job.payload)
             if job.kind == "llmff_resume":
                 validation = _resume_metadata(repo, job.id, job.payload)
                 if validation.failure_reason is not None:
                     failed = queue.transition(job.id, JobState.FAILED, now=config.now)
-                    _record_job_state(repo, failed.id, failed.state)
+                    _record_job_state(repo, failed.id, failed.state, payload=failed.payload)
                     failed_jobs.append({"job_id": job.id, "reason": validation.failure_reason})
                     continue
                 if validation.resume is not None:
@@ -295,7 +300,7 @@ def _execute_resume(
     now: datetime | None,
 ) -> Any:
     running = queue.transition(job_id, JobState.RUNNING, now=now)
-    _record_job_state(repo, running.id, running.state)
+    _record_job_state(repo, running.id, running.state, payload=running.payload)
     policy = load_policy(repo)
     try:
         result = run_llmff_manifest(
@@ -317,13 +322,13 @@ def _execute_resume(
             )
     except Exception:
         failed = queue.transition(running.id, JobState.FAILED, now=now)
-        _record_job_state(repo, failed.id, failed.state)
+        _record_job_state(repo, failed.id, failed.state, payload=failed.payload)
         return failed
     evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
-    _record_job_state(repo, evaluating.id, evaluating.state)
+    _record_job_state(repo, evaluating.id, evaluating.state, payload=evaluating.payload)
     final_state = JobState.WAITING_REVIEW if result.exit_code == 0 else JobState.FAILED
     final_job = queue.transition(evaluating.id, final_state, now=now)
-    _record_job_state(repo, final_job.id, final_job.state)
+    _record_job_state(repo, final_job.id, final_job.state, payload=final_job.payload)
     return final_job
 
 
@@ -374,12 +379,19 @@ def _resume_non_negative_int(value: object, default: int) -> int:
     return value
 
 
-def _record_job_state(repo: Path, job_id: int, state: JobState) -> None:
+def _record_job_state(
+    repo: Path,
+    job_id: int,
+    state: JobState,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> None:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.update_daemon_job_state(
             job_id=str(job_id),
             repo_path=repo,
             state=state.value,
+            payload=payload,
         )
 
 
