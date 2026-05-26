@@ -34,9 +34,9 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
             },
         ],
         jobs=[
-            {"job_id": 1, "state": "applied"},
-            {"job_id": 2, "state": "rejected"},
-            {"job_id": 3, "state": "rolled_back"},
+            {"job_id": 1, "state": "applied", "changed_lines": 4},
+            {"job_id": 2, "state": "rejected", "changed_lines": 8},
+            {"job_id": 3, "state": "rolled_back", "changed_lines": 12},
             {"job_id": 4, "state": "waiting_review"},
         ],
         evals=[
@@ -83,6 +83,13 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "rejected": 1,
         "rolled_back": 1,
     }
+    assert summary["edit_rates"] == {
+        "acceptance_rate": 0.333333,
+        "rejection_rate": 0.333333,
+        "rollback_rate": 0.333333,
+        "reviewed_count": 3,
+    }
+    assert summary["mean_changed_lines"] == 8
     assert summary["eval_suite_trends"]["governance"] == {
         "count": 2,
         "latest_score": 0.9,

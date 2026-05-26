@@ -14,10 +14,14 @@ def summarize_observability(
     harness_findings: Iterable[str] = (),
 ) -> dict[str, Any]:
     run_items = list(runs)
+    job_items = list(jobs)
+    edit_counts = _edit_counts(job_items)
     return {
         "run_duration": _run_duration_summary(run_items),
         "failure_kind_counts": dict(sorted(_failure_kind_counts(run_items).items())),
-        "edits": _edit_counts(jobs),
+        "edits": edit_counts,
+        "edit_rates": _edit_rates(edit_counts),
+        "mean_changed_lines": _mean_changed_lines(job_items),
         "eval_suite_trends": _eval_suite_trends(evals),
         "corpus_growth": _corpus_growth(corpus_snapshots),
         "provider_backend_failure_rate": _provider_backend_failure_rate(run_items),
@@ -72,6 +76,34 @@ def _edit_counts(jobs: Iterable[dict[str, Any]]) -> dict[str, int]:
         elif state in {"rolled_back", "rollback", "rolled-back"}:
             counts["rolled_back"] += 1
     return counts
+
+
+def _edit_rates(counts: dict[str, int]) -> dict[str, int | float]:
+    reviewed_count = counts["accepted"] + counts["rejected"] + counts["rolled_back"]
+    if reviewed_count == 0:
+        return {
+            "acceptance_rate": 0,
+            "rejection_rate": 0,
+            "rollback_rate": 0,
+            "reviewed_count": 0,
+        }
+    return {
+        "acceptance_rate": _round(counts["accepted"] / reviewed_count),
+        "rejection_rate": _round(counts["rejected"] / reviewed_count),
+        "rollback_rate": _round(counts["rolled_back"] / reviewed_count),
+        "reviewed_count": reviewed_count,
+    }
+
+
+def _mean_changed_lines(jobs: Iterable[dict[str, Any]]) -> int | float:
+    changed_lines = [
+        float(job["changed_lines"])
+        for job in jobs
+        if job.get("changed_lines") is not None
+    ]
+    if not changed_lines:
+        return 0
+    return _round(sum(changed_lines) / len(changed_lines))
 
 
 def _eval_suite_trends(evals: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
