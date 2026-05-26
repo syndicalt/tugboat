@@ -2475,7 +2475,7 @@ llmff:
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
-    assert "eval rejected: llmff eval_report.passed must be a boolean" in output
+    assert "eval rejected: eval-report.raw.json field has wrong type: passed" in output
     assert (run_dir / "eval-report.raw.json").exists()
     assert not (run_dir / "eval-report.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

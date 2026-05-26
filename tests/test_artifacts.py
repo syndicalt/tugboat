@@ -313,6 +313,28 @@ def test_validate_eval_raw_artifacts_accept_current_schema():
     )
 
 
+def test_validate_eval_raw_artifacts_reject_missing_required_typed_fields():
+    with pytest.raises(ArtifactValidationError, match="required"):
+        validate_json_artifact("eval-report.raw.json", {})
+
+    with pytest.raises(ArtifactValidationError, match="required"):
+        validate_json_artifact("policy-decision.raw.json", {})
+
+
+def test_validate_eval_raw_artifacts_reject_wrong_field_types():
+    with pytest.raises(ArtifactValidationError, match="passed"):
+        validate_json_artifact(
+            "eval-report.raw.json",
+            {"passed": "false", "metrics": {}},
+        )
+
+    with pytest.raises(ArtifactValidationError, match="allowed"):
+        validate_json_artifact(
+            "policy-decision.raw.json",
+            {"allowed": "true", "reasons": []},
+        )
+
+
 def test_validate_candidate_raw_artifact_rejects_unknown_top_level_fields():
     with pytest.raises(ArtifactValidationError, match="additional property"):
         validate_json_artifact(
