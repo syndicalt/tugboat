@@ -261,6 +261,8 @@ def _resume_metadata(repo: Path, job_id: int, payload: Any) -> ResumeValidation:
     ):
         if key in payload:
             resume[key] = payload[key]
+        elif key in checkpoint:
+            resume[key] = checkpoint[key]
     return ResumeValidation(resume=resume)
 
 
