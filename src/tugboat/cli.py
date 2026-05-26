@@ -847,6 +847,8 @@ def _write_release_artifact_manifest(
         raise ValueError("security review critical/high findings must be non-negative")
     if security_review_critical_high_findings > 0:
         raise ValueError("security review has open critical/high findings")
+    if security_review_decision not in {"approved_proposal_only", "approved_provider_backed"}:
+        raise ValueError("security review decision is not approved")
     retained_evidence = []
     for evidence_path in evidence_paths:
         resolved_evidence = evidence_path.resolve()

@@ -795,7 +795,10 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "additionalProperties": False,
                 "required": ["decision", "critical_high_findings"],
                 "properties": {
-                    "decision": {"type": "string"},
+                    "decision": {
+                        "type": "string",
+                        "enum": ["approved_proposal_only", "approved_provider_backed"],
+                    },
                     "critical_high_findings": {"type": "integer"},
                 },
             },
