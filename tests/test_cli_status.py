@@ -24,6 +24,7 @@ def test_status_reports_empty_sidecar_state(tmp_path: Path, capsys):
         "latest_llmff_failure_kind: none",
         "pending_candidates: 0",
         "retention_candidates: 0",
+        "retention_redaction_candidates: 0",
         "manifest_policy: unrestricted",
     ]
 
@@ -95,6 +96,22 @@ def test_status_reports_failed_llmff_job_and_retention_candidates(tmp_path: Path
     assert "latest_llmff_exit_code: 1" in lines
     assert "latest_llmff_failure_kind: provider_error" in lines
     assert "retention_candidates: 1" in lines
+
+
+def test_status_reports_retention_redaction_candidates(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    trace = run_dir / "trace-input.jsonl"
+    trace.write_text('{"output":"OPENAI_API_KEY=sk-1234567890abcdefghijkl"}\n', encoding="utf-8")
+    os.utime(trace, (0, 0))
+
+    assert main(["status", "--repo", str(repo)]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert "retention_candidates: 1" in lines
+    assert "retention_redaction_candidates: 1" in lines
 
 
 def test_status_reports_llmff_failure_kind_from_job_record_without_events(

@@ -162,6 +162,7 @@ def tugboat_status(repo: str | Path) -> dict[str, Any]:
             "latest_llmff_failure_kind": latest_failure_kind,
             "pending_candidates": pending_candidates,
             "retention_candidates": len(retention.candidates),
+            "retention_redaction_candidates": len(retention.redaction_candidates),
             "manifest_policy": manifest_policy,
         }
 

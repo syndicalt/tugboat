@@ -264,6 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"latest_llmff_failure_kind: {latest_failure_kind or 'none'}")
         print(f"pending_candidates: {pending_candidates}")
         print(f"retention_candidates: {len(retention.candidates)}")
+        print(f"retention_redaction_candidates: {len(retention.redaction_candidates)}")
         print(f"manifest_policy: {manifest_policy}")
         return 0
 

@@ -170,6 +170,7 @@ def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
         "latest_llmff_failure_kind": None,
         "pending_candidates": 0,
         "retention_candidates": 0,
+        "retention_redaction_candidates": 0,
         "manifest_policy": "unrestricted",
     }
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_status"
@@ -233,6 +234,21 @@ def test_status_reports_latest_llmff_job_failure_and_retention_candidates(
     assert result["latest_llmff_exit_code"] == 1
     assert result["latest_llmff_failure_kind"] == "provider_error"
     assert result["retention_candidates"] == 1
+
+
+def test_status_reports_retention_redaction_candidate_count(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    trace = run_dir / "trace-input.jsonl"
+    trace.write_text('{"output":"OPENAI_API_KEY=sk-1234567890abcdefghijkl"}\n', encoding="utf-8")
+    os.utime(trace, (0, 0))
+
+    result = tugboat_status(repo)
+
+    assert result["retention_candidates"] == 1
+    assert result["retention_redaction_candidates"] == 1
 
 
 def test_mcp_call_rows_are_reachable_from_append_only_audit_event(tmp_path: Path):
