@@ -359,13 +359,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             else _default_candidate(repo, audit_id=int(audit["audit_id"]))
         )
         decision = evaluate_candidate(repo, policy, candidate)
+        memory_reasons = _rejected_memory_policy_reasons(repo, candidate)
+        decision_allowed = decision.allowed and not memory_reasons
+        decision_reasons = [*decision.reasons, *memory_reasons]
         artifacts = write_candidate(repo, run_dir.name, candidate)
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             candidate_id = store.insert_candidate(
                 audit_id=int(audit["audit_id"]),
                 candidate=candidate,
                 diff_path=artifacts.diff_path,
-                state="needs_review" if decision.allowed else "rejected",
+                state="needs_review" if decision_allowed else "rejected",
             )
             _record_candidate_provenance(
                 store,
@@ -377,7 +380,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
         (run_dir / "policy-gate.json").write_text(
             json.dumps(
-                {"allowed": decision.allowed, "reasons": list(decision.reasons)},
+                {"allowed": decision_allowed, "reasons": decision_reasons},
                 indent=2,
                 sort_keys=True,
             )
@@ -387,9 +390,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         (run_dir / "decision.json").write_text(
             _decision_json(
                 candidate_id=candidate_id,
-                decision_value="needs_review" if decision.allowed else "rejected",
-                policy_allowed=decision.allowed,
-                policy_reasons=list(decision.reasons),
+                decision_value="needs_review" if decision_allowed else "rejected",
+                policy_allowed=decision_allowed,
+                policy_reasons=decision_reasons,
             ),
             encoding="utf-8",
         )
@@ -398,11 +401,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 candidate_id=candidate_id,
                 actor="tugboat",
                 policy="deterministic_policy_gate",
-                decision="needs_review" if decision.allowed else "rejected",
-                reason=",".join(decision.reasons),
+                decision="needs_review" if decision_allowed else "rejected",
+                reason=",".join(decision_reasons),
             )
         print(f"candidate: {run_dir / 'candidate.diff'}")
-        return 0 if decision.allowed else 1
+        return 0 if decision_allowed else 1
 
     if args.command == "eval":
         repo = Path(args.repo)
@@ -1099,6 +1102,19 @@ def _record_rejected_candidate_memory(
                 "source_refs": [f"audit:{candidate.audit_id}"],
             },
         )
+
+
+def _rejected_memory_policy_reasons(repo: Path, candidate: CandidatePatch) -> list[str]:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory.load(store, repo=repo)
+    for item in candidate.bounded_edit_metadata:
+        operator = str(item.get("operator", "unknown"))
+        target_file = str(item.get("file", candidate.base_file))
+        section = str(item.get("section", ""))
+        fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
+        if fingerprint in memory.rejected_edits:
+            return ["suppressed_by_rejected_edit_memory"]
+    return []
 
 
 def _bounded_edit_fingerprint(operator: str, target_file: str, section: str) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 from tugboat.cli import main
@@ -358,6 +359,72 @@ llmff:
         ],
         "slow_update_notes": [],
     }
+
+
+def test_propose_suppresses_candidate_matching_rejected_edit_memory(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    fingerprint = hashlib.sha256(b"add\nCODEX.md\nTesting").hexdigest()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "semantic_fingerprint": fingerprint,
+                "rejection_reason": "held_out_not_improved",
+                "source_refs": ["audit:1"],
+            },
+        )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        stored = store.connection.execute(
+            """
+            SELECT c.state, d.decision, d.reason
+            FROM candidates c
+            JOIN decisions d ON d.candidate_id = c.id
+            WHERE c.id = ?
+            """,
+            (candidate["candidate_id"],),
+        ).fetchone()
+
+    assert candidate["bounded_edit_metadata"][0]["section"] == "Testing"
+    assert policy_gate == {
+        "allowed": False,
+        "reasons": ["suppressed_by_rejected_edit_memory"],
+    }
+    assert decision["decision"] == "rejected"
+    assert decision["policy_allowed"] is False
+    assert decision["policy_reasons"] == ["suppressed_by_rejected_edit_memory"]
+    assert stored == (
+        "rejected",
+        "rejected",
+        "suppressed_by_rejected_edit_memory",
+    )
 
 
 def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):
