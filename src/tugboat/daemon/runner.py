@@ -69,6 +69,16 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
     processed_jobs: list[int] = []
     failed_jobs: list[dict[str, Any]] = []
     resume_jobs: list[dict[str, Any]] = []
+    if config.kill_switch is not None and config.kill_switch.is_enabled():
+        return {
+            "processed_jobs": processed_jobs,
+            "failed_jobs": failed_jobs,
+            "resume_jobs": resume_jobs,
+            "recovered_jobs": [],
+            "trace_discovery": {"discovered": 0, "skipped": 0},
+            "rate_limited": False,
+            "concurrency_limited": False,
+        }
     trace_discovery = discover_trace_jobs(repo, list(config.trace_dirs), now=config.now)
     with DaemonQueue.open_sidecar(repo) as queue:
         recovered = queue.mark_stale_leases(

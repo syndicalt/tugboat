@@ -6,7 +6,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from tugboat.daemon.queue import DaemonQueue, JobState
+from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState
 from tugboat.daemon.runner import (
     DaemonLoopConfig,
     discover_trace_jobs,
@@ -143,6 +143,44 @@ def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueu
     assert json.loads(rows[0]["payload_json"]) == {
         "trace_path": str(trace_dir / "episode.jsonl")
     }
+
+
+def test_run_daemon_cycle_read_only_kill_switch_blocks_trace_discovery_writes(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "configured-traces"
+    trace_dir.mkdir()
+    trace = trace_dir / "episode.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    kill_switch_path = tmp_path / ".sidecar" / "read-only.kill"
+    kill_switch_path.parent.mkdir()
+    kill_switch_path.write_text("enabled\n", encoding="utf-8")
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=1,
+            concurrency_limit=1,
+            lease_duration=timedelta(seconds=30),
+            trace_dirs=(trace_dir,),
+            kill_switch=FileKillSwitch(kill_switch_path),
+            now=_at(0),
+        ),
+    )
+
+    assert result == {
+        "processed_jobs": [],
+        "failed_jobs": [],
+        "resume_jobs": [],
+        "recovered_jobs": [],
+        "trace_discovery": {"discovered": 0, "skipped": 0},
+        "rate_limited": False,
+        "concurrency_limited": False,
+    }
+    assert not (tmp_path / ".sidecar" / "discovered-traces.json").exists()
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
 
 
 def test_run_daemon_cycle_recovers_corrupt_discovered_trace_registry(
