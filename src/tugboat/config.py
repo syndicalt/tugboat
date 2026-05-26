@@ -101,6 +101,7 @@ def load_policy(repo: Path) -> Policy:
     auto_apply = raw.get("auto_apply", {}) or {}
     llmff = raw.get("llmff", {}) or {}
     mcp = raw.get("mcp", {}) or {}
+    provider_smoke = raw.get("provider_smoke", {}) or {}
     retention = raw.get("retention", {}) or {}
     roadmap = raw.get("roadmap", {}) or {}
     learning_rate_budget = roadmap.get("learning_rate_budget", {}) or {}
@@ -199,6 +200,15 @@ def load_policy(repo: Path) -> Policy:
         checkpoints_retention_days=_as_non_negative_days(
             retention.get("checkpoints_days", Policy().checkpoints_retention_days),
             "retention.checkpoints_days",
+        ),
+        provider_smoke_enabled=bool(
+            provider_smoke.get("enabled", Policy().provider_smoke_enabled)
+        ),
+        provider_smoke_provider=str(
+            provider_smoke.get("provider", Policy().provider_smoke_provider)
+        ),
+        provider_smoke_command=str(
+            provider_smoke.get("command", Policy().provider_smoke_command)
         ),
         mcp_allowed_repositories=tuple(
             str(Path(item).expanduser().resolve())

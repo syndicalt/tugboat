@@ -56,7 +56,16 @@ Live provider smoke checks are opt-in. Without opt-in, the suite records a skipp
 tugboat eval --repo . --candidate latest --suite provider-smoke
 ```
 
-To enable the smoke preflight, set `TUGBOAT_PROVIDER_SMOKE=1` and provide the provider selection through `TUGBOAT_PROVIDER_SMOKE_PROVIDER`.
+To enable the smoke preflight for a repo, add explicit policy and provide the local smoke command:
+
+```yaml
+provider_smoke:
+  enabled: true
+  provider: openai
+  command: "python scripts/provider_smoke.py"
+```
+
+For one-off local checks, `TUGBOAT_PROVIDER_SMOKE=1`, `TUGBOAT_PROVIDER_SMOKE_PROVIDER`, and `TUGBOAT_PROVIDER_SMOKE_COMMAND` can override policy.
 
 ## Next Checks
 

@@ -360,6 +360,46 @@ def test_eval_provider_smoke_opt_in_runs_configured_smoke_command_and_passes(
     }
 
 
+def test_eval_provider_smoke_can_be_enabled_by_repo_policy_without_env_flags(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE", raising=False)
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE_PROVIDER", raising=False)
+    monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE_COMMAND", raising=False)
+    smoke = tmp_path / "provider_smoke.py"
+    smoke.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+provider_smoke:
+  enabled: true
+  provider: grok
+  command: "{sys.executable} {smoke}"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 0
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is True
+    assert report["recommendation"] == "accept"
+    assert report["metrics"]["provider_smoke_opted_in"] == 1
+    assert report["metrics"]["provider_smoke_configured"] == 1
+    assert report["metrics"]["provider_smoke_runner_configured"] == 1
+
+
 def test_eval_provider_smoke_failure_records_sanitized_metrics_without_raw_provider_output(
     tmp_path: Path,
     monkeypatch,

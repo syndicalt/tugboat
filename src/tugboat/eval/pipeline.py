@@ -45,9 +45,20 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
 
     if suite_id == "provider-smoke" and not (run_dir / "candidate.raw.json").exists():
         offline_report = run_provider_smoke_suite(
-            opted_in=os.environ.get("TUGBOAT_PROVIDER_SMOKE") == "1",
-            provider=os.environ.get("TUGBOAT_PROVIDER_SMOKE_PROVIDER"),
-            smoke_command=os.environ.get("TUGBOAT_PROVIDER_SMOKE_COMMAND"),
+            opted_in=(
+                os.environ.get("TUGBOAT_PROVIDER_SMOKE") == "1"
+                or policy.provider_smoke_enabled
+            ),
+            provider=(
+                os.environ.get("TUGBOAT_PROVIDER_SMOKE_PROVIDER")
+                or policy.provider_smoke_provider
+                or None
+            ),
+            smoke_command=(
+                os.environ.get("TUGBOAT_PROVIDER_SMOKE_COMMAND")
+                or policy.provider_smoke_command
+                or None
+            ),
         )
         passed = offline_report.passed
         metrics = offline_report.metrics
