@@ -12,6 +12,7 @@ from tugboat.db import Store
 from tugboat.mcp import (
     handle_jsonrpc_request,
     list_mcp_tools,
+    tugboat_active_instructions,
     tugboat_candidate,
     tugboat_harness_findings,
     tugboat_instruction_graph,
@@ -192,6 +193,65 @@ def test_instruction_graph_returns_metadata_not_instruction_text(tmp_path: Path)
     serialized = json.dumps(result, sort_keys=True)
     assert "sk-thissecret" not in serialized
     assert "Use " not in serialized
+
+
+def test_active_instructions_returns_ordered_refs_without_raw_text_and_audits(tmp_path: Path):
+    repo = tmp_path
+    (repo / "AGENTS.md").write_text(
+        "# Repo Policy\n\nMUST keep private customer prompt alpha internal.\n",
+        encoding="utf-8",
+    )
+    (repo / "CODEX.md").write_text(
+        "# Agent Policy\n\nUse sk-thissecretkeyvalue1234567890 carefully.\n",
+        encoding="utf-8",
+    )
+
+    result = tugboat_active_instructions(repo)
+
+    agent_ref = result["documents"][0]["refs"][0]
+    codex_ref = result["documents"][1]["refs"][0]
+    assert [document["path"] for document in result["documents"]] == ["AGENTS.md", "CODEX.md"]
+    assert result["documents"][0] == {
+        "path": "AGENTS.md",
+        "kind": "repo_policy",
+        "precedence": 80,
+        "protected": True,
+        "active": True,
+        "hash": result["documents"][0]["hash"],
+        "chunk_count": 1,
+        "refs": [agent_ref],
+    }
+    assert agent_ref.startswith("AGENTS.md#bytes-")
+    assert result["documents"][1] == {
+        "path": "CODEX.md",
+        "kind": "agent_policy",
+        "precedence": 70,
+        "protected": True,
+        "active": True,
+        "hash": result["documents"][1]["hash"],
+        "chunk_count": 1,
+        "refs": [codex_ref],
+    }
+    assert codex_ref.startswith("CODEX.md#bytes-")
+    serialized = json.dumps(result, sort_keys=True)
+    assert "private customer prompt alpha" not in serialized
+    assert "sk-thissecret" not in serialized
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_active_instructions"
+
+
+def test_active_instructions_refs_do_not_leak_sensitive_heading_text(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text(
+        "# Use sk-thissecretkeyvalue1234567890 carefully\n\nMUST test changes.\n",
+        encoding="utf-8",
+    )
+
+    result = tugboat_active_instructions(repo)
+
+    serialized = json.dumps(result, sort_keys=True)
+    assert result["documents"][0]["refs"][0].startswith("CODEX.md#bytes-")
+    assert "sk-thissecret" not in serialized
+    assert "use-sk-thissecret" not in serialized
 
 
 def test_harness_findings_are_plain_contract_and_audited(tmp_path: Path):
@@ -755,8 +815,14 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
     tools = list_mcp_tools()
 
     by_name = {tool["name"]: tool for tool in tools}
+    assert "tugboat_active_instructions" in by_name
     assert "tugboat_status" in by_name
     assert "tugboat_request_audit" in by_name
+    assert by_name["tugboat_active_instructions"] == {
+        "name": "tugboat_active_instructions",
+        "mutates_instructions": False,
+        "write_intent": False,
+    }
     assert by_name["tugboat_status"] == {
         "name": "tugboat_status",
         "mutates_instructions": False,

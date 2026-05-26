@@ -103,6 +103,34 @@ def tugboat_instruction_graph(repo: str | Path) -> dict[str, Any]:
     return _audit_call(repo_path, "tugboat_instruction_graph", {}, read)
 
 
+def tugboat_active_instructions(repo: str | Path) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        result = index_repo(repo_path, load_policy(repo_path))
+        documents = sorted(result.documents, key=lambda document: (-document.precedence, document.path))
+        return {
+            "documents": [
+                {
+                    "path": document.path,
+                    "kind": document.kind,
+                    "precedence": document.precedence,
+                    "protected": document.protected,
+                    "active": True,
+                    "hash": document.hash,
+                    "chunk_count": len(document.chunks),
+                    "refs": [
+                        _instruction_chunk_ref(document.path, chunk.byte_start, chunk.byte_end)
+                        for chunk in document.chunks
+                    ],
+                }
+                for document in documents
+            ]
+        }
+
+    return _audit_call(repo_path, "tugboat_active_instructions", {}, read)
+
+
 def tugboat_harness_findings(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -314,6 +342,7 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
 
 
 MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
+    "tugboat_active_instructions": tugboat_active_instructions,
     "tugboat_candidate": tugboat_candidate,
     "tugboat_daemon_status": tugboat_daemon_status,
     "tugboat_harness_findings": tugboat_harness_findings,
@@ -526,6 +555,10 @@ def _relative_ref(repo: Path, path: Path) -> str:
     if not resolved.is_relative_to(repo):
         raise ValueError("artifact path must resolve inside repo")
     return resolved.relative_to(repo).as_posix()
+
+
+def _instruction_chunk_ref(path: str, byte_start: int, byte_end: int) -> str:
+    return f"{path}#bytes-{byte_start}-{byte_end}"
 
 
 def _audit_artifact_summary(path: Path) -> dict[str, Any] | None:
