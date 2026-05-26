@@ -244,6 +244,49 @@ def test_run_offline_eval_suite_all_evaluates_candidate_preview_instead_of_curre
     ]
 
 
+def test_run_offline_eval_suite_all_rejects_noop_preview_without_held_out_improvement(
+    tmp_path: Path,
+):
+    policy = "# Policy\n\nYou must run tests before final answers.\n"
+    (tmp_path / "CODEX.md").write_text(policy, encoding="utf-8")
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(policy, encoding="utf-8")
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.trigger_score == 1.0
+    assert report.held_out_score == 1.0
+    assert report.metrics["held_out_improved"] == 0
+    assert report.recommendation == "reject"
+
+
+def test_run_offline_eval_suite_all_accepts_preview_with_held_out_improvement(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is True
+    assert report.trigger_score == 0.0
+    assert report.held_out_score == 1.0
+    assert report.metrics["held_out_improved"] == 1
+    assert report.recommendation == "accept"
+
+
 def test_run_offline_eval_suite_all_compares_preview_against_original_instruction_file(
     tmp_path: Path,
 ):
@@ -339,10 +382,12 @@ def test_run_offline_eval_suite_all_resolves_preview_only_links_against_preview_
 
     report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
 
-    assert report.passed is True
+    assert report.passed is False
     assert report.metrics["structural_cases"] == 2
     assert report.metrics["candidate_preview_files"] == 2
+    assert report.metrics["held_out_improved"] == 0
     assert report.metrics["structural_findings"] == 0
+    assert report.recommendation == "reject"
 
 
 def test_run_offline_eval_suite_all_emits_per_file_current_policy_cases(
@@ -379,8 +424,10 @@ def test_run_offline_eval_suite_all_can_run_from_preview_when_repo_file_is_missi
 
     report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
 
-    assert report.passed is True
+    assert report.passed is False
     assert report.metrics["candidate_preview_files"] == 1
+    assert report.metrics["held_out_improved"] == 0
+    assert report.recommendation == "reject"
     assert [case.case_id for case in report.eval_cases[:1]] == [
         "structural:candidate-preview:CODEX.md"
     ]

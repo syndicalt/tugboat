@@ -55,15 +55,16 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     (repo / ".sidecar").mkdir(exist_ok=True)
     copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
 
-    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
     report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
-    assert report["passed"] is True
+    assert report["passed"] is False
     assert report["suite_id"] == "all"
     assert report["trigger_score"] == 1.0
     assert report["held_out_score"] == 1.0
     assert report["governance_passed"] is True
-    assert report["recommendation"] == "accept"
+    assert report["recommendation"] == "reject"
+    assert report["metrics"]["held_out_improved"] == 0
     assert "trigger_score" not in report["metrics"]
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         eval_run = connection.execute(
@@ -89,7 +90,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
             """
         ).fetchall()
 
-    assert eval_run[:4] == (7, "all", "passed", str(run_dir / "eval-report.json"))
+    assert eval_run[:4] == (7, "all", "failed", str(run_dir / "eval-report.json"))
     assert eval_run[4] is not None
     assert [row[0] for row in eval_cases] == [
         "adversarial:reject-emergency-deploy-bypass",

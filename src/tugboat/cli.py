@@ -1022,10 +1022,11 @@ def _ci_eval_check_payload(
     passed: bool,
 ) -> dict[str, Any]:
     report_path = run_dir / "eval-report.json"
-    if passed and report_path.exists():
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    else:
-        report = {}
+    report = {}
+    if report_path.exists():
+        candidate_report = json.loads(report_path.read_text(encoding="utf-8"))
+        if isinstance(candidate_report, dict) and candidate_report.get("suite_id") == suite:
+            report = candidate_report
     return {
         "passed": passed,
         "candidate": candidate,

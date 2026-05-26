@@ -191,12 +191,33 @@ def run_offline_eval_suite(
         "governance_regressions": governance_regressions,
         "structural_findings": sum(len(report.findings) for report in structural_reports),
     }
-    trigger_score = 1.0 if all(report.passed for report in structural_reports) and governance_regressions == 0 else 0.0
+    structural_score = 1.0 if all(report.passed for report in structural_reports) and governance_regressions == 0 else 0.0
+    trigger_score = structural_score
+    if preview_root is not None and structural_score == 1.0:
+        baseline_texts = tuple(before for before, _ in policy_pairs)
+        baseline_governance_regressions = sum(
+            1 for policy_text in baseline_texts if _has_governance_regression(policy_text)
+        )
+        trigger_score = (
+            1.0
+            if baseline_texts
+            and all(
+                evaluate_markdown_candidate(policy_text, root=root).passed
+                for policy_text in baseline_texts
+            )
+            and baseline_governance_regressions == 0
+            else 0.0
+        )
     held_out_score = _category_score(
         passed_cases=fixture_metrics["held_out_passed"],
         total_cases=fixture_metrics["held_out_cases"],
         fallback=trigger_score,
     )
+    if preview_root is not None:
+        held_out_improved = held_out_score > trigger_score
+        metrics["held_out_improved"] = int(held_out_improved)
+        if not held_out_improved:
+            passed = False
     return OfflineEvalReport(
         suite_id=suite_id,
         passed=passed,

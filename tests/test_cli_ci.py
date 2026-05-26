@@ -241,19 +241,19 @@ def test_ci_check_runs_requested_eval_suite_and_records_scores(tmp_path: Path, c
     (repo / ".sidecar").mkdir(exist_ok=True)
     copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
 
-    assert main(["ci", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 0
+    assert main(["ci", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
-    assert "ci: ok" in capsys.readouterr().out
+    assert "ci: failed" in capsys.readouterr().out
     report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
     assert report["checks"]["eval"] == {
-        "passed": True,
+        "passed": False,
         "candidate": "run-1",
         "suite_id": "all",
         "report_path": ".sidecar/runs/run-1/eval-report.json",
         "trigger_score": 1.0,
         "held_out_score": 1.0,
         "governance_passed": True,
-        "recommendation": "accept",
+        "recommendation": "reject",
     }
 
 
@@ -285,7 +285,7 @@ def test_ci_check_with_relative_repo_path_records_relative_eval_report_path(
     )
     monkeypatch.chdir(tmp_path)
 
-    assert main(["ci", "--repo", "repo", "--candidate", "run-1", "--suite", "all"]) == 0
+    assert main(["ci", "--repo", "repo", "--candidate", "run-1", "--suite", "all"]) == 1
 
     report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
     assert report["checks"]["eval"]["report_path"] == ".sidecar/runs/run-1/eval-report.json"
@@ -348,7 +348,23 @@ def test_ci_check_failed_eval_does_not_reuse_stale_eval_report_metrics(tmp_path:
         encoding="utf-8",
     )
 
-    assert main(["ci", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 0
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "suite_id": "all",
+                "passed": True,
+                "metrics": {},
+                "trigger_score": 1.0,
+                "held_out_score": 1.0,
+                "governance_passed": True,
+                "recommendation": "accept",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     assert main(["ci", "--repo", str(repo), "--candidate", "run-1", "--suite", "bogus"]) == 1
 
     report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
