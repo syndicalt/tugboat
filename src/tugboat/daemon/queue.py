@@ -61,7 +61,7 @@ ALLOWED_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     JobState.INSPECTING: frozenset(
         {JobState.RUNNING, JobState.QUEUED, JobState.REJECTED, JobState.FAILED}
     ),
-    JobState.RUNNING: frozenset({JobState.EVALUATING, JobState.FAILED}),
+    JobState.RUNNING: frozenset({JobState.EVALUATING, JobState.WAITING_REVIEW, JobState.FAILED}),
     JobState.EVALUATING: frozenset(
         {
             JobState.WAITING_REVIEW,

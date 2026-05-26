@@ -213,12 +213,15 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
     except DaemonJobPayloadError:
         return _fail_daemon_job(repo, queue, running.id, now=now)
 
-    if result is not None and result.exit_code != 0:
-        return _fail_daemon_job(repo, queue, running.id, now=now)
-
-    evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
-    _record_job_state(repo, evaluating.id, evaluating.state)
-    waiting_review = queue.transition(evaluating.id, JobState.WAITING_REVIEW, now=now)
+    if running.kind == "eval":
+        evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
+        _record_job_state(repo, evaluating.id, evaluating.state)
+        final_state = JobState.WAITING_REVIEW if result is not None and result.exit_code == 0 else JobState.REJECTED
+        waiting_review = queue.transition(evaluating.id, final_state, now=now)
+    else:
+        if result is not None and result.exit_code != 0:
+            return _fail_daemon_job(repo, queue, running.id, now=now)
+        waiting_review = queue.transition(running.id, JobState.WAITING_REVIEW, now=now)
     _record_job_state(repo, waiting_review.id, waiting_review.state)
     return waiting_review
 

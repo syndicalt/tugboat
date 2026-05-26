@@ -399,7 +399,6 @@ llmff:
     assert transition_events == [
         ("daemon_job.state_changed", "inspecting"),
         ("daemon_job.state_changed", "running"),
-        ("daemon_job.state_changed", "evaluating"),
         ("daemon_job.state_changed", "waiting_review"),
     ]
 

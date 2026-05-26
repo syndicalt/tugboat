@@ -19,6 +19,9 @@ from tugboat.daemon.service import (
     run_daemon_once,
     serve_daemon_socket,
 )
+from tugboat.db import Store
+from tugboat.eval.pipeline import EvalPipelineResult
+from tugboat.paths import sidecar_dir
 from tugboat.mcp import tugboat_daemon_status
 
 
@@ -234,6 +237,13 @@ llmff:
     )
     with DaemonQueue.open_sidecar(repo) as queue:
         job = queue.enqueue(kind="trace_audit", payload={"trace_path": str(trace)}, now=_at(0))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_daemon_job(
+            job_id=str(job.id),
+            repo_path=repo,
+            state="queued",
+            payload={"trace_path": str(trace)},
+        )
 
     result = run_daemon_once(
         repo,
@@ -269,9 +279,81 @@ llmff:
             ORDER BY id
             """
         ).fetchall()
+        transition_events = connection.execute(
+            """
+            SELECT event_type, json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence
+            """
+        ).fetchall()
     assert jobs == [
         ("instruction-index.yaml", "completed"),
         ("episode-audit.yaml", "completed"),
+    ]
+    assert transition_events == [
+        ("daemon_job.state_changed", "inspecting"),
+        ("daemon_job.state_changed", "running"),
+        ("daemon_job.state_changed", "waiting_review"),
+    ]
+
+
+def test_run_daemon_once_marks_eval_rejection_as_rejected_not_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "eval-run"
+    run_dir.mkdir(parents=True)
+
+    def reject_eval(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipelineResult:
+        assert repo == tmp_path
+        assert candidate_ref == "latest"
+        assert suite_id == "held-out"
+        return EvalPipelineResult(1, run_dir, "eval suite: held-out failed")
+
+    monkeypatch.setattr("tugboat.daemon.service.run_eval_pipeline", reject_eval)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="eval",
+            payload={"candidate_id": "latest", "suite": "held-out"},
+            now=_at(0),
+        )
+    with Store.open(sidecar_dir(tmp_path) / "db.sqlite") as store:
+        store.record_daemon_job(
+            job_id=str(job.id),
+            repo_path=tmp_path,
+            state="queued",
+            payload={"candidate_id": "latest", "suite": "held-out"},
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["processed"] is True
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "rejected"
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.REJECTED  # type: ignore[union-attr]
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        transition_events = connection.execute(
+            """
+            SELECT event_type, json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence
+            """
+        ).fetchall()
+    assert transition_events == [
+        ("daemon_job.state_changed", "inspecting"),
+        ("daemon_job.state_changed", "running"),
+        ("daemon_job.state_changed", "evaluating"),
+        ("daemon_job.state_changed", "rejected"),
     ]
 
 
