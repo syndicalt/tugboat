@@ -871,7 +871,9 @@ def _audit_call(
 def _enforce_mcp_policy(repo: Path, tool: str) -> None:
     policy = load_policy(repo)
     allowed_repositories = tuple(Path(path).expanduser().resolve() for path in policy.mcp_allowed_repositories)
-    if allowed_repositories and repo.resolve() not in allowed_repositories:
+    if not allowed_repositories:
+        raise ValueError("MCP repo allowlist is required")
+    if repo.resolve() not in allowed_repositories:
         raise ValueError(f"repo is not allowed for MCP: {repo}")
     decision = policy.mcp_tool_policy.get(tool, "allow").lower()
     if decision != "allow":

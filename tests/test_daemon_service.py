@@ -512,6 +512,15 @@ def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
 def test_daemon_status_cli_and_mcp_read_queue_state(tmp_path: Path, capsys):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="eval", payload={"candidate_id": "candidate-1"}, now=_at(0))
+    (tmp_path / ".sidecar" / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {tmp_path.resolve().as_posix()}
+""".lstrip(),
+        encoding="utf-8",
+    )
 
     exit_code = main(["daemon", "status", "--repo", str(tmp_path)])
 

@@ -198,6 +198,7 @@ mcp:
 
 def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.insert_run(
             run_id="run-1",
@@ -230,6 +231,7 @@ def test_status_reports_latest_llmff_job_failure_and_retention_candidates(
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
+    _allow_mcp_repo(repo)
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     lifecycle_dir = run_dir / "patch-propose"
     lifecycle_dir.mkdir(parents=True)
@@ -288,6 +290,7 @@ def test_status_reports_latest_llmff_job_failure_and_retention_candidates(
 def test_status_reports_retention_redaction_candidate_count(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
+    _allow_mcp_repo(repo)
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     trace = run_dir / "trace-input.jsonl"
@@ -302,6 +305,7 @@ def test_status_reports_retention_redaction_candidate_count(tmp_path: Path):
 
 def test_mcp_call_rows_are_reachable_from_append_only_audit_event(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
 
     tugboat_status(repo)
 
@@ -323,6 +327,7 @@ def test_mcp_call_rows_are_reachable_from_append_only_audit_event(tmp_path: Path
 
 def test_instruction_graph_returns_metadata_not_instruction_text(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text(
         "# Rules\n\nUse sk-thissecretkeyvalue1234567890 carefully.\n",
         encoding="utf-8",
@@ -357,6 +362,7 @@ def test_instruction_graph_returns_metadata_not_instruction_text(tmp_path: Path)
 
 def test_active_instructions_returns_ordered_refs_without_raw_text_and_audits(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "AGENTS.md").write_text(
         "# Repo Policy\n\nMUST keep private customer prompt alpha internal.\n",
         encoding="utf-8",
@@ -401,6 +407,7 @@ def test_active_instructions_returns_ordered_refs_without_raw_text_and_audits(tm
 
 def test_active_instructions_refs_do_not_leak_sensitive_heading_text(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text(
         "# Use sk-thissecretkeyvalue1234567890 carefully\n\nMUST test changes.\n",
         encoding="utf-8",
@@ -416,6 +423,7 @@ def test_active_instructions_refs_do_not_leak_sensitive_heading_text(tmp_path: P
 
 def test_index_summary_returns_counts_and_refs_without_instruction_text(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "AGENTS.md").write_text(
         "# Repo Policy\n\nMUST keep private customer prompt alpha internal.\n",
         encoding="utf-8",
@@ -463,6 +471,7 @@ def test_index_summary_returns_counts_and_refs_without_instruction_text(tmp_path
 
 def test_harness_findings_are_plain_contract_and_audited(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "AGENTS.md").write_text("# Agent Map\n\nSee [Missing](docs/MISSING.md).\n", encoding="utf-8")
 
     result = tugboat_harness_findings(repo)
@@ -476,6 +485,7 @@ def test_harness_findings_are_plain_contract_and_audited(tmp_path: Path):
 
 def test_harness_findings_redact_raw_instruction_rule_text(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text(
         "# Rules\n\n"
         "MUST keep private customer prompt alpha internal.\n"
@@ -498,6 +508,7 @@ def test_harness_findings_redact_raw_instruction_rule_text(tmp_path: Path):
 
 def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         for run_id in ("run-1", "run-2", "run-3"):
             run_dir = runs_dir(repo) / run_id
@@ -524,6 +535,7 @@ def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
 
 def test_latest_audit_returns_sanitized_newest_audit_summary_and_audits(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         for run_id, stage in (("run-1", "audit"), ("run-2", "audit"), ("run-3", "optimize")):
             run_dir = runs_dir(repo) / run_id
@@ -581,6 +593,7 @@ def test_latest_audit_returns_sanitized_newest_audit_summary_and_audits(tmp_path
 
 def test_latest_audit_tie_breaks_equal_created_at_by_updated_at(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         for run_id in ("run-1", "run-2"):
             run_dir = runs_dir(repo) / run_id
@@ -626,6 +639,7 @@ def test_latest_audit_tie_breaks_equal_created_at_by_updated_at(tmp_path: Path):
 
 def test_run_report_summarizes_known_artifacts_without_raw_payloads(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     run_dir = runs_dir(repo) / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "trace-input.jsonl").write_text('{"prompt":"sk-thissecretkeyvalue1234567890"}\n', encoding="utf-8")
@@ -674,6 +688,7 @@ def test_run_report_summarizes_known_artifacts_without_raw_payloads(tmp_path: Pa
 
 def test_run_report_exposes_optimization_summary_artifact_ref(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     run_dir = runs_dir(repo) / "run-1"
     run_dir.mkdir(parents=True)
     (run_dir / "optimization-summary.json").write_text(
@@ -709,6 +724,7 @@ def test_run_report_exposes_optimization_summary_artifact_ref(tmp_path: Path):
 
 def test_candidate_returns_summary_and_diff_ref_without_raw_diff(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     run_dir = runs_dir(repo) / "run-1"
     run_dir.mkdir(parents=True)
     (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
@@ -755,6 +771,7 @@ def test_candidate_returns_summary_and_diff_ref_without_raw_diff(tmp_path: Path)
 
 def test_candidate_report_returns_eval_and_decision_refs_without_raw_payloads(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     run_dir = runs_dir(repo) / "run-1"
     run_dir.mkdir(parents=True)
     (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
@@ -837,6 +854,7 @@ def test_candidate_report_returns_eval_and_decision_refs_without_raw_payloads(tm
 
 def test_candidate_report_uses_latest_eval_and_decision_rows(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     run_dir = runs_dir(repo) / "run-1"
     run_dir.mkdir(parents=True)
     (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
@@ -964,6 +982,15 @@ def test_mcp_jsonrpc_requires_explicit_repo_allowlist_before_invocation(tmp_path
     assert event["status"] == "denied"
 
 
+def test_mcp_direct_calls_require_explicit_repo_allowlist_and_audit_denial(tmp_path: Path):
+    with pytest.raises(ValueError, match="MCP repo allowlist is required"):
+        tugboat_status(tmp_path)
+
+    event = _mcp_events(tmp_path)[-1]
+    assert event["tool"] == "tugboat_status"
+    assert event["status"] == "denied"
+
+
 def test_mcp_per_tool_policy_blocks_denied_tool_and_audits_denial(tmp_path: Path):
     policy_dir = tmp_path / ".sidecar"
     policy_dir.mkdir()
@@ -989,6 +1016,7 @@ mcp:
 
 def test_write_intent_tools_create_request_artifacts_without_mutating_instructions(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     codex = repo / "CODEX.md"
     original = "# Rules\n\nUse tests.\n"
     codex.write_text(original, encoding="utf-8")
@@ -1029,6 +1057,7 @@ def test_write_intent_tools_create_request_artifacts_without_mutating_instructio
 
 def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
 
     episode = tugboat_record_episode(
         repo,
@@ -1066,6 +1095,7 @@ def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path
 
 def test_record_episode_normalizes_mcp_live_events_for_mcp_capture(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
 
     episode = tugboat_record_episode(
         repo,
@@ -1098,8 +1128,9 @@ def test_record_episode_normalizes_mcp_live_events_for_mcp_capture(tmp_path: Pat
 
 def test_record_episode_denied_when_read_only_kill_switch_enabled(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     sidecar = repo / ".sidecar"
-    sidecar.mkdir()
+    sidecar.mkdir(exist_ok=True)
     (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="read-only kill switch"):
@@ -1132,6 +1163,7 @@ def test_mcp_write_intent_requests_denied_when_read_only_kill_switch_enabled(
     expected_tool: str,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     sidecar = repo / ".sidecar"
     episodes = sidecar / "mcp" / "episodes"
     episodes.mkdir(parents=True)
@@ -1163,8 +1195,9 @@ def test_request_audit_read_only_kill_switch_denial_precedes_missing_trace_valid
     tmp_path: Path,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     sidecar = repo / ".sidecar"
-    sidecar.mkdir()
+    sidecar.mkdir(exist_ok=True)
     (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="read-only kill switch"):
@@ -1186,6 +1219,9 @@ def test_request_audit_enqueues_daemon_executable_trace_audit(tmp_path: Path):
     (policy_dir / "policy.yaml").write_text(
         f"""
 version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
 llmff:
   binary: {fake_llmff}
   require_inspect: true
@@ -1243,6 +1279,7 @@ def test_request_audit_records_daemon_job_in_audited_store_before_worker_runs(
     tmp_path: Path,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     episode = tugboat_record_episode(
         repo,
@@ -1284,6 +1321,7 @@ def test_request_audit_keeps_daemon_job_invisible_until_audit_record_exists(
     monkeypatch: pytest.MonkeyPatch,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     episode = tugboat_record_episode(
         repo,
@@ -1323,6 +1361,7 @@ def test_request_audit_validates_request_artifact_before_queue_visibility(
     monkeypatch: pytest.MonkeyPatch,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     episode = tugboat_record_episode(
         repo,
@@ -1351,6 +1390,7 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     audit_id, _ = _seed_review_target(repo)
 
     def fail_enqueue(self, **kwargs):
@@ -1383,6 +1423,7 @@ def test_direct_mcp_write_intent_calls_validate_artifact_ids_before_queueing(
     expected_message: str,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
 
     with pytest.raises(ValueError, match=expected_message):
         request_fn(repo)
@@ -1405,6 +1446,7 @@ def test_mcp_write_intent_requests_validate_target_entities_before_queueing(
     expected_message: str,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
 
     with pytest.raises(ValueError, match=expected_message):
         request_fn(repo)
@@ -1418,6 +1460,7 @@ def test_mcp_write_intent_tools_record_daemon_jobs_in_audited_store(
     tmp_path: Path,
 ):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     audit_id, _ = _seed_review_target(repo)
     request = tugboat_request_proposal(repo, str(audit_id))
 
@@ -1451,6 +1494,7 @@ def test_mcp_write_intent_tools_record_daemon_jobs_in_audited_store(
 
 def test_mcp_eval_request_records_daemon_job_in_audited_store(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     _, candidate_id = _seed_review_target(repo)
     request = tugboat_request_eval(repo, str(candidate_id), "all")
 
@@ -1492,6 +1536,9 @@ def test_request_proposal_enqueues_daemon_executable_patch_propose(tmp_path: Pat
     (policy_dir / "policy.yaml").write_text(
         f"""
 version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
 llmff:
   binary: {fake_llmff}
   require_inspect: true
@@ -1560,6 +1607,9 @@ def test_request_eval_enqueues_daemon_executable_patch_eval(tmp_path: Path):
     (policy_dir / "policy.yaml").write_text(
         f"""
 version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
 llmff:
   binary: {fake_llmff}
   require_inspect: true
@@ -1691,6 +1741,7 @@ mcp:
 
 def test_request_audit_rejects_trace_id_path_traversal_without_queueing(tmp_path: Path):
     repo = tmp_path
+    _allow_mcp_repo(repo)
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     escaped_trace = repo / ".sidecar" / "mcp" / "policy.jsonl"
     (repo / ".sidecar" / "mcp" / "episodes").mkdir(parents=True)
@@ -1705,6 +1756,7 @@ def test_request_audit_rejects_trace_id_path_traversal_without_queueing(tmp_path
 
 
 def test_write_intent_episode_rejects_secret_payloads(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
     with pytest.raises(ValueError, match="secret"):
         tugboat_record_episode(
             tmp_path,
