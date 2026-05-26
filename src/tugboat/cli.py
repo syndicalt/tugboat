@@ -37,6 +37,12 @@ from tugboat.scoring import ScoreOutcome, score_episode
 from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.ingest import canonical_episode_from_bundle, ingest_jsonl_trace
+from tugboat.traces.adapters import (
+    ingest_ci_failure_bundle,
+    ingest_claude_transcript_bundle,
+    ingest_codex_session_bundle,
+    ingest_mcp_session_bundle,
+)
 from tugboat.traces.threats import detect_trace_threats
 from tugboat.vcs import VcsAdapter, VcsStateError
 
@@ -56,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit = subcommands.add_parser("audit")
     audit.add_argument("--repo", required=True)
     audit.add_argument("--trace", required=True)
+    audit.add_argument(
+        "--trace-format",
+        choices=("generic-jsonl", "codex", "claude", "ci", "mcp"),
+        default="generic-jsonl",
+    )
     audit.add_argument("--mock-llmff-inspect", action="store_true")
 
     propose = subcommands.add_parser("propose")
@@ -212,7 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else None
         )
         inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy, runner=runner)
-        bundle = ingest_jsonl_trace(trace)
+        bundle = _ingest_trace(trace, args.trace_format)
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             episode_id = store.record_trace_episode(repo=repo, bundle=bundle)
         audit_payload = _scored_audit_payload(bundle)
@@ -709,6 +720,20 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
                 artifact_path=snapshot / document.path,
             )
         store.record_instruction_graph(run_id=run_dir.name, artifact_path=graph_path)
+
+
+def _ingest_trace(trace: Path, trace_format: str):
+    if trace_format == "generic-jsonl":
+        return ingest_jsonl_trace(trace)
+    if trace_format == "codex":
+        return ingest_codex_session_bundle(trace)
+    if trace_format == "claude":
+        return ingest_claude_transcript_bundle(trace)
+    if trace_format == "ci":
+        return ingest_ci_failure_bundle(trace)
+    if trace_format == "mcp":
+        return ingest_mcp_session_bundle(trace)
+    raise ValueError(f"unsupported trace format: {trace_format}")
 
 
 def _scored_audit_payload(bundle) -> dict[str, object]:

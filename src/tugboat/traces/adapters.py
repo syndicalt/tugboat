@@ -9,6 +9,10 @@ from tugboat.traces.schema import CanonicalEpisode, TraceBundle, TraceEvent
 
 
 def ingest_codex_session(path: Path) -> CanonicalEpisode:
+    return canonical_episode_from_bundle(ingest_codex_session_bundle(path))
+
+
+def ingest_codex_session_bundle(path: Path) -> TraceBundle:
     events: list[dict[str, Any]] = []
     for row in _read_jsonl(path):
         role = row.get("role")
@@ -18,10 +22,14 @@ def ingest_codex_session(path: Path) -> CanonicalEpisode:
             events.append({"type": "final_answer", "content": row.get("content", "")})
         elif row.get("type") in {"tool_call", "tool_result", "diff", "test_result"}:
             events.append(dict(row))
-    return _episode_from_payloads(path, events)
+    return _bundle_from_payloads(path, events)
 
 
 def ingest_claude_transcript(path: Path) -> CanonicalEpisode:
+    return canonical_episode_from_bundle(ingest_claude_transcript_bundle(path))
+
+
+def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
     payload = json.loads(path.read_text(encoding="utf-8"))
     messages = payload.get("messages", [])
     events: list[dict[str, Any]] = []
@@ -43,10 +51,14 @@ def ingest_claude_transcript(path: Path) -> CanonicalEpisode:
                     "summary": message.get("content", ""),
                 }
             )
-    return _episode_from_payloads(path, events)
+    return _bundle_from_payloads(path, events)
 
 
 def ingest_ci_failure(path: Path) -> CanonicalEpisode:
+    return canonical_episode_from_bundle(ingest_ci_failure_bundle(path))
+
+
+def ingest_ci_failure_bundle(path: Path) -> TraceBundle:
     payload = json.loads(path.read_text(encoding="utf-8"))
     suite = str(payload.get("suite", "ci"))
     exit_code = int(payload.get("exit_code", 1))
@@ -60,10 +72,14 @@ def ingest_ci_failure(path: Path) -> CanonicalEpisode:
         {"type": "test_result", "suite": suite, "passed": exit_code == 0},
         {"type": "outcome_label", "label": "ci_failed" if exit_code else "ci_passed"},
     ]
-    return _episode_from_payloads(path, events)
+    return _bundle_from_payloads(path, events)
 
 
 def ingest_mcp_session(path: Path) -> CanonicalEpisode:
+    return canonical_episode_from_bundle(ingest_mcp_session_bundle(path))
+
+
+def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
     events: list[dict[str, Any]] = []
     for row in _read_jsonl(path):
         event = row.get("event")
@@ -81,7 +97,7 @@ def ingest_mcp_session(path: Path) -> CanonicalEpisode:
             )
         elif event == "agent.final":
             events.append({"type": "final_answer", "content": row.get("text", "")})
-    return _episode_from_payloads(path, events)
+    return _bundle_from_payloads(path, events)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -95,7 +111,7 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _episode_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> CanonicalEpisode:
+def _bundle_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> TraceBundle:
     events = tuple(
         TraceEvent(
             evidence_id=_evidence_id(index, payload),
@@ -106,7 +122,7 @@ def _episode_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> Canoni
         )
         for index, payload in enumerate(payloads, start=1)
     )
-    return canonical_episode_from_bundle(TraceBundle(trace_path=path, events=events))
+    return TraceBundle(trace_path=path, events=events)
 
 
 def _source_trust(event_type: str) -> str:
