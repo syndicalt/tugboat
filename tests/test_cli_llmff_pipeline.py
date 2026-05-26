@@ -7,7 +7,22 @@ from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 
 
-def _write_fake_llmff(path: Path, *, eval_passed: bool = False) -> Path:
+def _write_fake_llmff(
+    path: Path,
+    *,
+    eval_passed: bool = False,
+    bounded_edit_metadata: object | None = None,
+) -> Path:
+    if bounded_edit_metadata is None:
+        bounded_edit_metadata = [
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ]
     path.write_text(
         """#!/usr/bin/env python3
 import json
@@ -15,6 +30,7 @@ import sys
 from pathlib import Path
 
 EVAL_PASSED = __EVAL_PASSED__
+BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -69,13 +85,7 @@ if args[:1] == ["run"]:
                 "source_ref": "audit:latest",
                 "summary": "Tests were skipped because regression guidance was missing."
             }],
-            "bounded_edit_metadata": [{
-                "operator": "add",
-                "file": "CODEX.md",
-                "section": "Testing",
-                "changed_lines": 1,
-                "normative_changes": 0
-            }],
+            "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
         if EVAL_PASSED:
@@ -103,7 +113,9 @@ if args[:1] == ["run"]:
     raise SystemExit(0)
 
 raise SystemExit(64)
-""".replace("__EVAL_PASSED__", repr(eval_passed)),
+""".replace("__EVAL_PASSED__", repr(eval_passed)).replace(
+            "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
+        ),
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -322,6 +334,55 @@ llmff:
         candidate_edit[4],
     )
     assert candidate_edit[4] is not None
+
+
+def test_propose_rejects_malformed_llmff_bounded_edit_metadata(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        bounded_edit_metadata=[
+            {
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "bounded_edit_metadata[0].operator is required" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_count = store.connection.execute(
+            "SELECT COUNT(*) FROM candidates"
+        ).fetchone()[0]
+    assert candidate_count == 0
 
 
 def test_propose_passes_persisted_optimizer_memory_to_llmff(tmp_path: Path):

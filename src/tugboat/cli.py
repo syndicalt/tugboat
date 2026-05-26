@@ -60,6 +60,10 @@ from tugboat.traces.adapters import (
 from tugboat.traces.threats import detect_trace_threats
 from tugboat.vcs import VcsAdapter, VcsStateError
 
+BOUNDED_EDIT_OPERATORS = frozenset(
+    {"add", "replace", "delete", "split", "merge", "demote", "promote", "annotate"}
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
@@ -363,11 +367,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("audit does not warrant an instruction edit")
             return 1
         policy = load_policy(repo)
-        candidate = (
-            _run_patch_propose(repo, run_dir, policy, audit_id=int(audit["audit_id"]))
-            if (run_dir / "audit.raw.json").exists()
-            else _default_candidate(repo, audit_id=int(audit["audit_id"]))
-        )
+        try:
+            candidate = (
+                _run_patch_propose(repo, run_dir, policy, audit_id=int(audit["audit_id"]))
+                if (run_dir / "audit.raw.json").exists()
+                else _default_candidate(repo, audit_id=int(audit["audit_id"]))
+            )
+        except ValueError as error:
+            print(f"candidate rejected: {error}")
+            return 1
         decision = evaluate_candidate(repo, policy, candidate)
         memory_reasons = _rejected_memory_policy_reasons(repo, candidate)
         decision_allowed = decision.allowed and not memory_reasons
@@ -1059,10 +1067,52 @@ def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> Can
 
 
 def _bounded_edit_metadata_from_payload(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
-    raw_metadata = payload.get("bounded_edit_metadata", payload.get("operator_metadata", []))
-    if not isinstance(raw_metadata, list):
+    raw_metadata = payload.get("bounded_edit_metadata", payload.get("operator_metadata"))
+    if raw_metadata is None:
         return ()
-    return tuple(dict(item) for item in raw_metadata if isinstance(item, dict))
+    if not isinstance(raw_metadata, list):
+        raise ValueError("bounded_edit_metadata must be a JSON list")
+    return tuple(
+        _bounded_edit_metadata_item_from_payload(item, index=index)
+        for index, item in enumerate(raw_metadata)
+    )
+
+
+def _bounded_edit_metadata_item_from_payload(
+    item: object, *, index: int
+) -> dict[str, object]:
+    prefix = f"bounded_edit_metadata[{index}]"
+    if not isinstance(item, dict):
+        raise ValueError(f"{prefix} must be a JSON object")
+    operator = _required_non_empty_string(item, "operator", prefix)
+    if operator not in BOUNDED_EDIT_OPERATORS:
+        allowed = ", ".join(sorted(BOUNDED_EDIT_OPERATORS))
+        raise ValueError(f"{prefix}.operator must be one of: {allowed}")
+    return {
+        "operator": operator,
+        "file": _required_non_empty_string(item, "file", prefix),
+        "section": _required_non_empty_string(item, "section", prefix),
+        "changed_lines": _required_non_negative_int(item, "changed_lines", prefix),
+        "normative_changes": _required_non_negative_int(item, "normative_changes", prefix),
+    }
+
+
+def _required_non_empty_string(
+    item: dict[str, object], field: str, prefix: str
+) -> str:
+    value = item.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{prefix}.{field} is required")
+    return value
+
+
+def _required_non_negative_int(
+    item: dict[str, object], field: str, prefix: str
+) -> int:
+    value = item.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{prefix}.{field} must be a non-negative integer")
+    return value
 
 
 def _record_candidate_provenance(
