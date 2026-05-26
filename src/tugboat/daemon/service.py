@@ -87,6 +87,9 @@ def serve_daemon_socket(
     config: DaemonRunConfig,
     max_requests: int | None = None,
 ) -> dict[str, Any]:
+    repo = repo.resolve()
+    socket_path = socket_path.expanduser().resolve()
+    socket_ref = _repo_relative_socket_path(repo, socket_path)
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     socket_path.unlink(missing_ok=True)
     requests_served = 0
@@ -98,13 +101,13 @@ def serve_daemon_socket(
             with connection:
                 request = _read_socket_request(connection)
                 response = _handle_socket_request(repo, config, request)
-                response["socket_path"] = socket_path.relative_to(repo).as_posix()
+                response["socket_path"] = socket_ref
                 connection.sendall((json.dumps(response, sort_keys=True) + "\n").encode("utf-8"))
             requests_served += 1
     socket_path.unlink(missing_ok=True)
     return {
         "requests_served": requests_served,
-        "socket_path": socket_path.relative_to(repo).as_posix(),
+        "socket_path": socket_ref,
     }
 
 
@@ -138,6 +141,12 @@ def _handle_socket_request(
     if command == "run_once":
         return run_daemon_once(repo, config)
     return {"error": f"unknown daemon command: {command}"}
+
+
+def _repo_relative_socket_path(repo: Path, socket_path: Path) -> str:
+    if not socket_path.is_relative_to(repo):
+        raise ValueError("socket_path must resolve inside repo")
+    return socket_path.relative_to(repo).as_posix()
 
 
 def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: datetime | None) -> Any:

@@ -455,16 +455,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "daemon" and args.daemon_command == "serve":
         repo = Path(args.repo)
         socket_path = Path(args.socket) if args.socket else sidecar_dir(repo) / "daemon.sock"
-        result = serve_daemon_socket(
-            repo,
-            socket_path=socket_path,
-            config=DaemonRunConfig(
-                worker_id=args.worker_id,
-                lease_duration=timedelta(seconds=args.lease_seconds),
-                kill_switch=default_kill_switch(repo),
-            ),
-            max_requests=args.max_requests,
-        )
+        try:
+            result = serve_daemon_socket(
+                repo,
+                socket_path=socket_path,
+                config=DaemonRunConfig(
+                    worker_id=args.worker_id,
+                    lease_duration=timedelta(seconds=args.lease_seconds),
+                    kill_switch=default_kill_switch(repo),
+                ),
+                max_requests=args.max_requests,
+            )
+        except ValueError as error:
+            print(f"daemon serve blocked: {error}")
+            return 1
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

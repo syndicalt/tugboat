@@ -9,6 +9,8 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from tugboat.cli import main
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState
 from tugboat.daemon.service import (
@@ -292,6 +294,48 @@ def test_daemon_unix_socket_serves_status_and_exits_after_bounded_requests(tmp_p
     assert response["jobs_by_state"] == {"queued": 1}
     assert response["socket_path"] == ".sidecar/daemon.sock"
     assert result == {"requests_served": 1, "socket_path": ".sidecar/daemon.sock"}
+
+
+def test_daemon_unix_socket_rejects_path_outside_repo_before_bind(tmp_path: Path):
+    outside_socket = tmp_path.parent / f"{tmp_path.name}-outside.sock"
+
+    with pytest.raises(ValueError, match="socket_path must resolve inside repo"):
+        serve_daemon_socket(
+            tmp_path,
+            socket_path=outside_socket,
+            config=DaemonRunConfig(
+                worker_id="socket-worker",
+                lease_duration=timedelta(seconds=30),
+                now=_at(10),
+            ),
+            max_requests=0,
+        )
+
+    assert not outside_socket.exists()
+
+
+def test_daemon_serve_cli_rejects_path_outside_repo_without_binding(
+    tmp_path: Path,
+    capsys,
+):
+    outside_socket = tmp_path.parent / f"{tmp_path.name}-outside.sock"
+
+    exit_code = main(
+        [
+            "daemon",
+            "serve",
+            "--repo",
+            str(tmp_path),
+            "--socket",
+            str(outside_socket),
+            "--max-requests",
+            "0",
+        ]
+    )
+
+    assert exit_code == 1
+    assert capsys.readouterr().out == "daemon serve blocked: socket_path must resolve inside repo\n"
+    assert not outside_socket.exists()
 
 
 def test_daemon_serve_cli_can_exit_without_accepting_requests(tmp_path: Path, capsys):
