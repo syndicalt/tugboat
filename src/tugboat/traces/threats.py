@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from tugboat.security.secrets import scan_text
 from tugboat.traces.schema import CanonicalEpisode, TraceEvent
 
 
@@ -58,6 +59,16 @@ def detect_trace_threats(episode: CanonicalEpisode) -> tuple[TraceThreatFinding,
         text = _event_text(event)
         if not text:
             continue
+        if scan_text(f"trace:{event.evidence_id}", text):
+            findings.append(
+                TraceThreatFinding(
+                    code="secret_trace_content",
+                    severity="critical",
+                    evidence_id=event.evidence_id,
+                    message="Trace content contains material matching a secret pattern.",
+                    source_trust=event.source_trust,
+                )
+            )
         normalized = text.lower()
         if any(marker in normalized for marker in _PROMPT_INJECTION_MARKERS):
             code = (

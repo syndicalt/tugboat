@@ -76,3 +76,22 @@ def test_mock_audit_writes_trace_risk_findings(tmp_path: Path):
         "prompt_injection_attempt",
         "conflicting_instruction_request",
     ]
+
+
+def test_audit_blocks_secret_trace_before_scoring(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nNever expose secrets.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        '{"type":"tool_result","tool":"env","output":"OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx"}\n',
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace), "--mock-llmff-inspect"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "secret_detected"
+    assert audit["severity"] == "critical"
+    assert audit["secret_findings"][0]["kind"] == "openai_api_key"

@@ -60,3 +60,25 @@ def test_detect_trace_threats_flags_prompt_injection_and_conflicting_instruction
         ("prompt_injection_attempt", "high"),
         ("conflicting_instruction_request", "medium"),
     ]
+
+
+def test_detect_trace_threats_flags_secret_content(tmp_path: Path):
+    trace = tmp_path / "episode.jsonl"
+    _write_jsonl(
+        trace,
+        [
+            {
+                "type": "tool_result",
+                "tool": "env",
+                "output": "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx",
+            }
+        ],
+    )
+    episode = ingest_jsonl_trace_as_episode(trace)
+
+    findings = detect_trace_threats(episode)
+
+    assert [(finding.code, finding.severity, finding.source_trust) for finding in findings] == [
+        ("secret_trace_content", "critical", "tool")
+    ]
+    assert findings[0].evidence_id.startswith("ev_")
