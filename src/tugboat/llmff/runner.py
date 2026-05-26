@@ -226,6 +226,7 @@ def run_manifest(
     input_paths: dict[str, Path] | None = None,
     output_paths: dict[str, Path] | None = None,
 ) -> RunResult:
+    _require_matching_inspect_artifact(manifest_path, run_dir=run_dir, policy=policy)
     supervisor = LlmffRunSupervisor(policy.llmff_binary)
     return supervisor.run_manifest(
         manifest_path,
@@ -237,6 +238,44 @@ def run_manifest(
         input_paths=input_paths,
         output_paths=output_paths,
     )
+
+
+def _require_matching_inspect_artifact(manifest_path: Path, *, run_dir: Path, policy: Policy) -> None:
+    if not policy.llmff_require_inspect:
+        return
+    artifact_path = _manifest_lifecycle_dir(run_dir, manifest_path) / "llmff-inspect.json"
+    if not artifact_path.exists():
+        raise InspectPolicyError("llmff inspect artifact is required before run")
+    try:
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise InspectPolicyError("llmff inspect artifact must be valid JSON") from exc
+    if not isinstance(artifact, dict):
+        raise InspectPolicyError("llmff inspect artifact must be a JSON object")
+    validate_json_artifact("llmff-inspect.json", artifact)
+
+    manifest_digest = _manifest_hash(manifest_path)
+    if str(artifact["manifest_hash"]) != manifest_digest:
+        raise InspectPolicyError("llmff inspect artifact manifest hash does not match current manifest")
+    if policy.allowed_manifest_hashes and manifest_digest not in policy.allowed_manifest_hashes:
+        raise InspectPolicyError("manifest hash is not allowed by policy")
+
+    inspect_payload = artifact.get("inspect")
+    if not isinstance(inspect_payload, dict):
+        raise InspectPolicyError("llmff inspect artifact payload must be a JSON object")
+    network_required = _network_required(inspect_payload)
+    if network_required and not policy.llmff_allow_network:
+        raise InspectPolicyError("llmff inspect requires network but policy disallows network")
+    declared_providers = _declared_providers(inspect_payload)
+    _external_calls(
+        inspect_payload,
+        network_required=network_required,
+        declared_providers=declared_providers,
+    )
+    allowed_providers = set(policy.llmff_allowed_providers)
+    if declared_providers and not allowed_providers.issuperset(declared_providers):
+        provider = next(provider for provider in declared_providers if provider not in allowed_providers)
+        raise InspectPolicyError(f"provider is not allowed by policy: {provider}")
 
 
 def _manifest_hash(manifest_path: Path) -> str:

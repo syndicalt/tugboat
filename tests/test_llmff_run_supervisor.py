@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -11,12 +12,274 @@ import pytest
 from tugboat.llmff.runner import (
     CheckpointPathError,
     CheckpointMismatchError,
+    InspectPolicyError,
     MissingOutputError,
     OutputPathError,
     run_manifest,
 )
 from tugboat.models import Policy
 from tugboat.security.secrets import SecretScanError
+
+
+def _manifest_sha256(manifest: Path) -> str:
+    return hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+
+def _write_inspect_artifact(
+    run_dir: Path,
+    manifest: Path,
+    *,
+    manifest_hash: str | None = None,
+    inspect_payload: dict[str, object] | None = None,
+) -> Path:
+    lifecycle_dir = run_dir / manifest.stem
+    lifecycle_dir.mkdir(parents=True, exist_ok=True)
+    inspect = inspect_payload or {
+        "manifest": manifest.stem,
+        "network_required": False,
+        "providers": [],
+        "external_calls": [],
+    }
+    artifact = {
+        "schema_version": 1,
+        "manifest_path": str(manifest),
+        "manifest_hash": manifest_hash or _manifest_sha256(manifest),
+        "network_required": bool(inspect.get("network_required", False)),
+        "external_calls": inspect.get("external_calls", []),
+        "inspect": inspect,
+    }
+    path = lifecycle_dir / "llmff-inspect.json"
+    path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def test_run_manifest_requires_matching_inspect_artifact_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(InspectPolicyError, match="llmff inspect artifact is required"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=True),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+    assert calls == []
+
+
+def test_run_manifest_accepts_matching_inspect_artifact_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _write_inspect_artifact(run_dir, manifest)
+
+    result = run_manifest(
+        manifest,
+        run_dir=run_dir,
+        policy=Policy(llmff_require_inspect=True),
+        timeout_ms=12_000,
+        retry_attempts=2,
+        retry_backoff_ms=250,
+    )
+
+    assert result.exit_code == 0
+    assert len(calls) == 1
+
+
+def test_run_manifest_rejects_stale_inspect_artifact_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _write_inspect_artifact(run_dir, manifest, manifest_hash="old")
+
+    with pytest.raises(InspectPolicyError, match="manifest hash does not match"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=True),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+    assert calls == []
+
+
+def test_run_manifest_rejects_invalid_inspect_artifact_json_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    inspect_path = run_dir / manifest.stem / "llmff-inspect.json"
+    inspect_path.parent.mkdir(parents=True)
+    inspect_path.write_text("{not-json\n", encoding="utf-8")
+
+    with pytest.raises(InspectPolicyError, match="valid JSON"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=True),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+    assert calls == []
+
+
+def test_run_manifest_rejects_inspect_artifact_outside_policy_allowlist(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _write_inspect_artifact(run_dir, manifest)
+
+    with pytest.raises(InspectPolicyError, match="manifest hash is not allowed"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(
+                llmff_require_inspect=True,
+                allowed_manifest_hashes=("different",),
+            ),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+    assert calls == []
+
+
+def test_run_manifest_rejects_inspect_artifact_provider_outside_policy_allowlist(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _write_inspect_artifact(
+        run_dir,
+        manifest,
+        inspect_payload={
+            "manifest": manifest.stem,
+            "network_required": True,
+            "providers": ["anthropic"],
+            "external_calls": [{"kind": "model_provider", "target": "anthropic"}],
+        },
+    )
+
+    with pytest.raises(InspectPolicyError, match="provider is not allowed"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(
+                llmff_require_inspect=True,
+                llmff_allow_network=True,
+                llmff_allowed_providers=("openai",),
+            ),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+    assert calls == []
+
+
+def test_run_manifest_rechecks_inspect_artifact_network_policy_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _write_inspect_artifact(
+        run_dir,
+        manifest,
+        inspect_payload={
+            "manifest": manifest.stem,
+            "network_required": True,
+            "providers": ["openai"],
+            "external_calls": [{"kind": "model_provider", "target": "openai"}],
+        },
+    )
+
+    with pytest.raises(InspectPolicyError, match="policy disallows network"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=True, llmff_allow_network=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+    assert calls == []
 
 
 def test_run_manifest_invokes_subprocess_with_file_backed_streams(
@@ -36,7 +299,7 @@ def test_run_manifest_invokes_subprocess_with_file_backed_streams(
     run_manifest(
         manifest,
         run_dir=run_dir,
-        policy=Policy(llmff_binary="custom-llmff"),
+        policy=Policy(llmff_binary="custom-llmff", llmff_require_inspect=False),
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
@@ -87,7 +350,7 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
     result = run_manifest(
         manifest,
         run_dir=run_dir,
-        policy=Policy(llmff_binary="custom-llmff"),
+        policy=Policy(llmff_binary="custom-llmff", llmff_require_inspect=False),
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
@@ -136,7 +399,7 @@ def test_run_manifest_marks_lifecycle_artifacts_private_under_permissive_umask(
         result = run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -165,7 +428,7 @@ def test_successful_run_returns_exit_code_and_artifact_paths(monkeypatch, tmp_pa
     result = run_manifest(
         manifest,
         run_dir=run_dir,
-        policy=Policy(),
+        policy=Policy(llmff_require_inspect=False),
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
@@ -222,7 +485,7 @@ def test_failed_run_returns_sanitized_last_run_failed_event(
     result = run_manifest(
         manifest,
         run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
-        policy=Policy(),
+        policy=Policy(llmff_require_inspect=False),
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
@@ -247,7 +510,7 @@ def test_python_boundary_timeout_returns_deterministic_failure(
     result = run_manifest(
         manifest,
         run_dir=run_dir,
-        policy=Policy(),
+        policy=Policy(llmff_require_inspect=False),
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
@@ -286,7 +549,7 @@ def test_non_json_event_lines_are_ignored_safely(monkeypatch, tmp_path: Path):
     result = run_manifest(
         manifest,
         run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
-        policy=Policy(),
+        policy=Policy(llmff_require_inspect=False),
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
@@ -313,7 +576,7 @@ def test_run_manifest_rejects_checkpoint_for_different_manifest(tmp_path: Path):
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -343,7 +606,7 @@ def test_run_manifest_rejects_unverifiable_checkpoint(
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -359,7 +622,7 @@ def test_run_manifest_rejects_outputs_outside_run_dir(tmp_path: Path):
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -376,7 +639,7 @@ def test_run_manifest_rejects_checkpoint_outside_run_dir(tmp_path: Path):
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -393,7 +656,7 @@ def test_run_manifest_rejects_checkpoint_path_traversal(tmp_path: Path):
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -418,7 +681,7 @@ def test_run_manifest_rejects_successful_run_missing_declared_output(
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -446,7 +709,7 @@ def test_run_manifest_rejects_secret_in_checkpoint(monkeypatch, tmp_path: Path):
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,
@@ -475,7 +738,7 @@ def test_python_boundary_timeout_scans_partial_artifacts(monkeypatch, tmp_path: 
         run_manifest(
             manifest,
             run_dir=run_dir,
-            policy=Policy(),
+            policy=Policy(llmff_require_inspect=False),
             timeout_ms=12_000,
             retry_attempts=2,
             retry_backoff_ms=250,

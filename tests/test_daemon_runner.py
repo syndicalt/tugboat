@@ -82,6 +82,33 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _write_inspect_artifact(run_dir: Path, manifest: Path) -> None:
+    inspect_dir = run_dir / manifest.stem
+    inspect_dir.mkdir(parents=True, exist_ok=True)
+    manifest_hash = _sha256(manifest)
+    (inspect_dir / "llmff-inspect.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "manifest_path": str(manifest),
+                "manifest_hash": manifest_hash,
+                "network_required": False,
+                "external_calls": [],
+                "inspect": {
+                    "manifest": manifest.stem,
+                    "network_required": False,
+                    "providers": [],
+                    "external_calls": [],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
     trace_dir = tmp_path / "traces"
     trace_dir.mkdir()
@@ -610,6 +637,7 @@ def test_run_daemon_cycle_executes_checkpoint_resume_when_manifest_and_outputs_a
     lifecycle_dir.mkdir(parents=True)
     checkpoint = lifecycle_dir / "checkpoint.json"
     checkpoint.write_text(json.dumps({"manifest_hash": manifest_hash}) + "\n", encoding="utf-8")
+    _write_inspect_artifact(run_dir, manifest)
     output = run_dir / "instruction-index.raw.json"
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(
@@ -679,6 +707,7 @@ def test_run_daemon_cycle_executes_checkpoint_resume_from_checkpoint_metadata_af
     lifecycle_dir.mkdir(parents=True)
     checkpoint = lifecycle_dir / "checkpoint.json"
     output = run_dir / "instruction-index.raw.json"
+    _write_inspect_artifact(run_dir, manifest)
     checkpoint.write_text(
         json.dumps(
             {
