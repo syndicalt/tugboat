@@ -241,10 +241,17 @@ def test_phase_10_operations_docs_exist_with_required_sections_and_commands(
 
     content = doc_path.read_text(encoding="utf-8")
     if relative_path.endswith(".md"):
-        assert content.startswith("# "), f"{relative_path} must start with a markdown title"
+        assert _markdown_body(content).startswith("# "), f"{relative_path} must start with a markdown title"
 
     for section in contract["sections"]:
         assert section in content, f"{relative_path} is missing section {section!r}"
 
     for text in contract["required_text"]:
         assert text in content, f"{relative_path} is missing required text {text!r}"
+
+
+def _markdown_body(content: str) -> str:
+    if not content.startswith("---\n"):
+        return content
+    _, separator, body = content[4:].partition("\n---\n")
+    return body.lstrip() if separator else content

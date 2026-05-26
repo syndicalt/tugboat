@@ -10,6 +10,11 @@ Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+## Project References
+
+- Use [docs/quickstart.md](docs/quickstart.md) for Tugboat CLI setup and the governed proposal loop.
+- Use [docs/architecture.md](docs/architecture.md) for sidecar boundaries, data flow, and authority model.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**

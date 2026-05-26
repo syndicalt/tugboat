@@ -4,6 +4,12 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+## Project Map
+
+- Start with [docs/quickstart.md](docs/quickstart.md) for the CLI workflow and release smoke commands.
+- Use [docs/architecture.md](docs/architecture.md) for Tugboat's sidecar, policy, storage, and `llmff` boundaries.
+- Before promoting a build, follow [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
