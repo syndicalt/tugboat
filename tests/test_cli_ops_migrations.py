@@ -66,3 +66,19 @@ def test_ops_migrate_apply_executes_pending_steps_and_reports_artifact(
             ],
         },
     ]
+
+
+def test_ops_migrate_apply_is_blocked_by_read_only_kill_switch(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert main(["ops", "migrate", "--repo", str(tmp_path), "--apply"]) == 1
+
+    assert "migration blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert not (sidecar / "version.json").exists()
+    assert not (sidecar / "migrations" / "migration-report.json").exists()

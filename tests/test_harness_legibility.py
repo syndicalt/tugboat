@@ -704,6 +704,30 @@ def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path,
     assert (repo / "AGENTS.md").read_text(encoding="utf-8") == original_agents
 
 
+def test_harness_cleanup_cli_is_blocked_by_read_only_kill_switch(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text("# Runbook\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert main(["harness", "cleanup", "--repo", str(repo)]) == 1
+
+    assert "cleanup blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert not (repo / ".sidecar" / "harness-cleanup-candidates.json").exists()
+    assert not (repo / ".sidecar" / "harness-cleanup-proposals").exists()
+    assert not (repo / ".sidecar" / "db.sqlite").exists()
+
+
 def test_harness_cleanup_cli_validates_candidate_bundle_before_writing(
     tmp_path: Path,
     monkeypatch,

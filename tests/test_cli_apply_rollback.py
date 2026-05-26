@@ -225,6 +225,63 @@ def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_p
     )
 
 
+def test_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    run_dir = _candidate_run(repo)
+    (repo / ".sidecar" / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest"]) == 1
+
+    assert "apply blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_auto_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    (repo / ".sidecar" / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 1
+    )
+
+    assert "auto-apply blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
 def test_apply_rejects_dirty_target_before_writing_plan(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

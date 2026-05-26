@@ -74,6 +74,13 @@ from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.vcs import VcsAdapter, VcsStateError
 
 
+def _write_blocked_by_read_only(repo: Path, action: str) -> bool:
+    if not default_kill_switch(repo).is_enabled():
+        return False
+    print(f"{action} blocked: read-only kill switch is enabled")
+    return True
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -334,6 +341,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         policy = load_policy(repo)
         if args.apply:
+            if _write_blocked_by_read_only(repo, "retention"):
+                return 1
             preflight = apply_retention_policy(repo, policy, dry_run=True)
             report_path = _write_retention_report(
                 repo,
@@ -474,6 +483,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "apply":
         repo = Path(args.repo)
+        if _write_blocked_by_read_only(repo, "apply"):
+            return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
         try:
             apply_path = _write_apply_plan(
@@ -497,6 +508,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "auto-apply":
         repo = Path(args.repo)
+        if _write_blocked_by_read_only(repo, "auto-apply"):
+            return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
         try:
             apply_path = _write_apply_plan(
@@ -700,6 +713,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "harness" and args.harness_command == "cleanup":
         repo = Path(args.repo)
+        if _write_blocked_by_read_only(repo, "cleanup"):
+            return 1
         report = generate_harness_report(repo)
         _persist_harness_report(repo, report)
         candidates = generate_cleanup_candidates(repo)
@@ -783,6 +798,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ops" and args.ops_command == "migrate":
         repo = Path(args.repo)
+        if args.apply and _write_blocked_by_read_only(repo, "migration"):
+            return 1
         plan = execute_migration_plan(repo) if args.apply else dry_run_migration_plan(repo)
         print(f"migration_mode: {'apply' if args.apply else 'dry-run'}")
         print(f"current_version: {plan.current_version}")

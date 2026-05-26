@@ -231,6 +231,33 @@ retention:
     assert not (run_dir / "episode-audit" / "llmff-events.jsonl").exists()
 
 
+def test_retention_cli_apply_is_blocked_by_read_only_kill_switch(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+  checkpoints_days: 7
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (policy_dir / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    trace = run_dir / "trace-redacted.jsonl"
+    _touch_old(trace, days_old=15)
+
+    assert main(["retention", "--repo", str(tmp_path), "--apply"]) == 1
+
+    assert "retention blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert trace.exists()
+    assert not (tmp_path / ".sidecar" / "ops" / "retention" / "retention-report.json").exists()
+
+
 def test_retention_cli_apply_preflights_report_before_deleting(
     tmp_path: Path,
     monkeypatch,
