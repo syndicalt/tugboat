@@ -296,6 +296,79 @@ def test_apply_rejects_prohibited_risk_class(tmp_path: Path):
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_sidecar_policy_self_apply_even_when_stored_gate_passed(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir(parents=True)
+    original_policy = (
+        "version: 1\n"
+        "mode: proposal_only\n"
+        "instruction_files:\n"
+        "  - path: .sidecar/policy.yaml\n"
+        "    kind: repo_policy\n"
+        "    precedence: 90\n"
+        "    protected: true\n"
+        "auto_apply:\n"
+        "  enabled: false\n"
+    )
+    policy_path.write_text(original_policy, encoding="utf-8")
+    run_dir = repo / ".sidecar" / "runs" / "20260525T000000000001Z"
+    run_dir.mkdir(parents=True)
+    diff = (
+        "--- a/.sidecar/policy.yaml\n"
+        "+++ b/.sidecar/policy.yaml\n"
+        "@@\n"
+        "-  enabled: false\n"
+        "+  enabled: true\n"
+    )
+    candidate = {
+        "schema_version": 1,
+        "audit_id": 1,
+        "candidate_id": 8,
+        "base_file": ".sidecar/policy.yaml",
+        "base_hash": _hash(policy_path),
+        "diff_hash": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+        "risk_class": "A",
+        "rationale": "Simulate a misclassified sidecar approval policy edit.",
+        "sources": [{"source_id": "audit:policy", "trusted": True}],
+    }
+    (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
+    (run_dir / "candidate.json").write_text(
+        json.dumps(candidate, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"allowed": True, "reasons": []}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 8,
+                "suite_id": "all",
+                "passed": True,
+                "trigger_score": 0.80,
+                "held_out_score": 0.90,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": 0},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert policy_path.read_text(encoding="utf-8") == original_policy
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

@@ -17,6 +17,7 @@ DENIAL_REASON_ORDER = (
     "base_file_outside_repo",
     "base_file_not_allowed",
     "pending_eval_definition_edit",
+    "approval_policy_self_apply",
     "higher_priority_contradiction",
     "max_changed_lines_exceeded",
     "risk_class_changed_lines_exceeded",
@@ -183,6 +184,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("base_file_not_allowed")
     if _is_pending_eval_definition_edit(candidate.base_file, candidate):
         found_reasons.add("pending_eval_definition_edit")
+    if _is_sidecar_approval_policy(base_path, repo_root):
+        found_reasons.add("approval_policy_self_apply")
     if _has_higher_priority_contradiction(repo, policy, candidate):
         found_reasons.add("higher_priority_contradiction")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
@@ -530,6 +533,10 @@ def _is_pending_eval_definition_edit(base_file: str, candidate: CandidatePatch) 
         fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
         for pattern in candidate.pending_audit_eval_definition_paths
     )
+
+
+def _is_sidecar_approval_policy(base_path: Path, repo_root: Path) -> bool:
+    return base_path == (repo_root / ".sidecar" / "policy.yaml").resolve()
 
 
 def _has_higher_priority_contradiction(

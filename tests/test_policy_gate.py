@@ -729,6 +729,86 @@ def test_policy_gate_rejects_spec_class_d_examples_as_prohibited(
     assert decision.reasons == ("prohibited_risk_class",)
 
 
+def test_policy_gate_rejects_sidecar_approval_policy_self_apply_by_path(
+    tmp_path: Path,
+):
+    policy_path = tmp_path / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir()
+    policy_path.write_text(
+        "version: 1\nmode: proposal_only\nauto_apply:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    diff = (
+        "--- a/.sidecar/policy.yaml\n"
+        "+++ b/.sidecar/policy.yaml\n"
+        "@@\n"
+        "-  enabled: false\n"
+        "+  enabled: true\n"
+    )
+    candidate = _candidate(
+        base_file=".sidecar/policy.yaml",
+        base_hash=CandidatePatch.hash_file(policy_path),
+        diff=diff,
+        risk_class="A",
+    )
+    policy = Policy(
+        instruction_files=(
+            InstructionFilePolicy(
+                path=".sidecar/policy.yaml",
+                kind="repo_policy",
+                precedence=90,
+                protected=True,
+            ),
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, policy, candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("approval_policy_self_apply",)
+    assert decision.auto_apply_eligible is False
+
+
+def test_policy_gate_rejects_sidecar_approval_policy_self_apply_by_resolved_path(
+    tmp_path: Path,
+):
+    (tmp_path / "docs").mkdir()
+    policy_path = tmp_path / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir()
+    policy_path.write_text(
+        "version: 1\nmode: proposal_only\nauto_apply:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    diff = (
+        "--- a/docs/../.sidecar/policy.yaml\n"
+        "+++ b/docs/../.sidecar/policy.yaml\n"
+        "@@\n"
+        "-  enabled: false\n"
+        "+  enabled: true\n"
+    )
+    candidate = _candidate(
+        base_file="docs/../.sidecar/policy.yaml",
+        base_hash=CandidatePatch.hash_file(policy_path),
+        diff=diff,
+        risk_class="A",
+    )
+    policy = Policy(
+        instruction_files=(
+            InstructionFilePolicy(
+                path="docs/../.sidecar/policy.yaml",
+                kind="repo_policy",
+                precedence=90,
+                protected=True,
+            ),
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, policy, candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("approval_policy_self_apply",)
+
+
 def test_policy_gate_rejects_pending_candidate_eval_definition_edits(tmp_path: Path):
     eval_file = tmp_path / "tests" / "fixtures" / "evals" / "regression.json"
     eval_file.parent.mkdir(parents=True)
