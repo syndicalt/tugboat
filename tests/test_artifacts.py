@@ -373,6 +373,7 @@ def test_validate_optimizer_memory_artifact_accepts_current_schema():
             "schema_version": 1,
             "rejected_edits": [
                 {
+                    "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
                     "semantic_fingerprint": "abc123",
                     "rejection_reason": "held_out_not_improved",
                     "source_refs": ["audit:1"],
@@ -388,6 +389,25 @@ def test_validate_optimizer_memory_artifact_accepts_current_schema():
             ],
         },
     )
+
+
+def test_validate_optimizer_memory_artifact_rejects_unknown_suppression_signal():
+    with pytest.raises(ArtifactValidationError, match="future_proposal_suppression_signal"):
+        validate_json_artifact(
+            "optimizer-memory.json",
+            {
+                "schema_version": 1,
+                "rejected_edits": [
+                    {
+                        "future_proposal_suppression_signal": "unknown",
+                        "semantic_fingerprint": "abc123",
+                        "rejection_reason": "held_out_not_improved",
+                        "source_refs": ["audit:1"],
+                    }
+                ],
+                "slow_update_notes": [],
+            },
+        )
 
 
 def test_validate_optimization_summary_artifact_requires_schema_version():

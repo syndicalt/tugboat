@@ -316,6 +316,7 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
         "schema_version": SCHEMA_VERSION,
         "rejected_edits": [
             {
+                "future_proposal_suppression_signal": record.future_proposal_suppression_signal,
                 "semantic_fingerprint": record.semantic_fingerprint,
                 "rejection_reason": record.rejection_reason,
                 "source_refs": list(record.source_refs),

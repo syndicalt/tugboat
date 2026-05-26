@@ -13,6 +13,7 @@ from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
+from tugboat.optimization import REJECTED_EDIT_SUPPRESSION_SIGNAL
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef
 
@@ -331,6 +332,7 @@ def _record_rejected_candidate_memory(
             memory_type="rejected_edit",
             key=fingerprint,
             payload={
+                "future_proposal_suppression_signal": REJECTED_EDIT_SUPPRESSION_SIGNAL,
                 "semantic_fingerprint": fingerprint,
                 "rejection_reason": reason,
                 "source_refs": source_refs,

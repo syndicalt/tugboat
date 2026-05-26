@@ -1847,6 +1847,7 @@ llmff:
         "schema_version": 1,
         "rejected_edits": [
             {
+                "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
                 "rejection_reason": "held_out_not_improved",
                 "semantic_fingerprint": "fingerprint-1",
                 "source_refs": ["audit:1"],
@@ -2236,6 +2237,7 @@ llmff:
     assert rejected_memory[0] == "rejected_edit"
     assert len(rejected_memory[1]) == 64
     assert json.loads(rejected_memory[2]) == {
+        "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
         "rejection_reason": "reject",
         "semantic_fingerprint": rejected_memory[1],
         "source_refs": ["trace:episode-7", "drift:cluster-1"],

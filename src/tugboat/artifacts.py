@@ -591,11 +591,16 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
+                        "future_proposal_suppression_signal",
                         "semantic_fingerprint",
                         "rejection_reason",
                         "source_refs",
                     ],
                     "properties": {
+                        "future_proposal_suppression_signal": {
+                            "type": "string",
+                            "const": "suppress_matching_bounded_edit_fingerprint",
+                        },
                         "semantic_fingerprint": {"type": "string"},
                         "rejection_reason": {"type": "string"},
                         "source_refs": {"type": "array", "items": {"type": "string"}},
@@ -1400,7 +1405,9 @@ def _validate_schema_value(
     if expected_type is not None and not _matches_json_schema_type(value, expected_type):
         raise ArtifactValidationError(f"{artifact_name} field has wrong type: {field_path}")
     if "const" in schema and value != schema["const"]:
-        raise ArtifactValidationError(f"{artifact_name} has unsupported schema_version")
+        if field_path == "schema_version":
+            raise ArtifactValidationError(f"{artifact_name} has unsupported schema_version")
+        raise ArtifactValidationError(f"{artifact_name} field has unsupported value: {field_path}")
     if "enum" in schema:
         allowed_values = schema["enum"]
         if not isinstance(allowed_values, list):

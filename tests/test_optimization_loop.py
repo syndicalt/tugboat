@@ -221,6 +221,28 @@ def test_rejected_edit_memory_suppresses_later_matching_candidates():
     assert decision.reasons == ("suppressed_by_rejected_edit_memory",)
 
 
+def test_old_rejected_edit_memory_rows_load_with_default_suppression_signal(tmp_path):
+    repo = tmp_path
+    fingerprint = BoundedEdit("delete", "CODEX.md", "Approval", 1, 1).fingerprint
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "rejection_reason": "held_out_not_improved",
+                "semantic_fingerprint": fingerprint,
+                "source_refs": ["ev_1"],
+            },
+        )
+        loaded = OptimizationMemory.load(store, repo=repo)
+
+    assert loaded.rejected_edits[fingerprint].future_proposal_suppression_signal == (
+        "suppress_matching_bounded_edit_fingerprint"
+    )
+
+
 def test_fixture_benchmark_accepts_one_improvement_and_rejects_one_harmful_edit():
     run = OptimizationRun(
         baseline=ScoreSet(0.5, 0.0, True),
@@ -334,6 +356,7 @@ def test_rejected_edit_memory_persists_to_optimizer_memory_table_with_audit_link
     assert row[0] == "rejected_edit"
     assert row[1] == candidate.edits[0].fingerprint
     assert json.loads(row[2]) == {
+        "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
         "rejection_reason": "held_out_not_improved",
         "semantic_fingerprint": candidate.edits[0].fingerprint,
         "source_refs": ["ev_1"],

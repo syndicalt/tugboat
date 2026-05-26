@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     from tugboat.db import Store
 
 
+REJECTED_EDIT_SUPPRESSION_SIGNAL = "suppress_matching_bounded_edit_fingerprint"
+
+
 @dataclass(frozen=True)
 class ScoreSet:
     behavior: float
@@ -72,6 +75,7 @@ class RejectedEditRecord:
     semantic_fingerprint: str
     rejection_reason: str
     source_refs: tuple[str, ...]
+    future_proposal_suppression_signal: str = REJECTED_EDIT_SUPPRESSION_SIGNAL
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,7 @@ class OptimizationMemory:
                 semantic_fingerprint=edit.fingerprint,
                 rejection_reason=reason,
                 source_refs=source_refs,
+                future_proposal_suppression_signal=REJECTED_EDIT_SUPPRESSION_SIGNAL,
             )
 
     def suppresses(self, candidate: OptimizationCandidate) -> bool:
@@ -119,6 +124,7 @@ class OptimizationMemory:
         repo_path = str(repo)
         for fingerprint, record in sorted(self.rejected_edits.items()):
             payload = {
+                "future_proposal_suppression_signal": record.future_proposal_suppression_signal,
                 "rejection_reason": record.rejection_reason,
                 "semantic_fingerprint": record.semantic_fingerprint,
                 "source_refs": list(record.source_refs),
@@ -170,6 +176,12 @@ class OptimizationMemory:
                     semantic_fingerprint=str(payload["semantic_fingerprint"]),
                     rejection_reason=str(payload["rejection_reason"]),
                     source_refs=tuple(str(ref) for ref in source_refs),
+                    future_proposal_suppression_signal=str(
+                        payload.get(
+                            "future_proposal_suppression_signal",
+                            REJECTED_EDIT_SUPPRESSION_SIGNAL,
+                        )
+                    ),
                 )
             elif memory_type == "slow_update":
                 memory.slow_update_notes.append(str(payload["note"]))
