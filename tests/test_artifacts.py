@@ -221,6 +221,24 @@ def test_validate_candidate_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_candidate_raw_artifact_rejects_empty_sources():
+    with pytest.raises(ArtifactValidationError, match="sources"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": "CODEX.md",
+                "base_hash": "abc123",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [],
+            },
+        )
+
+
 def test_validate_candidate_raw_artifact_requires_proposal_metadata():
     with pytest.raises(ArtifactValidationError, match="base_hash"):
         validate_json_artifact(
@@ -798,6 +816,26 @@ def test_validate_candidate_artifact_rejects_malformed_sources():
                 "rationale": "because",
                 "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [{"source_id": 123, "trusted": "yes"}],
+            },
+        )
+
+
+def test_validate_candidate_artifact_rejects_empty_sources():
+    with pytest.raises(ArtifactValidationError, match="sources"):
+        validate_json_artifact(
+            "candidate.json",
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "def",
+                "expected_behavior_change": "Agents preserve regression-test guidance.",
+                "evals_required": ["governance-regression"],
+                "risk_class": "instruction_clarification",
+                "rationale": "because",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [],
             },
         )
 

@@ -205,6 +205,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "rollback_plan": {"type": "array", "items": {"type": "string"}},
             "sources": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "required": ["source_id", "trusted"],
@@ -268,6 +269,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "rollback_plan": {"type": "array", "items": {"type": "string"}},
             "sources": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "required": ["source_id", "trusted"],
