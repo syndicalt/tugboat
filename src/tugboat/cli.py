@@ -69,6 +69,7 @@ from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.report.service import write_report
+from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.vcs import VcsAdapter, VcsStateError
 
 
@@ -911,6 +912,14 @@ def _write_release_artifact_manifest(
             raise FileNotFoundError(f"evidence does not exist: {evidence_path}")
         if not resolved_evidence.is_file():
             raise ValueError(f"evidence must be a file: {evidence_path}")
+        try:
+            scan_path(resolved_evidence)
+        except SecretScanError as error:
+            findings = ", ".join(
+                f"{Path(finding.path).name}:{finding.line_number}:{finding.kind}"
+                for finding in error.findings
+            )
+            raise ValueError(f"retained evidence contains secret: {findings}") from error
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
 
     payload = {
