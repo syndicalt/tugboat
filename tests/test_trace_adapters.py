@@ -152,6 +152,45 @@ def test_ingest_codex_session_maps_custom_tool_response_items(tmp_path: Path):
     }
 
 
+def test_ingest_codex_session_derives_diff_evidence_from_apply_patch_call(
+    tmp_path: Path,
+):
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: CODEX.md\n"
+        "@@\n"
+        "-Use tests.\n"
+        "+Use regression tests.\n"
+        "*** End Patch\n"
+    )
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        json.dumps(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "call-1",
+                    "name": "apply_patch",
+                    "input": patch,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_codex_session(session)
+
+    assert episode.diffs[0].payload == {
+        "type": "diff",
+        "path": "CODEX.md",
+        "diff": patch,
+        "source_tool": "apply_patch",
+        "call_id": "call-1",
+    }
+
+
 def test_ingest_codex_session_maps_session_meta_base_instructions(tmp_path: Path):
     session = tmp_path / "codex-session.jsonl"
     session.write_text(
@@ -280,6 +319,46 @@ def test_ingest_claude_transcript_maps_jsonl_content_blocks(tmp_path: Path):
         "call_id": "toolu_1",
         "output": "1 failed",
         "is_error": True,
+    }
+
+
+def test_ingest_claude_transcript_derives_diff_evidence_from_edit_tool(
+    tmp_path: Path,
+):
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_edit",
+                            "name": "Edit",
+                            "input": {
+                                "file_path": "CODEX.md",
+                                "old_string": "Use tests.",
+                                "new_string": "Use regression tests.",
+                            },
+                        }
+                    ],
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_claude_transcript(transcript)
+
+    assert episode.diffs[0].payload == {
+        "type": "diff",
+        "path": "CODEX.md",
+        "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n-Use tests.\n+Use regression tests.\n",
+        "source_tool": "Edit",
+        "call_id": "toolu_edit",
     }
 
 

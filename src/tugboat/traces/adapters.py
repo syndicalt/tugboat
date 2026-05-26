@@ -28,9 +28,7 @@ def ingest_codex_session_bundle(path: Path) -> TraceBundle:
             if event is not None:
                 events.append(event)
         elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
-            event = _normalize_codex_response_item(row["payload"], tool_names_by_call_id)
-            if event is not None:
-                events.append(event)
+            events.extend(_normalize_codex_response_item(row["payload"], tool_names_by_call_id))
     return _bundle_from_payloads(path, events)
 
 
@@ -198,36 +196,41 @@ def _normalize_codex_event(row: dict[str, Any]) -> dict[str, Any]:
 def _normalize_codex_response_item(
     payload: dict[str, Any],
     tool_names_by_call_id: dict[str, str],
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     item_type = payload.get("type")
     if item_type == "message":
         role = payload.get("role")
         content = _codex_content_text(payload.get("content"))
         if role == "user":
-            return {"type": "user_request", "content": content}
+            return [{"type": "user_request", "content": content}]
         if role == "assistant":
-            return {"type": "final_answer", "content": content}
+            return [{"type": "final_answer", "content": content}]
     if item_type in {"function_call", "custom_tool_call"}:
         call_id = str(payload.get("call_id", ""))
         tool = str(payload.get("name", "unknown"))
         if call_id:
             tool_names_by_call_id[call_id] = tool
         arguments = payload.get("arguments", payload.get("input", ""))
-        return {
+        events = [{
             "type": "tool_call",
             "tool": tool,
             "call_id": call_id,
             "arguments": str(arguments),
-        }
+        }]
+        if tool == "apply_patch":
+            diff_event = _codex_apply_patch_diff_event(str(arguments), call_id=call_id)
+            if diff_event is not None:
+                events.append(diff_event)
+        return events
     if item_type in {"function_call_output", "custom_tool_call_output"}:
         call_id = str(payload.get("call_id", ""))
-        return {
+        return [{
             "type": "tool_result",
             "tool": tool_names_by_call_id.get(call_id, "unknown"),
             "call_id": call_id,
             "output": str(payload.get("output", "")),
-        }
-    return None
+        }]
+    return []
 
 
 def _normalize_codex_session_meta(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -278,6 +281,7 @@ def _normalize_claude_assistant_content(
         elif block_type == "tool_use":
             tool_id = str(block.get("id", ""))
             tool = str(block.get("name", "unknown"))
+            tool_input = block.get("input", {})
             if tool_id:
                 tool_names_by_id[tool_id] = tool
             events.append(
@@ -285,9 +289,12 @@ def _normalize_claude_assistant_content(
                     "type": "tool_call",
                     "tool": tool,
                     "call_id": tool_id,
-                    "arguments": _compact_json(block.get("input", {})),
+                    "arguments": _compact_json(tool_input),
                 }
             )
+            diff_event = _claude_edit_diff_event(tool, tool_input, call_id=tool_id)
+            if diff_event is not None:
+                events.append(diff_event)
     if text_parts:
         events.insert(0, {"type": "final_answer", "content": "\n".join(text_parts)})
     return events
@@ -341,6 +348,79 @@ def _codex_content_text(content: object) -> str:
 
 def _compact_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _codex_apply_patch_diff_event(patch: str, *, call_id: str) -> dict[str, Any] | None:
+    path = _apply_patch_target_path(patch)
+    if path is None:
+        return None
+    return {
+        "type": "diff",
+        "path": path,
+        "diff": patch,
+        "source_tool": "apply_patch",
+        "call_id": call_id,
+    }
+
+
+def _apply_patch_target_path(patch: str) -> str | None:
+    for line in patch.splitlines():
+        for marker in (
+            "*** Update File: ",
+            "*** Add File: ",
+            "*** Delete File: ",
+        ):
+            if line.startswith(marker):
+                return line.removeprefix(marker).strip()
+    return None
+
+
+def _claude_edit_diff_event(tool: str, tool_input: object, *, call_id: str) -> dict[str, Any] | None:
+    if tool not in {"Edit", "MultiEdit"} or not isinstance(tool_input, dict):
+        return None
+    file_path = tool_input.get("file_path")
+    if not isinstance(file_path, str) or not file_path:
+        return None
+    if tool == "Edit":
+        old_string = tool_input.get("old_string")
+        new_string = tool_input.get("new_string")
+        if not isinstance(old_string, str) or not isinstance(new_string, str):
+            return None
+        diff = _string_replacement_diff(file_path, old_string, new_string)
+    else:
+        edits = tool_input.get("edits")
+        if not isinstance(edits, list):
+            return None
+        hunks = []
+        for edit in edits:
+            if not isinstance(edit, dict):
+                continue
+            old_string = edit.get("old_string")
+            new_string = edit.get("new_string")
+            if isinstance(old_string, str) and isinstance(new_string, str):
+                hunks.append(_diff_hunk(old_string, new_string))
+        if not hunks:
+            return None
+        diff = f"--- a/{file_path}\n+++ b/{file_path}\n" + "".join(hunks)
+    return {
+        "type": "diff",
+        "path": file_path,
+        "diff": diff,
+        "source_tool": tool,
+        "call_id": call_id,
+    }
+
+
+def _string_replacement_diff(path: str, old_string: str, new_string: str) -> str:
+    return f"--- a/{path}\n+++ b/{path}\n{_diff_hunk(old_string, new_string)}"
+
+
+def _diff_hunk(old_string: str, new_string: str) -> str:
+    old_lines = old_string.splitlines() or [old_string]
+    new_lines = new_string.splitlines() or [new_string]
+    return "@@\n" + "".join(f"-{line}\n" for line in old_lines) + "".join(
+        f"+{line}\n" for line in new_lines
+    )
 
 
 def _bundle_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> TraceBundle:
