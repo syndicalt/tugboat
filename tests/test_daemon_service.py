@@ -299,7 +299,7 @@ def test_daemon_unix_socket_serves_status_and_exits_after_bounded_requests(tmp_p
 def test_daemon_unix_socket_rejects_path_outside_repo_before_bind(tmp_path: Path):
     outside_socket = tmp_path.parent / f"{tmp_path.name}-outside.sock"
 
-    with pytest.raises(ValueError, match="socket_path must resolve inside repo"):
+    with pytest.raises(ValueError, match="socket_path must resolve inside repo sidecar"):
         serve_daemon_socket(
             tmp_path,
             socket_path=outside_socket,
@@ -312,6 +312,70 @@ def test_daemon_unix_socket_rejects_path_outside_repo_before_bind(tmp_path: Path
         )
 
     assert not outside_socket.exists()
+
+
+def test_daemon_unix_socket_rejects_repo_file_path_before_unlink(tmp_path: Path):
+    instruction_file = tmp_path / "CODEX.md"
+    instruction_file.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="socket_path must resolve inside repo sidecar"):
+        serve_daemon_socket(
+            tmp_path,
+            socket_path=instruction_file,
+            config=DaemonRunConfig(
+                worker_id="socket-worker",
+                lease_duration=timedelta(seconds=30),
+                now=_at(10),
+            ),
+            max_requests=0,
+        )
+
+    assert instruction_file.read_text(encoding="utf-8") == "# Rules\n\nUse tests.\n"
+
+
+def test_daemon_unix_socket_rejects_symlinked_sidecar_before_unlink(
+    tmp_path: Path,
+):
+    instruction_file = tmp_path / "CODEX.md"
+    instruction_file.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (tmp_path / ".sidecar").symlink_to(".")
+
+    with pytest.raises(ValueError, match="socket_path must resolve inside repo sidecar"):
+        serve_daemon_socket(
+            tmp_path,
+            socket_path=tmp_path / ".sidecar" / "CODEX.md",
+            config=DaemonRunConfig(
+                worker_id="socket-worker",
+                lease_duration=timedelta(seconds=30),
+                now=_at(10),
+            ),
+            max_requests=0,
+        )
+
+    assert instruction_file.read_text(encoding="utf-8") == "# Rules\n\nUse tests.\n"
+
+
+def test_daemon_unix_socket_rejects_sidecar_symlink_outside_repo(
+    tmp_path: Path,
+):
+    external_sidecar = tmp_path.parent / f"{tmp_path.name}-external-sidecar"
+    external_sidecar.mkdir()
+    (tmp_path / ".sidecar").symlink_to(external_sidecar)
+    external_socket = external_sidecar / "daemon.sock"
+
+    with pytest.raises(ValueError, match="socket_path must resolve inside repo sidecar"):
+        serve_daemon_socket(
+            tmp_path,
+            socket_path=tmp_path / ".sidecar" / "daemon.sock",
+            config=DaemonRunConfig(
+                worker_id="socket-worker",
+                lease_duration=timedelta(seconds=30),
+                now=_at(10),
+            ),
+            max_requests=0,
+        )
+
+    assert not external_socket.exists()
 
 
 def test_daemon_serve_cli_rejects_path_outside_repo_without_binding(
@@ -334,7 +398,9 @@ def test_daemon_serve_cli_rejects_path_outside_repo_without_binding(
     )
 
     assert exit_code == 1
-    assert capsys.readouterr().out == "daemon serve blocked: socket_path must resolve inside repo\n"
+    assert capsys.readouterr().out == (
+        "daemon serve blocked: socket_path must resolve inside repo sidecar\n"
+    )
     assert not outside_socket.exists()
 
 

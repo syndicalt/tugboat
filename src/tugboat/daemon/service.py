@@ -89,7 +89,7 @@ def serve_daemon_socket(
 ) -> dict[str, Any]:
     repo = repo.resolve()
     socket_path = socket_path.expanduser().resolve()
-    socket_ref = _repo_relative_socket_path(repo, socket_path)
+    socket_ref = _sidecar_relative_socket_path(repo, socket_path)
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     socket_path.unlink(missing_ok=True)
     requests_served = 0
@@ -143,9 +143,13 @@ def _handle_socket_request(
     return {"error": f"unknown daemon command: {command}"}
 
 
-def _repo_relative_socket_path(repo: Path, socket_path: Path) -> str:
-    if not socket_path.is_relative_to(repo):
-        raise ValueError("socket_path must resolve inside repo")
+def _sidecar_relative_socket_path(repo: Path, socket_path: Path) -> str:
+    sidecar_root = repo / ".sidecar"
+    if sidecar_root.is_symlink():
+        raise ValueError("socket_path must resolve inside repo sidecar")
+    sidecar_root = sidecar_root.resolve()
+    if not socket_path.is_relative_to(sidecar_root):
+        raise ValueError("socket_path must resolve inside repo sidecar")
     return socket_path.relative_to(repo).as_posix()
 
 
