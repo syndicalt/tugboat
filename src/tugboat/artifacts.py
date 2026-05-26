@@ -822,9 +822,31 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "candidates"],
+        "required": ["schema_version", "structural_eval", "candidates"],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "structural_eval": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "suite_id",
+                    "runner",
+                    "passed",
+                    "candidate_count",
+                    "evaluated_candidates",
+                    "candidate_hashes",
+                    "findings",
+                ],
+                "properties": {
+                    "suite_id": {"type": "string", "const": "structural"},
+                    "runner": {"type": "string", "const": "harness-cleanup-structural"},
+                    "passed": {"type": "boolean"},
+                    "candidate_count": {"type": "integer"},
+                    "evaluated_candidates": {"type": "array", "items": {"type": "string"}},
+                    "candidate_hashes": {"type": "object"},
+                    "findings": {"type": "array", "items": {"type": "string"}},
+                },
+            },
             "candidates": {
                 "type": "array",
                 "items": {

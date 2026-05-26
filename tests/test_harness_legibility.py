@@ -585,6 +585,22 @@ def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path,
     assert f"cleanup candidates: {bundle_path}" in output
     assert payload == {
         "schema_version": 1,
+        "structural_eval": {
+            "suite_id": "structural",
+            "runner": "harness-cleanup-structural",
+            "passed": True,
+            "candidate_count": 2,
+            "evaluated_candidates": ["harness-cleanup-1", "harness-cleanup-2"],
+            "candidate_hashes": {
+                "harness-cleanup-1": payload["structural_eval"]["candidate_hashes"][
+                    "harness-cleanup-1"
+                ],
+                "harness-cleanup-2": payload["structural_eval"]["candidate_hashes"][
+                    "harness-cleanup-2"
+                ],
+            },
+            "findings": [],
+        },
         "candidates": [
             {
                 "candidate_id": "harness-cleanup-1",
@@ -607,6 +623,10 @@ def test_harness_cleanup_cli_writes_review_only_candidate_bundle(tmp_path: Path,
         ],
     }
     assert not (repo / "CODEX.md").exists()
+    assert all(
+        len(digest) == 64
+        for digest in payload["structural_eval"]["candidate_hashes"].values()
+    )
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert connection.execute(
             """
@@ -638,3 +658,42 @@ def test_harness_cleanup_cli_validates_candidate_bundle_before_writing(
 
     assert main(["harness", "cleanup", "--repo", str(tmp_path)]) == 1
     assert not (tmp_path / ".sidecar" / "harness-cleanup-candidates.json").exists()
+
+
+def test_harness_cleanup_cli_blocks_when_structural_eval_fails(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text("# Runbook\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+
+    def failing_structural_eval(repo: Path, candidates: list[object]) -> dict[str, object]:
+        return {
+            "suite_id": "structural",
+            "runner": "harness-cleanup-structural",
+            "passed": False,
+            "candidate_count": len(candidates),
+            "evaluated_candidates": ["harness-cleanup-1", "harness-cleanup-2"],
+            "candidate_hashes": {
+                "harness-cleanup-1": "a" * 64,
+                "harness-cleanup-2": "b" * 64,
+            },
+            "findings": ["harness-cleanup-1: structural eval failed"],
+        }
+
+    monkeypatch.setattr(
+        "tugboat.cli.run_cleanup_structural_eval",
+        failing_structural_eval,
+    )
+
+    assert main(["harness", "cleanup", "--repo", str(repo)]) == 1
+
+    assert "cleanup candidates blocked: structural eval failed" in capsys.readouterr().out
+    assert not (repo / ".sidecar" / "harness-cleanup-candidates.json").exists()

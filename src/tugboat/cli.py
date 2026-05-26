@@ -674,10 +674,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = generate_harness_report(repo)
         _persist_harness_report(repo, report)
         candidates = generate_cleanup_candidates(repo)
+        structural_eval = run_cleanup_structural_eval(repo, candidates)
+        if not structural_eval["passed"]:
+            print("cleanup candidates blocked: structural eval failed")
+            return 1
         path = sidecar_dir(repo) / "harness-cleanup-candidates.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema_version": SCHEMA_VERSION,
+            "structural_eval": structural_eval,
             "candidates": [candidate.to_json_dict() for candidate in candidates],
         }
         try:
@@ -768,6 +773,37 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+def run_cleanup_structural_eval(repo: Path, candidates: Sequence[object]) -> dict[str, object]:
+    candidate_ids: list[str] = []
+    candidate_hashes: dict[str, str] = {}
+    findings: list[str] = []
+    for index, candidate in enumerate(candidates):
+        candidate_payload = candidate.to_json_dict()
+        candidate_id = str(candidate_payload.get("candidate_id", f"candidate-{index + 1}"))
+        candidate_ids.append(candidate_id)
+        encoded_candidate = json.dumps(candidate_payload, sort_keys=True).encode("utf-8")
+        candidate_hashes[candidate_id] = hashlib.sha256(encoded_candidate).hexdigest()
+        if candidate_payload.get("auto_apply") is not False:
+            findings.append(f"{candidate_id}: cleanup candidates must remain review-only")
+        if candidate_payload.get("risk_class") != "review_required":
+            findings.append(f"{candidate_id}: cleanup candidates must be review_required")
+        eval_suites = candidate_payload.get("required_eval_suites", [])
+        if not isinstance(eval_suites, list) or "structural" not in eval_suites:
+            findings.append(f"{candidate_id}: structural eval suite is required")
+        source_findings = candidate_payload.get("source_findings", [])
+        if not isinstance(source_findings, list) or not source_findings:
+            findings.append(f"{candidate_id}: source findings are required")
+    return {
+        "suite_id": "structural",
+        "runner": "harness-cleanup-structural",
+        "passed": not findings,
+        "candidate_count": len(candidates),
+        "evaluated_candidates": candidate_ids,
+        "candidate_hashes": candidate_hashes,
+        "findings": findings,
+    }
 
 
 def _write_ops_command_bundle(path: Path, bundle: dict[str, object]) -> None:

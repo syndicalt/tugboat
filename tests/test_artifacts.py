@@ -569,6 +569,15 @@ def test_validate_harness_cleanup_candidates_artifact_accepts_current_schema():
         "harness-cleanup-candidates.json",
         {
             "schema_version": 1,
+            "structural_eval": {
+                "suite_id": "structural",
+                "runner": "harness-cleanup-structural",
+                "passed": True,
+                "candidate_count": 1,
+                "evaluated_candidates": ["harness-cleanup-1"],
+                "candidate_hashes": {"harness-cleanup-1": "a" * 64},
+                "findings": [],
+            },
             "candidates": [
                 {
                     "candidate_id": "harness-cleanup-1",
@@ -589,6 +598,15 @@ def test_validate_harness_cleanup_candidates_rejects_auto_apply_candidate():
             "harness-cleanup-candidates.json",
             {
                 "schema_version": 1,
+                "structural_eval": {
+                    "suite_id": "structural",
+                    "runner": "harness-cleanup-structural",
+                    "passed": False,
+                    "candidate_count": 1,
+                    "evaluated_candidates": ["harness-cleanup-1"],
+                    "candidate_hashes": {"harness-cleanup-1": "a" * 64},
+                    "findings": ["harness-cleanup-1: cleanup candidates must remain review-only"],
+                },
                 "candidates": [
                     {
                         "candidate_id": "harness-cleanup-1",
