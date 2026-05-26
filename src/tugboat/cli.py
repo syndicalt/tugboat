@@ -67,6 +67,7 @@ from tugboat.optimization import (
 )
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
+from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.report.service import write_report
 from tugboat.security.secrets import SecretScanError, scan_path
@@ -193,6 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
     report = subcommands.add_parser("report")
     report.add_argument("--repo", required=True)
     report.add_argument("--run", required=True)
+
+    inspect_decision = subcommands.add_parser("inspect-decision")
+    inspect_decision.add_argument("--repo", required=True)
+    inspect_decision.add_argument("--decision", required=True)
 
     harness = subcommands.add_parser("harness")
     harness_subcommands = harness.add_subparsers(dest="harness_command", required=True)
@@ -642,6 +647,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             eval_report_path=run_dir / "eval-report.json",
         )
         print(f"report: {report_path}")
+        return 0
+
+    if args.command == "inspect-decision":
+        repo = Path(args.repo)
+        try:
+            trace_path = write_decision_trace(repo, args.decision)
+        except (FileNotFoundError, KeyError, ValueError, SecretScanError) as error:
+            print(f"inspect decision blocked: {error}")
+            return 1
+        print(f"decision_trace: {trace_path}")
         return 0
 
     if args.command == "harness" and args.harness_command == "check":

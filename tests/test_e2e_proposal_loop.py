@@ -25,8 +25,13 @@ if args[:1] == ["run"]:
     events = Path(args[args.index("--events") + 1])
     checkpoint = Path(args[args.index("--checkpoint") + 1])
     outputs = {}
+    inputs = {}
     index = 0
     while index < len(args):
+        if args[index] == "--input":
+            inputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
         if args[index] == "--output":
             outputs[args[index + 1]] = Path(args[index + 2])
             index += 3
@@ -40,15 +45,24 @@ if args[:1] == ["run"]:
             "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
         }) + "\\n", encoding="utf-8")
     elif manifest == "episode-audit":
+        episode = json.loads(inputs["episode_trace"].read_text(encoding="utf-8"))
+        evidence_id = next(
+            (
+                event["evidence_id"]
+                for event in episode["events"]
+                if event["event_type"] == "user_correction"
+            ),
+            episode["events"][0]["evidence_id"],
+        )
         outputs["audit_report"].write_text(json.dumps({
             "edit_warranted": True,
             "failure_class": "instruction_missing",
             "severity": "medium",
             "confidence": 0.82,
-            "evidence_refs": ["ev_e2e"],
+            "evidence_refs": [evidence_id],
         }) + "\\n", encoding="utf-8")
         outputs["evidence_ids"].write_text(json.dumps({
-            "evidence_ids": ["ev_e2e"],
+            "evidence_ids": [evidence_id],
         }) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
         outputs["drift_clusters"].write_text(json.dumps({
@@ -146,6 +160,7 @@ llmff:
     assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
     assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
     assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
 
     run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())
@@ -174,13 +189,50 @@ llmff:
     assert (run_dir / "acceptance-summary.raw.json").exists()
     assert (run_dir / "optimization-summary.json").exists()
     assert (run_dir / "decision.json").exists()
+    assert (run_dir / "decision-trace.json").exists()
     assert (run_dir / "report.md").exists()
+    decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    evidence_id = audit["evidence_refs"][0]
+    assert decision_trace["schema_version"] == 1
+    assert decision_trace["decision"]["decision"] == "needs_review"
+    assert decision_trace["decision"]["event_hash"]
+    assert decision_trace["candidate"]["base_file"] == "CODEX.md"
+    assert decision_trace["candidate"]["diff_path"].endswith("candidate.diff")
+    assert decision_trace["audit"]["evidence_refs"] == [evidence_id]
+    assert decision_trace["audit"]["instruction_refs"] == ["CODEX.md#rules"]
+    assert decision_trace["trace_events"] == [
+        {
+            "audit_event_sequence": decision_trace["trace_events"][0]["audit_event_sequence"],
+            "event_hash": decision_trace["trace_events"][0]["event_hash"],
+            "event_type": "user_correction",
+            "evidence_id": evidence_id,
+            "line_number": 2,
+            "source_trust": "user",
+        }
+    ]
+    assert decision_trace["evals"][0]["suite_id"] == "all"
+    assert decision_trace["evals"][0]["passed"] is True
+    assert decision_trace["artifacts"]["candidate_diff"].endswith("candidate.diff")
+    assert decision_trace["artifacts"]["decision_artifact"].endswith("decision.json")
+    report = (run_dir / "report.md").read_text(encoding="utf-8")
+    for artifact_ref in (
+        "trace_input: .sidecar/runs/",
+        "instruction_snapshot: .sidecar/runs/",
+        "instruction_graph: .sidecar/runs/",
+        "audit_report: .sidecar/runs/",
+        "candidate_metadata: .sidecar/runs/",
+        "candidate_diff: .sidecar/runs/",
+        "policy_gate: .sidecar/runs/",
+        "eval_report: .sidecar/runs/",
+        "decision_artifact: .sidecar/runs/",
+    ):
+        assert artifact_ref in report
     assert json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8")) == {
         "schema_version": 1,
         "allowed": True,
         "reasons": [],
     }
-    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     optimization_summary = json.loads(
@@ -228,7 +280,25 @@ llmff:
         assert connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0] >= 1
         assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] >= 1
+        decision_id = connection.execute(
+            """
+            SELECT id
+            FROM decisions
+            WHERE candidate_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (candidate["candidate_id"],),
+        ).fetchone()[0]
         assert connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] >= 5
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", run_dir.name]) == 0
+    run_ref_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    assert run_ref_trace["decision_ref"] == run_dir.name
+    assert run_ref_trace["decision"]["decision_id"] == decision_id
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", str(decision_id)]) == 0
+    decision_id_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    assert decision_id_trace["decision_ref"] == str(decision_id)
+    assert decision_id_trace["decision"]["decision_id"] == decision_id
     assert snapshot == (
         "CODEX.md",
         str(run_dir / "instruction-snapshot" / "CODEX.md"),

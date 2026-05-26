@@ -1214,6 +1214,84 @@ def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
     )
 
 
+def test_validate_decision_trace_artifact_accepts_provenance_payload():
+    validate_json_artifact(
+        "decision-trace.json",
+        {
+            "schema_version": 1,
+            "decision_ref": "latest",
+            "run_id": "run-1",
+            "decision": {
+                "decision_id": 3,
+                "candidate_id": 7,
+                "actor": "tugboat",
+                "policy": "optimization_acceptance_gate",
+                "decision": "needs_review",
+                "reason": "held_out_improved",
+                "created_at": "2026-05-26T00:00:00Z",
+                "applied_commit": "",
+                "rollback_ref": "",
+                "audit_event_sequence": 42,
+                "event_hash": "0" * 64,
+            },
+            "candidate": {
+                "candidate_id": 7,
+                "audit_id": 2,
+                "base_file": "CODEX.md",
+                "base_hash": "1" * 64,
+                "diff_hash": "2" * 64,
+                "diff_path": ".sidecar/runs/run-1/candidate.diff",
+                "risk_class": "instruction_clarification",
+                "rationale": "because",
+                "state": "needs_review",
+                "audit_event_sequence": 41,
+                "event_hash": "3" * 64,
+            },
+            "audit": {
+                "audit_id": 2,
+                "run_id": "run-1",
+                "failure_class": "instruction_missing",
+                "severity": "medium",
+                "confidence": 0.82,
+                "evidence_refs": ["ev_real"],
+                "instruction_refs": ["CODEX.md#rules"],
+                "audit_event_sequence": 40,
+                "event_hash": "4" * 64,
+            },
+            "trace_events": [
+                {
+                    "evidence_id": "ev_real",
+                    "event_type": "user_correction",
+                    "source_trust": "user",
+                    "line_number": 2,
+                    "audit_event_sequence": 39,
+                    "event_hash": "5" * 64,
+                }
+            ],
+            "unresolved_evidence_refs": [],
+            "evals": [
+                {
+                    "eval_id": 4,
+                    "suite_id": "all",
+                    "report_path": ".sidecar/runs/run-1/eval-report.json",
+                    "passed": True,
+                    "metrics": {"held_out_cases": 3},
+                    "audit_event_sequence": 43,
+                    "event_hash": "6" * 64,
+                }
+            ],
+            "artifacts": {
+                "audit_report": ".sidecar/runs/run-1/audit.json",
+                "candidate_diff": ".sidecar/runs/run-1/candidate.diff",
+                "candidate_metadata": ".sidecar/runs/run-1/candidate.json",
+                "decision_artifact": ".sidecar/runs/run-1/decision.json",
+                "eval_report": ".sidecar/runs/run-1/eval-report.json",
+                "trace_input": ".sidecar/runs/run-1/trace-input.jsonl",
+            },
+        },
+    )
+
+
 def test_validate_provenance_bundle_artifact_accepts_apply_evidence_bundle():
     validate_json_artifact(
         "provenance-bundle.json",

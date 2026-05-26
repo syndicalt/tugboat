@@ -291,6 +291,21 @@ def run_audit_pipeline(
                 "evidence-ids.raw.json",
             )
             validate_json_artifact("evidence-ids.raw.json", raw_evidence_ids)
+            missing_evidence_refs = _undeclared_evidence_refs(
+                raw_audit["evidence_refs"],
+                raw_evidence_ids["evidence_ids"],
+            )
+            if missing_evidence_refs:
+                return _failed_audit_result(
+                    repo,
+                    run_dir,
+                    manifest_hash=inspect.manifest_hash,
+                    episode_id=episode_id,
+                    message=(
+                        "audit rejected: audit evidence refs not declared by evidence_ids: "
+                        f"{', '.join(missing_evidence_refs)}"
+                    ),
+                )
         except ArtifactValidationError as error:
             return _failed_audit_result(
                 repo,
@@ -350,6 +365,14 @@ def _failed_audit_result(
             episode_id=episode_id,
         )
     return AuditPipelineResult(1, run_dir, message)
+
+
+def _undeclared_evidence_refs(
+    audit_refs: list[str],
+    declared_refs: list[str],
+) -> list[str]:
+    declared = set(declared_refs)
+    return sorted({ref for ref in audit_refs if ref not in declared})
 
 
 def _secret_scan_audit_payload(

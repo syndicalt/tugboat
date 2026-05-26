@@ -249,6 +249,16 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
         + "\n",
         encoding="utf-8",
     )
+    run_dir = eval_report_path.parent
+    (run_dir / "trace-input.jsonl").write_text('{"type":"user_request"}\n', encoding="utf-8")
+    (run_dir / "instruction-snapshot").mkdir()
+    (run_dir / "instruction-graph.json").write_text('{"documents":[]}\n', encoding="utf-8")
+    (run_dir / "audit.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    (run_dir / "candidate.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    (run_dir / "candidate.diff").write_text("--- a/CODEX.md\n+++ b/CODEX.md\n", encoding="utf-8")
+    (run_dir / "policy-gate.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    (run_dir / "decision.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    (run_dir / "provenance-bundle.json").write_text('{"schema_version":1}\n', encoding="utf-8")
     report_path = write_report(
         tmp_path,
         "run-1",
@@ -267,7 +277,16 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- risk_class: instruction_clarification",
             "- policy_allowed: false",
             "- policy_reasons: modal_weakening,new_external_endpoint",
+            "- trace_input: .sidecar/runs/run-1/trace-input.jsonl",
+            "- instruction_snapshot: .sidecar/runs/run-1/instruction-snapshot",
+            "- instruction_graph: .sidecar/runs/run-1/instruction-graph.json",
+            "- audit_report: .sidecar/runs/run-1/audit.json",
+            "- candidate_metadata: .sidecar/runs/run-1/candidate.json",
+            "- candidate_diff: .sidecar/runs/run-1/candidate.diff",
+            "- policy_gate: .sidecar/runs/run-1/policy-gate.json",
             "- eval_report: .sidecar/runs/run-1/eval-report.json",
+            "- decision_artifact: .sidecar/runs/run-1/decision.json",
+            "- provenance_bundle: .sidecar/runs/run-1/provenance-bundle.json",
             "- trigger_score: 0.84",
             "- held_out_score: 0.92",
             "- governance_passed: true",

@@ -21,6 +21,7 @@ def write_report(
     run_dir = _repo_local_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     report_path = run_dir / "report.md"
+    evidence_chain = _evidence_chain_lines(repo, run_dir, eval_report_path)
     eval_summary = _eval_summary_lines(eval_report_path)
     optimization_summary = _optimization_summary_lines(repo, run_dir / "optimization-summary.json")
     text = "\n".join(
@@ -32,7 +33,7 @@ def write_report(
             f"- risk_class: {candidate.risk_class}",
             f"- policy_allowed: {str(decision.allowed).lower()}",
             f"- policy_reasons: {','.join(decision.reasons)}",
-            f"- eval_report: {eval_report_path.relative_to(repo)}",
+            *evidence_chain,
             *eval_summary,
             *optimization_summary,
             "",
@@ -48,6 +49,26 @@ def write_report(
         raise SecretScanError(findings)
     report_path.write_text(text, encoding="utf-8")
     return report_path
+
+
+def _evidence_chain_lines(repo: Path, run_dir: Path, eval_report_path: Path) -> list[str]:
+    artifact_fields = (
+        ("trace_input", run_dir / "trace-input.jsonl"),
+        ("instruction_snapshot", run_dir / "instruction-snapshot"),
+        ("instruction_graph", run_dir / "instruction-graph.json"),
+        ("audit_report", run_dir / "audit.json"),
+        ("candidate_metadata", run_dir / "candidate.json"),
+        ("candidate_diff", run_dir / "candidate.diff"),
+        ("policy_gate", run_dir / "policy-gate.json"),
+        ("eval_report", eval_report_path),
+        ("decision_artifact", run_dir / "decision.json"),
+        ("provenance_bundle", run_dir / "provenance-bundle.json"),
+    )
+    return [
+        f"- {field}: {path.relative_to(repo)}"
+        for field, path in artifact_fields
+        if field == "eval_report" or path.exists()
+    ]
 
 
 def _eval_summary_lines(eval_report_path: Path) -> list[str]:
