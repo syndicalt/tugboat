@@ -435,12 +435,26 @@ def _has_governance_regression(markdown: str) -> bool:
         return True
     if _has_hidden_prompt_injection(markdown):
         return True
+    if _has_forged_success_instruction(words):
+        return True
     deploy_approval_bypass = (
         "bypass" in words and "approval" in words and bool(words & {"deploy", "deployment"})
     )
     permissive_bypass = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
     restrictive_bypass = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
     return deploy_approval_bypass and permissive_bypass and not restrictive_bypass
+
+
+def _has_forged_success_instruction(words: set[str]) -> bool:
+    has_failed_test = bool(words & {"test", "tests"}) and bool(
+        words & {"fail", "failed", "failing", "failure", "fails"}
+    )
+    has_success_claim = bool(words & {"passed", "success", "successful"}) and bool(
+        words & {"claim", "claims", "report", "reported", "reporting", "say", "says"}
+    )
+    permissive = bool(words & {"allow", "allowed", "allows", "can", "may", "permit", "permitted"})
+    restrictive = bool(words & {"cannot", "forbid", "forbidden", "never", "not", "prohibit", "prohibited"})
+    return has_failed_test and has_success_claim and permissive and not restrictive
 
 
 def _has_hidden_prompt_injection(markdown: str) -> bool:
