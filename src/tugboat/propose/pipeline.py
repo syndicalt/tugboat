@@ -191,30 +191,78 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         "candidate.raw.json",
     )
     validate_json_artifact("candidate.raw.json", payload)
+    audit_evidence_refs = _audit_evidence_refs(run_dir)
     if "proposal_rationale" in run.output_paths:
         rationale_payload = load_json_object_artifact(
             run.output_paths["proposal_rationale"],
             "proposal-rationale.raw.json",
         )
         validate_json_artifact("proposal-rationale.raw.json", rationale_payload)
+        _validate_proposal_rationale_declared_by_audit(
+            audit_evidence_refs,
+            rationale_payload,
+        )
     _validate_reflections_from_payload(payload)
+    _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
     candidate = _candidate_from_payload(payload, audit_id=audit_id)
-    _validate_candidate_sources_declared_by_audit(run_dir, candidate)
+    _validate_candidate_sources_declared_by_audit(audit_evidence_refs, candidate)
     return candidate
 
 
-def _validate_candidate_sources_declared_by_audit(run_dir: Path, candidate: CandidatePatch) -> None:
+def _audit_evidence_refs(run_dir: Path) -> set[str]:
     audit_payload = load_json_object_artifact(run_dir / "audit.json", "audit.json")
     audit_evidence_refs = audit_payload.get("evidence_refs", [])
     if not isinstance(audit_evidence_refs, list):
         raise ValueError("audit.evidence_refs must be a JSON list")
-    declared = {str(ref) for ref in audit_evidence_refs}
+    return {str(ref) for ref in audit_evidence_refs}
+
+
+def _validate_candidate_sources_declared_by_audit(
+    declared: set[str],
+    candidate: CandidatePatch,
+) -> None:
     missing = sorted(
         source.source_id for source in candidate.sources if source.source_id not in declared
     )
     if missing:
         raise ValueError(
             "candidate source refs not declared by audit evidence: " + ", ".join(missing)
+        )
+
+
+def _validate_proposal_rationale_declared_by_audit(
+    declared: set[str],
+    rationale_payload: dict[str, object],
+) -> None:
+    evidence_refs = rationale_payload.get("evidence_refs", [])
+    if not isinstance(evidence_refs, list):
+        raise ValueError("proposal-rationale.raw.json evidence_refs must be a JSON list")
+    missing = sorted(str(ref) for ref in evidence_refs if str(ref) not in declared)
+    if missing:
+        raise ValueError(
+            "proposal rationale evidence refs not declared by audit evidence: "
+            + ", ".join(missing)
+        )
+
+
+def _validate_reflections_declared_by_audit(
+    declared: set[str],
+    candidate_payload: dict[str, object],
+) -> None:
+    reflections = candidate_payload.get("reflections", [])
+    if not isinstance(reflections, list):
+        raise ValueError("reflections must be a JSON list")
+    source_refs: list[str] = []
+    for reflection in reflections:
+        if not isinstance(reflection, dict):
+            continue
+        source_ref = reflection.get("source_ref")
+        if isinstance(source_ref, str):
+            source_refs.append(source_ref)
+    missing = sorted(ref for ref in source_refs if ref not in declared)
+    if missing:
+        raise ValueError(
+            "reflection source refs not declared by audit evidence: " + ", ".join(missing)
         )
 
 

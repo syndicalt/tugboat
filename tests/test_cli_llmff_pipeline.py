@@ -112,7 +112,7 @@ def _write_fake_llmff(
     if reflections is None:
         reflections = [
             {
-                "source_ref": "audit:latest",
+                "source_ref": "ev_fake",
                 "summary": "Tests were skipped because regression guidance was missing.",
             }
         ]
@@ -1117,7 +1117,7 @@ llmff:
             (candidate["candidate_id"],),
         ).fetchone()
 
-    assert reflection[0] == "audit:latest"
+    assert reflection[0] == "ev_fake"
     assert len(reflection[1]) == 64
     assert Path(reflection[2]).exists()
     assert reflection[3] is not None
@@ -2071,6 +2071,139 @@ llmff:
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "candidate.raw.json missing required field: reflections[0].summary" in output
+    assert not (run_dir / "reflection-001.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        reflection_count = store.connection.execute(
+            "SELECT COUNT(*) FROM reflections"
+        ).fetchone()[0]
+    assert reflection_count == 0
+
+
+def test_propose_rejects_proposal_rationale_evidence_not_declared_by_audit(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        proposal_rationale={
+            "rationale": "Patch proposal cites undeclared evidence.",
+            "evidence_refs": ["ev_hallucinated"],
+            "style_constraints": ["Preserve concise style."],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "proposal rationale evidence refs not declared by audit evidence: ev_hallucinated" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "reflection-001.json").exists()
+
+
+def test_propose_rejects_reflection_source_ref_not_declared_by_audit(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        reflections=[
+            {
+                "source_ref": "ev_hallucinated",
+                "summary": "This reflection cites undeclared evidence.",
+            }
+        ],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "reflection source refs not declared by audit evidence: ev_hallucinated" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "reflection-001.json").exists()
+
+
+def test_propose_rejects_artifact_reflection_source_ref_not_declared_by_audit(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        reflections=[
+            {
+                "source_ref": "audit:latest",
+                "summary": "This reflection cites an artifact instead of evidence.",
+            }
+        ],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "reflection source refs not declared by audit evidence: audit:latest" in output
+    assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "reflection-001.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         reflection_count = store.connection.execute(
