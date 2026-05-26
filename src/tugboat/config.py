@@ -92,6 +92,13 @@ def _as_string_tuple(raw: Any, field_name: str) -> tuple[str, ...]:
     return tuple(raw)
 
 
+def _as_non_empty_string_tuple(raw: Any, field_name: str) -> tuple[str, ...]:
+    values = _as_string_tuple(raw, field_name)
+    if not all(item.strip() for item in values):
+        raise ValueError(f"{field_name} entries must be non-empty strings")
+    return tuple(item.strip() for item in values)
+
+
 def load_policy(repo: Path) -> Policy:
     path = repo / ".sidecar" / "policy.yaml"
     if not path.exists():
@@ -193,6 +200,10 @@ def load_policy(repo: Path) -> Policy:
             "llmff.retry_backoff_ms",
         ),
         allowed_manifest_hashes=tuple(str(item) for item in allowed_manifest_hashes),
+        llmff_allowed_providers=_as_non_empty_string_tuple(
+            llmff.get("allowed_providers", []),
+            "llmff.allowed_providers",
+        ),
         raw_traces_retention_days=_as_non_negative_days(
             retention.get("raw_traces_days", Policy().raw_traces_retention_days),
             "retention.raw_traces_days",

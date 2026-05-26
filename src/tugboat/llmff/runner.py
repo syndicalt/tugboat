@@ -253,6 +253,22 @@ def _network_required(inspect_payload: dict[str, Any]) -> bool:
     )
 
 
+def _declared_providers(inspect_payload: dict[str, Any]) -> tuple[str, ...]:
+    raw_providers = inspect_payload.get("providers", [])
+    if not isinstance(raw_providers, list):
+        raise InspectPolicyError("providers must be a list of non-empty strings")
+    if not all(isinstance(provider, str) and provider.strip() for provider in raw_providers):
+        raise InspectPolicyError("providers must be a list of non-empty strings")
+    providers = tuple(provider.strip() for provider in raw_providers)
+
+    raw_provider = inspect_payload.get("provider")
+    if raw_provider is not None:
+        if not isinstance(raw_provider, str) or not raw_provider.strip():
+            raise InspectPolicyError("provider must be a non-empty string")
+        providers = (*providers, raw_provider.strip())
+    return tuple(dict.fromkeys(provider.strip() for provider in providers if provider.strip()))
+
+
 def inspect_manifest(
     manifest_path: Path,
     *,
@@ -265,6 +281,11 @@ def inspect_manifest(
     network_required = _network_required(inspect_payload)
     if network_required and not policy.llmff_allow_network:
         raise InspectPolicyError("llmff inspect requires network but policy disallows network")
+    declared_providers = _declared_providers(inspect_payload)
+    allowed_providers = set(policy.llmff_allowed_providers)
+    if declared_providers and not allowed_providers.issuperset(declared_providers):
+        provider = next(provider for provider in declared_providers if provider not in allowed_providers)
+        raise InspectPolicyError(f"provider is not allowed by policy: {provider}")
 
     manifest_digest = _manifest_hash(manifest_path)
     if policy.allowed_manifest_hashes and manifest_digest not in policy.allowed_manifest_hashes:

@@ -198,6 +198,43 @@ llmff:
     assert policy.allowed_manifest_hashes == ("abc123", "def456")
 
 
+def test_load_policy_yaml_reads_llmff_allowed_providers(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  allowed_providers:
+    - openai
+    - anthropic
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.llmff_allowed_providers == ("openai", "anthropic")
+
+
+def test_load_policy_yaml_rejects_malformed_llmff_allowed_providers(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  allowed_providers:
+    - openai
+    - 123
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="llmff.allowed_providers"):
+        load_policy(tmp_path)
+
+
 def test_load_policy_yaml_reads_llmff_runtime_knobs(tmp_path: Path):
     policy_dir = tmp_path / ".sidecar"
     policy_dir.mkdir()

@@ -75,6 +75,68 @@ def test_inspect_manifest_rejects_unpinned_manifest_hash(tmp_path: Path):
     ).exists()
 
 
+def test_inspect_manifest_rejects_unallowlisted_declared_provider(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    runner = FixtureLlmffRunner(
+        inspect_payload={"network_required": False, "providers": ["openai"]}
+    )
+
+    with pytest.raises(InspectPolicyError, match="provider is not allowed"):
+        inspect_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(),
+            runner=runner,
+        )
+
+    assert not (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "manifest" / "llmff-inspect.json"
+    ).exists()
+
+
+def test_inspect_manifest_allows_declared_provider_when_policy_allowlisted(
+    tmp_path: Path,
+):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    runner = FixtureLlmffRunner(
+        inspect_payload={"network_required": False, "providers": ["openai"]}
+    )
+
+    result = inspect_manifest(
+        manifest,
+        run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+        policy=Policy(llmff_allowed_providers=("openai",)),
+        runner=runner,
+    )
+
+    artifact = json.loads(result.artifact_path.read_text(encoding="utf-8"))
+    assert artifact["inspect"]["providers"] == ["openai"]
+
+
+def test_inspect_manifest_rejects_malformed_provider_declarations(tmp_path: Path):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+
+    for inspect_payload in (
+        {"network_required": False, "providers": "openai"},
+        {"network_required": False, "providers": [123]},
+        {"network_required": False, "providers": [""]},
+    ):
+        with pytest.raises(InspectPolicyError, match="providers must be a list of non-empty strings"):
+            inspect_manifest(
+                manifest,
+                run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+                policy=Policy(llmff_allowed_providers=("openai",)),
+                runner=FixtureLlmffRunner(inspect_payload=inspect_payload),
+            )
+
+    assert not (
+        tmp_path / ".sidecar" / "runs" / "run-1" / "manifest" / "llmff-inspect.json"
+    ).exists()
+
+
 def test_write_audit_writes_deterministic_pretty_json(tmp_path: Path):
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
 
