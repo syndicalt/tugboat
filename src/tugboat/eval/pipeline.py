@@ -15,7 +15,7 @@ from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.optimization import REJECTED_EDIT_SUPPRESSION_SIGNAL
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
-from tugboat.policy.gate import CandidatePatch, SourceRef
+from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,12 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 policy,
                 suite_id=suite_id,
             )
-            policy_decision_payload = _policy_decision_from_payload(raw_policy_decision_payload)
+            _policy_decision_from_payload(raw_policy_decision_payload)
+            deterministic_decision = evaluate_candidate(repo, policy, _candidate_from_artifacts(run_dir))
+            policy_decision_payload = {
+                "allowed": deterministic_decision.allowed,
+                "reasons": list(deterministic_decision.reasons),
+            }
             passed = _required_eval_bool(eval_payload, "passed", "llmff eval_report")
             raw_metrics = eval_payload.get("metrics", {})
             if not isinstance(raw_metrics, dict):
@@ -99,7 +104,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 eval_payload,
                 metrics,
                 "governance_passed",
-                bool(policy_decision_payload["allowed"]),
+                deterministic_decision.allowed,
             )
             recommendation = _str_eval_field(
                 eval_payload,
@@ -107,6 +112,11 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 "recommendation",
                 "accept" if passed and governance_passed else "reject",
             )
+            if not deterministic_decision.allowed:
+                passed = False
+                governance_passed = False
+                recommendation = "reject"
+                eval_failure_message = "eval rejected: deterministic policy gate rejected candidate"
             if passed and recommendation == "accept" and not _has_held_out_validation_cases(metrics):
                 passed = False
                 governance_passed = False

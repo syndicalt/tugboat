@@ -2372,12 +2372,12 @@ llmff:
     policy_decision = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     assert eval_report["passed"] is False
     assert eval_report["metrics"] == {"governance_regressions": 1, "held_out_cases": 3}
-    assert eval_report["governance_passed"] is False
+    assert eval_report["governance_passed"] is True
     assert eval_report["recommendation"] == "reject"
     assert policy_decision == {
         "schema_version": 1,
-        "allowed": False,
-        "reasons": ["held_out_regression"],
+        "allowed": True,
+        "reasons": [],
     }
     assert (run_dir / "eval-report.raw.json").exists()
     assert (run_dir / "policy-decision.raw.json").exists()
@@ -2437,6 +2437,109 @@ llmff:
         "source_refs": ["trace:episode-7", "drift:cluster-1"],
     }
     assert rejected_memory[3] is not None
+
+
+def test_eval_recomputes_policy_gate_instead_of_trusting_llmff_policy_decision(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    codex.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    codex.write_text("# Rules\n\nUse tests.\n\nRepo changed after proposal.\n", encoding="utf-8")
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    raw_policy_decision = json.loads((run_dir / "policy-decision.raw.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+
+    assert raw_policy_decision == {"allowed": True, "reasons": []}
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": False,
+        "reasons": ["base_hash_mismatch"],
+    }
+    assert eval_report["passed"] is False
+    assert eval_report["governance_passed"] is False
+    assert eval_report["recommendation"] == "reject"
+    assert summary["decision"] == "rejected"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+
+
+def test_eval_does_not_copy_llmff_policy_denial_when_deterministic_gate_allows(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": False,
+            "trigger_score": 0.7,
+            "held_out_score": 0.6,
+            "governance_passed": False,
+            "recommendation": "reject",
+            "metrics": {"governance_regressions": 1, "held_out_cases": 3},
+        },
+        policy_decision={"allowed": False, "reasons": ["llmff_claimed_policy_denial"]},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    raw_policy_decision = json.loads((run_dir / "policy-decision.raw.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+
+    assert raw_policy_decision == {
+        "allowed": False,
+        "reasons": ["llmff_claimed_policy_denial"],
+    }
+    assert policy_gate == {"schema_version": 1, "allowed": True, "reasons": []}
+    assert eval_report["passed"] is False
+    assert eval_report["recommendation"] == "reject"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 
 def test_eval_rejects_malformed_llmff_eval_report_output(tmp_path: Path, capsys):
