@@ -111,6 +111,23 @@ def test_validate_eval_suite_artifact_accepts_current_schema():
     )
 
 
+def test_validate_optimizer_memory_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "optimizer-memory.json",
+        {
+            "schema_version": 1,
+            "rejected_edits": [
+                {
+                    "semantic_fingerprint": "abc123",
+                    "rejection_reason": "held_out_not_improved",
+                    "source_refs": ["audit:1"],
+                }
+            ],
+            "slow_update_notes": ["Prefer smaller edits."],
+        },
+    )
+
+
 def test_validate_optimization_summary_artifact_requires_schema_version():
     with pytest.raises(ArtifactValidationError, match="schema_version"):
         validate_json_artifact(

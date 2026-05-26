@@ -1157,6 +1157,7 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         memory = OptimizationMemory.load(store, repo=repo)
     payload = {
+        "schema_version": SCHEMA_VERSION,
         "rejected_edits": [
             {
                 "semantic_fingerprint": record.semantic_fingerprint,
@@ -1167,6 +1168,7 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
         ],
         "slow_update_notes": list(memory.slow_update_notes),
     }
+    validate_json_artifact("optimizer-memory.json", payload)
     path = run_dir / "optimizer-memory.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path

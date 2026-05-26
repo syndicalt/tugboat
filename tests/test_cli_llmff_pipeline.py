@@ -729,6 +729,7 @@ llmff:
     assert Path(llmff_inputs["optimizer_memory"]) == run_dir / "optimizer-memory.json"
     optimizer_memory = json.loads((run_dir / "optimizer-memory.json").read_text(encoding="utf-8"))
     assert optimizer_memory == {
+        "schema_version": 1,
         "rejected_edits": [
             {
                 "rejection_reason": "held_out_not_improved",

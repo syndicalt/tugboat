@@ -241,6 +241,33 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "suite_id": {"type": "string"},
         },
     },
+    "optimizer-memory.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "rejected_edits", "slow_update_notes"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "rejected_edits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "semantic_fingerprint",
+                        "rejection_reason",
+                        "source_refs",
+                    ],
+                    "properties": {
+                        "semantic_fingerprint": {"type": "string"},
+                        "rejection_reason": {"type": "string"},
+                        "source_refs": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+            "slow_update_notes": {"type": "array", "items": {"type": "string"}},
+        },
+    },
     "optimization-summary.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
