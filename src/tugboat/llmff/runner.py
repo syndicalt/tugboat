@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.llmff.contracts import InspectPolicyError, InspectResult, LlmffRunner, RunResult
 from tugboat.models import Policy
 from tugboat.security.secrets import scan_path
@@ -234,11 +235,13 @@ def inspect_manifest(
     artifact_path = _manifest_lifecycle_dir(run_dir, manifest_path) / "llmff-inspect.json"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact = {
+        "schema_version": SCHEMA_VERSION,
         "manifest_path": str(manifest_path),
         "manifest_hash": manifest_digest,
         "network_required": network_required,
         "inspect": inspect_payload,
     }
+    validate_json_artifact("llmff-inspect.json", artifact)
     artifact_path.write_text(
         json.dumps(artifact, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",

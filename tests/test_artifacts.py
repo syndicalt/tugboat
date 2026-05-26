@@ -88,6 +88,19 @@ def test_validate_policy_gate_artifact_accepts_current_schema():
     )
 
 
+def test_validate_llmff_inspect_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "llmff-inspect.json",
+        {
+            "schema_version": 1,
+            "manifest_path": ".sidecar/manifests/episode-audit.yaml",
+            "manifest_hash": "abc123",
+            "network_required": False,
+            "inspect": {"manifest": "episode-audit", "providers": []},
+        },
+    )
+
+
 def test_validate_optimization_summary_artifact_requires_schema_version():
     with pytest.raises(ArtifactValidationError, match="schema_version"):
         validate_json_artifact(

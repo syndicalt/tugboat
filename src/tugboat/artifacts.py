@@ -212,6 +212,25 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "reasons": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "llmff-inspect.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "manifest_path",
+            "manifest_hash",
+            "network_required",
+            "inspect",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "manifest_path": {"type": "string"},
+            "manifest_hash": {"type": "string"},
+            "network_required": {"type": "boolean"},
+            "inspect": {"type": "object"},
+        },
+    },
     "optimization-summary.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
