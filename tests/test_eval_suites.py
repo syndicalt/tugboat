@@ -79,6 +79,29 @@ def test_run_offline_eval_suite_all_evaluates_candidate_preview_instead_of_curre
     ]
 
 
+def test_run_offline_eval_suite_all_compares_preview_against_original_instruction_file(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "---\nowner: platform\n---\n# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Renamed Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.metrics["candidate_preview_files"] == 1
+    assert report.metrics["structural_findings"] == 2
+    assert report.trigger_score == 0.0
+    assert report.recommendation == "reject"
+
+
 def test_run_offline_eval_suite_all_evaluates_full_instruction_preview_corpus(
     tmp_path: Path,
 ):

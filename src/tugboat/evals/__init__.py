@@ -137,15 +137,17 @@ def run_offline_eval_suite(
         raise ValueError("only offline suite 'all' is supported")
 
     policy_files = _instruction_files(root, preview_root=preview_root)
-    policy_texts = tuple(
-        _read_optional(_preview_overlay_path(path, root=root, preview_root=preview_root)) or ""
+    policy_pairs = tuple(
+        _instruction_text_pair(path, root=root, preview_root=preview_root)
         for path in policy_files
     )
+    policy_texts = tuple(after for _, after in policy_pairs)
     if not policy_texts:
         policy_texts = ("",)
+        policy_pairs = (("", ""),)
     structural_reports = tuple(
-        evaluate_markdown_candidate(policy_text, root=root, overlay_root=preview_root)
-        for policy_text in policy_texts
+        evaluate_markdown_pair(before, after, root=root, overlay_root=preview_root)
+        for before, after in policy_pairs
     )
     governance_regressions = sum(
         1 for policy_text in policy_texts if _has_governance_regression(policy_text)
@@ -219,6 +221,15 @@ def _preview_overlay_path(path: Path, *, root: Path, preview_root: Path | None) 
     if preview_path.exists():
         return preview_path
     return path
+
+
+def _instruction_text_pair(path: Path, *, root: Path, preview_root: Path | None) -> tuple[str, str]:
+    before = _read_optional(path) or ""
+    after_path = _preview_overlay_path(path, root=root, preview_root=preview_root)
+    after = _read_optional(after_path) or ""
+    if not path.exists():
+        before = after
+    return before, after
 
 
 def _structural_eval_cases(
