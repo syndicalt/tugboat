@@ -9,6 +9,7 @@ from pathlib import Path
 from tugboat.patches import apply_unified_diff
 
 from tugboat.models import Policy
+from tugboat.security.secrets import scan_text
 
 
 DENIAL_REASON_ORDER = (
@@ -25,6 +26,7 @@ DENIAL_REASON_ORDER = (
     "protected_heading_changed",
     "governance_constraint_removed",
     "modal_weakening",
+    "secret_exposure",
     "new_external_endpoint",
     "missing_trusted_source",
     "single_untrusted_source",
@@ -197,6 +199,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("governance_constraint_removed")
     if has_modal_weakening:
         found_reasons.add("modal_weakening")
+    if scan_text(candidate.base_file, candidate.diff):
+        found_reasons.add("secret_exposure")
     if _has_new_external_endpoint(candidate.diff):
         found_reasons.add("new_external_endpoint")
     if not any(source.trusted for source in candidate.sources):

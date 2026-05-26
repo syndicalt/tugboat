@@ -569,6 +569,26 @@ def test_policy_gate_rejects_removed_governance_constraints(
     assert "governance_constraint_removed" in decision.reasons
 
 
+def test_policy_gate_rejects_candidate_diff_that_introduces_secret(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@\n"
+            " Keep this instruction.\n"
+            "+Use OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx for smoke tests.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(), candidate)
+
+    assert decision.allowed is False
+    assert "secret_exposure" in decision.reasons
+
+
 def test_policy_gate_allows_reworded_governance_constraints_when_terms_are_preserved(
     tmp_path: Path,
 ):
