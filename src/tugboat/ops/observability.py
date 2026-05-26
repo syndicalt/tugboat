@@ -12,6 +12,7 @@ def summarize_observability(
     evals: Iterable[dict[str, Any]] = (),
     corpus_snapshots: Iterable[dict[str, Any]] = (),
     harness_findings: Iterable[str] = (),
+    trace_events: Iterable[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     run_items = list(runs)
     job_items = list(jobs)
@@ -26,6 +27,7 @@ def summarize_observability(
         "corpus_growth": _corpus_growth(corpus_snapshots),
         "provider_backend_failure_rate": _provider_backend_failure_rate(run_items),
         "duplicate_rule_count": _duplicate_rule_count(harness_findings),
+        "user_correction_recurrence": _user_correction_recurrence(trace_events),
     }
 
 
@@ -172,6 +174,22 @@ def _duplicate_rule_count(harness_findings: Iterable[str]) -> int:
         for finding in harness_findings
         if str(finding).startswith("Duplicate instruction rule appears ")
     )
+
+
+def _user_correction_recurrence(events: Iterable[dict[str, Any]]) -> dict[str, int]:
+    corrections: list[str] = []
+    for event in events:
+        if str(event.get("type", event.get("event", ""))) != "user_correction":
+            continue
+        text = str(event.get("content", event.get("text", event.get("message", "")))).strip()
+        if text:
+            corrections.append(" ".join(text.casefold().split()))
+    counts = Counter(corrections)
+    return {
+        "correction_count": len(corrections),
+        "recurring_correction_count": sum(1 for count in counts.values() if count > 1),
+        "unique_correction_count": len(counts),
+    }
 
 
 def _parse_datetime(value: str) -> datetime:

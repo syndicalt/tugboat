@@ -65,6 +65,12 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
             "CODEX.md has no repo-local markdown references; keep instruction files as short maps.",
             "Duplicate instruction rule appears 3 times: cite evidence.",
         ],
+        trace_events=[
+            {"type": "user_correction", "content": "Run regression tests before final."},
+            {"type": "user_correction", "content": "Run regression tests before final."},
+            {"type": "user_correction", "content": "Use Zaxy memory first."},
+            {"type": "tool_call", "content": "pytest"},
+        ],
     )
 
     json.dumps(summary)
@@ -107,3 +113,8 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "total": 3,
     }
     assert summary["duplicate_rule_count"] == 2
+    assert summary["user_correction_recurrence"] == {
+        "correction_count": 3,
+        "recurring_correction_count": 1,
+        "unique_correction_count": 2,
+    }
