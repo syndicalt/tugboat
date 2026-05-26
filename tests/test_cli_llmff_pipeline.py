@@ -529,6 +529,55 @@ llmff:
     )
 
 
+def test_propose_rejects_candidate_over_learning_rate_budget(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        bounded_edit_metadata=[
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 21,
+                "normative_changes": 0,
+            }
+        ],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        stored_state = store.connection.execute(
+            "SELECT state FROM candidates WHERE id = ?",
+            (candidate["candidate_id"],),
+        ).fetchone()[0]
+
+    assert policy_gate == {"allowed": False, "reasons": ["max_changed_lines_exceeded"]}
+    assert decision["decision"] == "rejected"
+    assert stored_state == "rejected"
+
+
 def test_eval_consumes_real_llmff_file_backed_eval_output(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

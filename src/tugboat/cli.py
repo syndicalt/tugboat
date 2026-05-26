@@ -42,7 +42,11 @@ from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manif
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.mcp import run_stdio_server
 from tugboat.ops.observability import summarize_sidecar_observability
-from tugboat.optimization import OptimizationMemory
+from tugboat.optimization import (
+    LearningRateBudget,
+    OptimizationMemory,
+    budget_reasons_for_bounded_edit_metadata,
+)
 from tugboat.paths import latest_run_dir, new_run_dir, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
@@ -377,8 +381,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         decision = evaluate_candidate(repo, policy, candidate)
         memory_reasons = _rejected_memory_policy_reasons(repo, candidate)
-        decision_allowed = decision.allowed and not memory_reasons
-        decision_reasons = [*decision.reasons, *memory_reasons]
+        budget_reasons = _learning_rate_budget_policy_reasons(policy, candidate)
+        decision_allowed = decision.allowed and not memory_reasons and not budget_reasons
+        decision_reasons = [*decision.reasons, *memory_reasons, *budget_reasons]
         artifacts = write_candidate(repo, run_dir.name, candidate)
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             candidate_id = store.insert_candidate(
@@ -1149,6 +1154,24 @@ def _record_candidate_provenance(
             source_ref=str(reflection.get("source_ref", f"candidate:{candidate_id}")),
             artifact_path=artifact_path,
         )
+
+
+def _learning_rate_budget_policy_reasons(policy, candidate: CandidatePatch) -> list[str]:
+    if not candidate.bounded_edit_metadata:
+        return ["bounded_edit_metadata_required"]
+    budget = LearningRateBudget(
+        max_files_touched=policy.roadmap_learning_rate_max_files_touched,
+        max_sections_touched=policy.roadmap_learning_rate_max_sections_touched,
+        max_changed_lines=policy.roadmap_learning_rate_max_changed_lines,
+        max_normative_changes=policy.roadmap_learning_rate_max_normative_changes,
+        operator_risk_limits=dict(policy.roadmap_learning_rate_operator_risk_limits),
+    )
+    return list(
+        budget_reasons_for_bounded_edit_metadata(
+            candidate.bounded_edit_metadata,
+            budget=budget,
+        )
+    )
 
 
 def _record_rejected_candidate_memory(

@@ -33,6 +33,27 @@ def _as_non_negative_days(raw: Any, field_name: str) -> int:
     return days
 
 
+def _as_non_negative_int(raw: Any, field_name: str) -> int:
+    value = int(raw)
+    if value < 0:
+        raise ValueError(f"{field_name} must be non-negative")
+    return value
+
+
+def _as_operator_risk_limits(raw: Any) -> dict[str, int]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("roadmap.learning_rate_budget.operator_risk_limits must be a mapping")
+    return {
+        str(operator): _as_non_negative_int(
+            limit,
+            f"roadmap.learning_rate_budget.operator_risk_limits.{operator}",
+        )
+        for operator, limit in raw.items()
+    }
+
+
 def load_policy(repo: Path) -> Policy:
     path = repo / ".sidecar" / "policy.yaml"
     if not path.exists():
@@ -43,6 +64,8 @@ def load_policy(repo: Path) -> Policy:
     llmff = raw.get("llmff", {}) or {}
     mcp = raw.get("mcp", {}) or {}
     retention = raw.get("retention", {}) or {}
+    roadmap = raw.get("roadmap", {}) or {}
+    learning_rate_budget = roadmap.get("learning_rate_budget", {}) or {}
     entries = tuple(_as_instruction_file(item) for item in raw.get("instruction_files", []))
 
     allowed_manifest_hashes = llmff.get(
@@ -59,6 +82,37 @@ def load_policy(repo: Path) -> Policy:
         auto_apply_allowed_repositories=tuple(
             str(Path(item).expanduser().resolve())
             for item in auto_apply.get("allowed_repositories", [])
+        ),
+        roadmap_learning_rate_max_files_touched=_as_non_negative_int(
+            learning_rate_budget.get(
+                "max_files_touched",
+                Policy().roadmap_learning_rate_max_files_touched,
+            ),
+            "roadmap.learning_rate_budget.max_files_touched",
+        ),
+        roadmap_learning_rate_max_sections_touched=_as_non_negative_int(
+            learning_rate_budget.get(
+                "max_sections_touched",
+                Policy().roadmap_learning_rate_max_sections_touched,
+            ),
+            "roadmap.learning_rate_budget.max_sections_touched",
+        ),
+        roadmap_learning_rate_max_changed_lines=_as_non_negative_int(
+            learning_rate_budget.get(
+                "max_changed_lines",
+                Policy().roadmap_learning_rate_max_changed_lines,
+            ),
+            "roadmap.learning_rate_budget.max_changed_lines",
+        ),
+        roadmap_learning_rate_max_normative_changes=_as_non_negative_int(
+            learning_rate_budget.get(
+                "max_normative_changes",
+                Policy().roadmap_learning_rate_max_normative_changes,
+            ),
+            "roadmap.learning_rate_budget.max_normative_changes",
+        ),
+        roadmap_learning_rate_operator_risk_limits=_as_operator_risk_limits(
+            learning_rate_budget.get("operator_risk_limits", {})
         ),
         auto_apply_minimum_burn_in_days=_as_non_negative_days(
             auto_apply.get(

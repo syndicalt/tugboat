@@ -12,6 +12,7 @@ from tugboat.optimization import (
     ReflectionArtifact,
     ScoreSet,
     build_minibatches,
+    budget_reasons_for_bounded_edit_metadata,
     evaluate_candidate,
     reflect_on_minibatch,
     rank_candidates,
@@ -79,6 +80,38 @@ def test_learning_rate_budget_rejects_oversized_candidate():
 
     assert decision.accepted is False
     assert decision.reasons == (
+        "max_files_touched_exceeded",
+        "max_changed_lines_exceeded",
+        "max_normative_changes_exceeded",
+    )
+
+
+def test_learning_rate_budget_evaluates_bounded_edit_metadata_directly():
+    reasons = budget_reasons_for_bounded_edit_metadata(
+        (
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 3,
+                "normative_changes": 1,
+            },
+            {
+                "operator": "delete",
+                "file": "AGENTS.md",
+                "section": "Approval",
+                "changed_lines": 3,
+                "normative_changes": 1,
+            },
+        ),
+        budget=LearningRateBudget(
+            max_files_touched=1,
+            max_changed_lines=4,
+            max_normative_changes=1,
+        ),
+    )
+
+    assert reasons == (
         "max_files_touched_exceeded",
         "max_changed_lines_exceeded",
         "max_normative_changes_exceeded",

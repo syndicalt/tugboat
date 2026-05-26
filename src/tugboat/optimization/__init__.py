@@ -221,6 +221,29 @@ def evaluate_candidate(
     )
 
 
+def budget_reasons_for_bounded_edit_metadata(
+    metadata: tuple[dict[str, object], ...],
+    *,
+    budget: LearningRateBudget,
+) -> tuple[str, ...]:
+    candidate = OptimizationCandidate(
+        candidate_id="bounded-edit-metadata",
+        edits=tuple(
+            BoundedEdit(
+                operator=str(item["operator"]),
+                file=str(item["file"]),
+                section=str(item["section"]),
+                changed_lines=int(item["changed_lines"]),
+                normative_changes=int(item["normative_changes"]),
+            )
+            for item in metadata
+        ),
+        trigger_score=ScoreSet(behavior=0.0, regression=0.0, governance_passed=True),
+        held_out_score=ScoreSet(behavior=1.0, regression=0.0, governance_passed=True),
+    )
+    return _budget_reasons(candidate, budget)
+
+
 def rank_candidates(run: OptimizationRun) -> tuple[OptimizationDecision, ...]:
     candidates = sorted(
         run.candidates,
