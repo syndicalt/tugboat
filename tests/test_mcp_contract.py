@@ -1261,6 +1261,33 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
 
 
 @pytest.mark.parametrize(
+    ("request_fn", "expected_message"),
+    (
+        (lambda repo: tugboat_request_proposal(repo, "../audit-7"), "invalid audit_id"),
+        (lambda repo: tugboat_request_proposal(repo, ".."), "invalid audit_id"),
+        (
+            lambda repo: tugboat_request_eval(repo, "../candidate-9", "all"),
+            "invalid candidate_id",
+        ),
+        (lambda repo: tugboat_request_eval(repo, "..", "all"), "invalid candidate_id"),
+    ),
+)
+def test_direct_mcp_write_intent_calls_validate_artifact_ids_before_queueing(
+    tmp_path: Path,
+    request_fn: Callable[[Path], dict[str, object]],
+    expected_message: str,
+):
+    repo = tmp_path
+
+    with pytest.raises(ValueError, match=expected_message):
+        request_fn(repo)
+
+    assert not (sidecar_dir(repo) / "mcp" / "requests").exists()
+    assert not (sidecar_dir(repo) / "daemon.sqlite").exists()
+    assert _mcp_events(repo)[-1]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
     ("request_fn", "expected_kind", "expected_payload"),
     (
         (lambda repo: tugboat_request_proposal(repo, "audit-7"), "proposal", {"audit_id": "audit-7"}),

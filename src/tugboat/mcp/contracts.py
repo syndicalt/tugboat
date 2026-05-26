@@ -579,20 +579,28 @@ def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
 
 
 def tugboat_request_proposal(repo: str | Path, audit_id: str) -> dict[str, Any]:
+    def validate_audit_id() -> None:
+        _validate_mcp_artifact_id("audit_id", audit_id)
+
     return _write_request_artifact(
         repo,
         tool="tugboat_request_proposal",
         kind="proposal",
         payload={"audit_id": audit_id},
+        preflight=validate_audit_id,
     )
 
 
 def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dict[str, Any]:
+    def validate_candidate_id() -> None:
+        _validate_mcp_artifact_id("candidate_id", candidate_id)
+
     return _write_request_artifact(
         repo,
         tool="tugboat_request_eval",
         kind="eval",
         payload={"candidate_id": candidate_id, "suite": suite},
+        preflight=validate_candidate_id,
     )
 
 
