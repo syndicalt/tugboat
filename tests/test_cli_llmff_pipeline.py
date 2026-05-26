@@ -11,10 +11,13 @@ def _write_fake_llmff(
     path: Path,
     *,
     eval_passed: bool = False,
+    sources: object | None = None,
     bounded_edit_metadata: object | None = None,
     eval_report: object | None = None,
     policy_decision: object | None = None,
 ) -> Path:
+    if sources is None:
+        sources = [{"source_id": "ev_fake", "trusted": True}]
     if bounded_edit_metadata is None:
         bounded_edit_metadata = [
             {
@@ -54,6 +57,7 @@ import sys
 from pathlib import Path
 
 EVAL_PASSED = __EVAL_PASSED__
+SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 EVAL_REPORT = __EVAL_REPORT__
 POLICY_DECISION = __POLICY_DECISION__
@@ -106,7 +110,7 @@ if args[:1] == ["run"]:
             "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add llmff proposed regression guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
-            "sources": [{"source_id": "ev_fake", "trusted": True}],
+            "sources": SOURCES,
             "reflections": [{
                 "source_ref": "audit:latest",
                 "summary": "Tests were skipped because regression guidance was missing."
@@ -120,6 +124,8 @@ if args[:1] == ["run"]:
 
 raise SystemExit(64)
 """.replace("__EVAL_PASSED__", repr(eval_passed)).replace(
+            "__SOURCES__", repr(sources)
+        ).replace(
             "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
         ).replace("__EVAL_REPORT__", repr(eval_report)).replace(
             "__POLICY_DECISION__", repr(policy_decision)
@@ -403,6 +409,46 @@ llmff:
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "bounded_edit_metadata[0].operator is required" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_count = store.connection.execute(
+            "SELECT COUNT(*) FROM candidates"
+        ).fetchone()[0]
+    assert candidate_count == 0
+
+
+def test_propose_rejects_malformed_llmff_candidate_sources(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        sources=[{"source_id": "ev_fake", "trusted": "false"}],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "sources[0].trusted must be a boolean" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

@@ -1051,13 +1051,30 @@ def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> Can
         diff=str(payload["diff"]),
         risk_class=str(payload["risk_class"]),
         rationale=str(payload["rationale"]),
-        sources=tuple(
-            SourceRef(str(source["source_id"]), trusted=bool(source["trusted"]))
-            for source in payload.get("sources", [])
-            if isinstance(source, dict)
-        ),
+        sources=_source_refs_from_payload(payload),
         bounded_edit_metadata=_bounded_edit_metadata_from_payload(payload),
     )
+
+
+def _source_refs_from_payload(payload: dict[str, object]) -> tuple[SourceRef, ...]:
+    raw_sources = payload.get("sources", [])
+    if not isinstance(raw_sources, list):
+        raise ValueError("sources must be a JSON list")
+    return tuple(
+        _source_ref_from_payload(source, index=index)
+        for index, source in enumerate(raw_sources)
+    )
+
+
+def _source_ref_from_payload(source: object, *, index: int) -> SourceRef:
+    prefix = f"sources[{index}]"
+    if not isinstance(source, dict):
+        raise ValueError(f"{prefix} must be a JSON object")
+    source_id = _required_non_empty_string(source, "source_id", prefix)
+    trusted = source.get("trusted")
+    if not isinstance(trusted, bool):
+        raise ValueError(f"{prefix}.trusted must be a boolean")
+    return SourceRef(source_id, trusted=trusted)
 
 
 def _bounded_edit_metadata_from_payload(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
