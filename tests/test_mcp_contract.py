@@ -1745,6 +1745,35 @@ def test_mcp_jsonrpc_lists_and_invokes_tools(tmp_path: Path):
         "mutates_instructions": False,
         "write_intent": True,
     }
+    assert by_name["tugboat_request_proposal"] == {
+        "inputSchema": {
+            "additionalProperties": False,
+            "properties": {
+                "repo": {"type": "string"},
+                "audit_id": {"pattern": "^[0-9]+$", "type": "string"},
+            },
+            "required": ["repo", "audit_id"],
+            "type": "object",
+        },
+        "name": "tugboat_request_proposal",
+        "mutates_instructions": False,
+        "write_intent": True,
+    }
+    assert by_name["tugboat_request_eval"] == {
+        "inputSchema": {
+            "additionalProperties": False,
+            "properties": {
+                "repo": {"type": "string"},
+                "candidate_id": {"pattern": "^[0-9]+$", "type": "string"},
+                "suite": {"type": "string"},
+            },
+            "required": ["repo", "candidate_id", "suite"],
+            "type": "object",
+        },
+        "name": "tugboat_request_eval",
+        "mutates_instructions": False,
+        "write_intent": True,
+    }
     assert by_name["tugboat_record_episode"]["write_intent"] is True
     assert all(tool["mutates_instructions"] is False for tool in tools)
     assert handle_jsonrpc_request(
@@ -1971,6 +2000,48 @@ def test_mcp_jsonrpc_validates_tool_arguments_before_invocation(tmp_path: Path):
         "id": 11,
         "error": {"code": -32602, "message": "invalid params: trace_id has invalid format"},
     }
+    assert _mcp_events(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "expected_message"),
+    (
+        (
+            "tugboat_request_proposal",
+            {"audit_id": "audit-7"},
+            "invalid params: audit_id has invalid format",
+        ),
+        (
+            "tugboat_request_eval",
+            {"candidate_id": "candidate-9", "suite": "all"},
+            "invalid params: candidate_id has invalid format",
+        ),
+    ),
+)
+def test_mcp_jsonrpc_rejects_non_decimal_write_intent_target_ids_before_invocation(
+    tmp_path: Path,
+    tool_name: str,
+    arguments: dict[str, str],
+    expected_message: str,
+):
+    response = handle_jsonrpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": {"repo": str(tmp_path), **arguments},
+            },
+        }
+    )
+
+    assert response == {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "error": {"code": -32602, "message": expected_message},
+    }
+    assert not (sidecar_dir(tmp_path) / "daemon.sqlite").exists()
     assert _mcp_events(tmp_path) == []
 
 

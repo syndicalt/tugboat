@@ -62,6 +62,7 @@ _INTEGER_ID_SCHEMA = {"type": "integer"}
 _SAFE_MCP_ID_PATTERN_TEXT = r"^(?!\.\.?$)[A-Za-z0-9_.-]+$"
 _SAFE_MCP_ID_PATTERN = re.compile(_SAFE_MCP_ID_PATTERN_TEXT)
 _STRING_ID_SCHEMA = {"pattern": _SAFE_MCP_ID_PATTERN_TEXT, "type": "string"}
+_DECIMAL_ID_SCHEMA = {"pattern": r"^[0-9]+$", "type": "string"}
 
 MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "tugboat_active_instructions": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
@@ -91,11 +92,11 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         ("repo", "trace_id"),
     ),
     "tugboat_request_eval": _object_schema(
-        {"repo": _REPO_SCHEMA, "candidate_id": _STRING_ID_SCHEMA, "suite": {"type": "string"}},
+        {"repo": _REPO_SCHEMA, "candidate_id": _DECIMAL_ID_SCHEMA, "suite": {"type": "string"}},
         ("repo", "candidate_id", "suite"),
     ),
     "tugboat_request_proposal": _object_schema(
-        {"repo": _REPO_SCHEMA, "audit_id": _STRING_ID_SCHEMA},
+        {"repo": _REPO_SCHEMA, "audit_id": _DECIMAL_ID_SCHEMA},
         ("repo", "audit_id"),
     ),
     "tugboat_run_report": _object_schema(
