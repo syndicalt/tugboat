@@ -112,6 +112,23 @@ External links like [site](https://example.com) are not checked.
     assert all(finding.code == "link.local_missing" for finding in report.findings)
 
 
+def test_missing_local_markdown_anchor_is_reported(tmp_path: Path):
+    guide = tmp_path / "docs" / "guide.md"
+    guide.parent.mkdir()
+    guide.write_text("# Setup Guide\n", encoding="utf-8")
+    markdown = "# Links\n\nSee [missing section](docs/guide.md#missing-section).\n"
+
+    report = evaluate_markdown_pair(markdown, markdown, root=tmp_path)
+
+    assert report.passed is False
+    assert any(
+        finding.code == "link.anchor_missing"
+        and finding.target == "docs/guide.md#missing-section"
+        and finding.severity is Severity.ERROR
+        for finding in report.findings
+    )
+
+
 def test_semantic_diff_classifies_additive_clarification_and_normative_change():
     additive = evaluate_markdown_pair(
         "# Reviews\n\nRun tests before final response.\n",

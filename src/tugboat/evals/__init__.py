@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 class Severity(str, Enum):
@@ -533,16 +533,31 @@ def _local_path_findings(
 
     for target in [*_markdown_link_targets(markdown), *_inline_path_targets(markdown)]:
         normalized = _normalize_local_target(target)
-        if normalized is None or normalized in seen:
+        if normalized is None:
             continue
-        seen.add(normalized)
-        if not _local_path_exists(normalized, root=root, overlay_root=overlay_root):
+        path, fragment = normalized
+        display_target = f"{path}#{fragment}" if fragment else path
+        if display_target in seen:
+            continue
+        seen.add(display_target)
+        existing_path = _existing_local_path(path, root=root, overlay_root=overlay_root)
+        if existing_path is None:
             findings.append(
                 StructuralFinding(
                     code="link.local_missing",
-                    message=f"Local link or path does not exist: {normalized}",
+                    message=f"Local link or path does not exist: {path}",
                     severity=Severity.ERROR,
-                    target=normalized,
+                    target=path,
+                )
+            )
+            continue
+        if fragment and existing_path.suffix == ".md" and fragment not in _anchors(existing_path.read_text(encoding="utf-8")):
+            findings.append(
+                StructuralFinding(
+                    code="link.anchor_missing",
+                    message=f"Local markdown anchor does not exist: {display_target}",
+                    severity=Severity.ERROR,
+                    target=display_target,
                 )
             )
 
@@ -550,9 +565,16 @@ def _local_path_findings(
 
 
 def _local_path_exists(normalized: str, *, root: Path, overlay_root: Path | None) -> bool:
-    if (root / normalized).exists():
-        return True
-    return overlay_root is not None and (overlay_root / normalized).exists()
+    return _existing_local_path(normalized, root=root, overlay_root=overlay_root) is not None
+
+
+def _existing_local_path(normalized: str, *, root: Path, overlay_root: Path | None) -> Path | None:
+    if overlay_root is not None and (overlay_path := overlay_root / normalized).exists():
+        return overlay_path
+    root_path = root / normalized
+    if root_path.exists():
+        return root_path
+    return None
 
 
 def _markdown_link_targets(markdown: str) -> tuple[str, ...]:
@@ -568,7 +590,7 @@ def _inline_path_targets(markdown: str) -> tuple[str, ...]:
     return tuple(targets)
 
 
-def _normalize_local_target(target: str) -> str | None:
+def _normalize_local_target(target: str) -> tuple[str, str] | None:
     target = target.split()[0].strip("<>")
     parsed = urlparse(target)
     if parsed.scheme or parsed.netloc or target.startswith("#"):
@@ -577,7 +599,7 @@ def _normalize_local_target(target: str) -> str | None:
     path = parsed.path
     if not path:
         return None
-    return path.lstrip("/")
+    return path.lstrip("/"), unquote(parsed.fragment)
 
 
 def _classify_semantic_diff(before: str, after: str) -> str:
