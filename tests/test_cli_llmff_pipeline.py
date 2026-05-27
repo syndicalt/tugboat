@@ -8,6 +8,7 @@ from tugboat.artifacts import ArtifactValidationError
 from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.security.secrets import SecretScanError
 
 
@@ -1210,6 +1211,49 @@ llmff:
         candidate_edit[4],
     )
     assert candidate_edit[4] is not None
+
+
+def test_propose_does_not_publish_needs_review_state_before_policy_artifact_is_durable(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+
+    def fail_policy_gate(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("policy-gate write failed")
+
+    monkeypatch.setattr("tugboat.propose.pipeline._write_policy_gate", fail_policy_gate)
+
+    with pytest.raises(RuntimeError, match="policy-gate write failed"):
+        run_propose_pipeline(repo, "latest")
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_states = [
+            row[0] for row in store.connection.execute("SELECT state FROM candidates").fetchall()
+        ]
+        decision_count = store.connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+
+    assert "needs_review" not in candidate_states
+    assert decision_count == 0
 
 
 def test_propose_rejects_candidate_source_not_in_audit_evidence(tmp_path: Path, capsys):

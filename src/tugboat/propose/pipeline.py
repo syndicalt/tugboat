@@ -67,7 +67,7 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
             audit_id=int(audit["audit_id"]),
             candidate=candidate,
             diff_path=artifacts.diff_path,
-            state="needs_review" if decision_allowed else "rejected",
+            state="artifact_pending",
         )
         _record_candidate_provenance(
             store,
@@ -93,6 +93,11 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
             actor="tugboat",
             policy="deterministic_policy_gate",
             decision="needs_review" if decision_allowed else "rejected",
+            reason=",".join(decision_reasons),
+        )
+        store.update_candidate_state(
+            candidate_id=candidate_id,
+            state="needs_review" if decision_allowed else "rejected",
             reason=",".join(decision_reasons),
         )
     return ProposePipelineResult(
