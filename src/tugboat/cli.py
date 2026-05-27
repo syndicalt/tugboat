@@ -265,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_cycle.add_argument("--lease-seconds", type=int, default=300)
     daemon_cycle.add_argument("--max-jobs", type=int, default=1)
     daemon_cycle.add_argument("--concurrency", type=int, default=1)
+    daemon_cycle.add_argument("--rate-limit-window-seconds", type=int)
+    daemon_cycle.add_argument("--rate-limit-max-jobs", type=int)
     daemon_cycle.add_argument("--trace-dir", action="append", default=[])
     daemon_cycle.add_argument("--cycles", type=int, default=1)
     daemon_cycle.add_argument("--interval-seconds", type=float, default=0.0)
@@ -755,12 +757,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.trace_dir
             else tuple(default_trace_dirs(repo))
         )
+        if (args.rate_limit_window_seconds is None) != (args.rate_limit_max_jobs is None):
+            raise ValueError(
+                "rate-limit-window-seconds and rate-limit-max-jobs must be provided together"
+            )
         config = DaemonLoopConfig(
             worker_id=args.worker_id,
             max_jobs_per_cycle=args.max_jobs,
             concurrency_limit=args.concurrency,
             lease_duration=timedelta(seconds=args.lease_seconds),
             trace_dirs=trace_dirs,
+            rate_limit_window=(
+                timedelta(seconds=args.rate_limit_window_seconds)
+                if args.rate_limit_window_seconds is not None
+                else None
+            ),
+            max_jobs_per_rate_window=args.rate_limit_max_jobs,
             kill_switch=default_kill_switch(repo),
         )
         if args.cycles < 1:

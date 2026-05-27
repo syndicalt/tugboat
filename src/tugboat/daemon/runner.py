@@ -35,6 +35,8 @@ class DaemonLoopConfig:
     concurrency_limit: int
     lease_duration: timedelta
     trace_dirs: tuple[Path, ...] = ()
+    rate_limit_window: timedelta | None = None
+    max_jobs_per_rate_window: int | None = None
     kill_switch: KillSwitch | None = None
     now: datetime | None = None
     max_attempts: int = 3
@@ -126,7 +128,9 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
             max_attempts=config.max_attempts,
         )
         record_recovered_job_states(repo, queue, recovered)
-        slots = max(0, min(config.max_jobs_per_cycle, config.concurrency_limit))
+        rate_limit_slots = _rate_limit_slots(queue, config)
+        slots = max(0, min(config.max_jobs_per_cycle, config.concurrency_limit, rate_limit_slots))
+        temporal_rate_limited = rate_limit_slots == 0
         for _ in range(slots):
             try:
                 job = queue.acquire_next(
@@ -177,7 +181,9 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
         "resume_jobs": resume_jobs,
         "recovered_jobs": list(recovered),
         "trace_discovery": trace_discovery,
-        "rate_limited": remaining_queued > 0,
+        "rate_limited": remaining_queued > 0 and (
+            temporal_rate_limited or len(processed_jobs) >= slots
+        ),
         "concurrency_limited": config.concurrency_limit < config.max_jobs_per_cycle,
     }
 
@@ -291,6 +297,29 @@ def _queued_count(queue: DaemonQueue) -> int:
             (JobState.QUEUED.value,),
         ).fetchone()[0]
     )
+
+
+def _rate_limit_slots(queue: DaemonQueue, config: DaemonLoopConfig) -> int:
+    if config.rate_limit_window is None or config.max_jobs_per_rate_window is None:
+        return config.max_jobs_per_cycle
+    if config.rate_limit_window.total_seconds() <= 0:
+        raise ValueError("rate_limit_window must be positive")
+    if config.max_jobs_per_rate_window < 0:
+        raise ValueError("max_jobs_per_rate_window must be non-negative")
+
+    now = config.now or datetime.now().astimezone()
+    window_start = now - config.rate_limit_window
+    used = int(
+        queue.connection.execute(
+            """
+            SELECT COUNT(*) FROM daemon_jobs
+            WHERE attempts > 0
+              AND updated_at >= ?
+            """,
+            (window_start.isoformat(),),
+        ).fetchone()[0]
+    )
+    return max(0, config.max_jobs_per_rate_window - used)
 
 
 def _resume_can_execute(resume: dict[str, Any]) -> bool:

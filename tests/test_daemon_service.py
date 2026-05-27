@@ -1116,6 +1116,38 @@ def test_daemon_cycle_cli_can_run_bounded_loop(tmp_path: Path, capsys):
     assert [cycle["processed_jobs"] for cycle in payload["cycles"]] == [[1], [2]]
 
 
+def test_daemon_cycle_cli_wires_time_window_rate_limit(tmp_path: Path, capsys):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
+        queue.enqueue(kind="audit", payload={"n": 2}, now=_at(1))
+
+    exit_code = main(
+        [
+            "daemon",
+            "cycle",
+            "--repo",
+            str(tmp_path),
+            "--max-jobs",
+            "2",
+            "--concurrency",
+            "2",
+            "--rate-limit-window-seconds",
+            "300",
+            "--rate-limit-max-jobs",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["processed_jobs"] == [1]
+    assert payload["rate_limited"] is True
+    assert payload["concurrency_limited"] is False
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
+        assert queue.get_job(2).state is JobState.QUEUED  # type: ignore[union-attr]
+
+
 def test_daemon_cycle_cli_preserves_one_cycle_output_shape(tmp_path: Path, capsys):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
@@ -1146,6 +1178,23 @@ def test_daemon_cycle_cli_rejects_negative_interval_for_single_cycle(tmp_path: P
         assert str(error) == "interval_seconds must be non-negative"
     else:
         raise AssertionError("negative interval should fail")
+
+
+def test_daemon_cycle_cli_requires_complete_rate_limit_configuration(tmp_path: Path):
+    with pytest.raises(
+        ValueError,
+        match="rate-limit-window-seconds and rate-limit-max-jobs must be provided together",
+    ):
+        main(
+            [
+                "daemon",
+                "cycle",
+                "--repo",
+                str(tmp_path),
+                "--rate-limit-window-seconds",
+                "300",
+            ]
+        )
 
 
 def test_daemon_unix_socket_serves_status_and_exits_after_bounded_requests(tmp_path: Path):

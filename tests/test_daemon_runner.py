@@ -612,6 +612,33 @@ def test_run_daemon_cycle_applies_rate_and_concurrency_limits(tmp_path: Path):
         assert queue.get_job(2).state is JobState.QUEUED  # type: ignore[union-attr]
 
 
+def test_run_daemon_cycle_enforces_time_window_rate_limit(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        for number in range(3):
+            queue.enqueue(kind="audit", payload={"n": number}, now=_at(number))
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=3,
+            concurrency_limit=3,
+            lease_duration=timedelta(seconds=30),
+            rate_limit_window=timedelta(minutes=5),
+            max_jobs_per_rate_window=1,
+            now=_at(10),
+        ),
+    )
+
+    assert result["processed_jobs"] == [1]
+    assert result["rate_limited"] is True
+    assert result["concurrency_limited"] is False
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1).state is JobState.WAITING_REVIEW  # type: ignore[union-attr]
+        assert queue.get_job(2).state is JobState.QUEUED  # type: ignore[union-attr]
+        assert queue.get_job(3).state is JobState.QUEUED  # type: ignore[union-attr]
+
+
 def test_run_daemon_loop_runs_bounded_cycles_and_sleeps_between_cycles(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
@@ -666,6 +693,35 @@ def test_run_daemon_loop_rejects_invalid_bounds(tmp_path: Path):
         assert str(error) == "interval_seconds must be non-negative"
     else:
         raise AssertionError("negative interval should fail")
+
+
+def test_run_daemon_cycle_rejects_invalid_rate_limit_bounds(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        queue.enqueue(kind="audit", payload={"n": 1}, now=_at(0))
+
+    config = DaemonLoopConfig(
+        worker_id="worker-a",
+        max_jobs_per_cycle=1,
+        concurrency_limit=1,
+        lease_duration=timedelta(seconds=30),
+        rate_limit_window=timedelta(seconds=0),
+        max_jobs_per_rate_window=1,
+        now=_at(10),
+    )
+    with pytest.raises(ValueError, match="rate_limit_window must be positive"):
+        run_daemon_cycle(tmp_path, config)
+
+    config = DaemonLoopConfig(
+        worker_id="worker-a",
+        max_jobs_per_cycle=1,
+        concurrency_limit=1,
+        lease_duration=timedelta(seconds=30),
+        rate_limit_window=timedelta(seconds=300),
+        max_jobs_per_rate_window=-1,
+        now=_at(10),
+    )
+    with pytest.raises(ValueError, match="max_jobs_per_rate_window must be non-negative"):
+        run_daemon_cycle(tmp_path, config)
 
 
 def test_run_daemon_cycle_fails_corrupt_queue_payload_without_crashing(
