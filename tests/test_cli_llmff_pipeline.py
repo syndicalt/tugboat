@@ -3639,6 +3639,11 @@ def test_optimization_summary_rejects_accepted_eval_without_bounded_edit_metadat
                 "recommendation": "accept",
                 "suite_id": "held-out",
                 "trigger_score": 0.7,
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
             }
         )
         + "\n",
@@ -3699,6 +3704,11 @@ def test_optimization_summary_requires_acceptance_summary_for_needs_review(tmp_p
                 "recommendation": "accept",
                 "suite_id": "held-out",
                 "trigger_score": 0.7,
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
             }
         )
         + "\n",
@@ -3765,6 +3775,11 @@ def test_optimization_summary_rejects_secret_bearing_acceptance_summary_before_s
                 "recommendation": "accept",
                 "suite_id": "held-out",
                 "trigger_score": 0.7,
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
             }
         )
         + "\n",

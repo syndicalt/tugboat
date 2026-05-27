@@ -112,6 +112,11 @@ def _candidate_run(
                 "governance_passed": True,
                 "recommendation": "accept",
                 "metrics": {"governance_regressions": 0},
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
             },
             indent=2,
             sort_keys=True,
@@ -704,6 +709,39 @@ def test_apply_rejects_eval_report_with_regression_degradation(tmp_path: Path):
         "governance_regressions": 0,
         "regression_score": 0.20,
         "regression_tolerance": 0.05,
+    }
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_rejects_eval_report_without_validation_split_provenance(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report.pop("validation_splits")
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_rejects_overlapping_trigger_and_held_out_validation_splits(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["validation_splits"] = {
+        "trigger": ["case:shared"],
+        "held_out": ["case:shared"],
     }
     (run_dir / "eval-report.json").write_text(
         json.dumps(eval_report, indent=2, sort_keys=True) + "\n",

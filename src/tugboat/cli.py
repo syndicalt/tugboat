@@ -2324,6 +2324,9 @@ def _assert_eval_acceptance(
         raise ValueError("held-out eval score did not improve")
     if validation_baseline_score is not None and float(held_out_score) <= validation_baseline_score:
         raise ValueError("held-out eval score did not improve over baseline")
+    split_failure = _eval_validation_split_failure(eval_report)
+    if split_failure is not None:
+        raise ValueError(split_failure)
     regression_score = _score_from_eval_report(eval_report, "regression_score")
     baseline_regression_score = _score_from_eval_report(eval_report, "baseline_regression_score")
     if regression_score is not None or baseline_regression_score is not None:
@@ -2332,6 +2335,36 @@ def _assert_eval_acceptance(
         regression_tolerance = _score_from_eval_report(eval_report, "regression_tolerance") or 0.0
         if regression_score > baseline_regression_score + regression_tolerance:
             raise ValueError("regression score degraded beyond tolerance")
+
+
+def _eval_validation_split_failure(eval_report: dict[str, object]) -> str | None:
+    raw_splits = eval_report.get("validation_splits")
+    if raw_splits is None:
+        return "eval report cannot accept without validation split provenance"
+    if not isinstance(raw_splits, dict):
+        return "eval report validation_splits must be an object"
+    splits: dict[str, set[str]] = {}
+    for split_name, raw_case_ids in raw_splits.items():
+        if not isinstance(split_name, str) or not split_name.strip():
+            return "eval report validation_splits keys must be non-empty strings"
+        if not isinstance(raw_case_ids, list) or not all(
+            isinstance(case_id, str) and case_id.strip() for case_id in raw_case_ids
+        ):
+            return f"eval report validation_splits.{split_name} must be a JSON list of strings"
+        splits[split_name] = set(raw_case_ids)
+    trigger_cases = splits.get("trigger", set())
+    held_out_cases = splits.get("held_out", set())
+    if not trigger_cases:
+        return "eval report cannot accept without triggering validation cases"
+    if not held_out_cases:
+        return "eval report cannot accept without held-out validation case IDs"
+    overlap = sorted(trigger_cases & held_out_cases)
+    if overlap:
+        return (
+            "eval report triggering validation cases overlap held-out validation cases: "
+            + ", ".join(overlap)
+        )
+    return None
 
 
 def _validation_baseline_key(suite_id: str) -> str:
