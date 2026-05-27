@@ -60,6 +60,7 @@ def _evidence_chain_lines(repo: Path, run_dir: Path, eval_report_path: Path) -> 
         ("instruction_graph", run_dir / "instruction-graph.json"),
         ("audit_report", run_dir / "audit.json"),
         ("candidate_metadata", run_dir / "candidate.json"),
+        ("candidate_ranking", run_dir / "candidate-ranking.json"),
         ("candidate_diff", run_dir / "candidate.diff"),
         ("policy_gate", run_dir / "policy-gate.json"),
         ("eval_report", eval_report_path),
