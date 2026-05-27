@@ -28,6 +28,8 @@ def ingest_codex_session_bundle(path: Path) -> TraceBundle:
             event = _normalize_codex_session_meta(row["payload"])
             if event is not None:
                 events.append(event)
+        elif row.get("type") == "turn_context" and isinstance(row.get("payload"), dict):
+            events.append(_normalize_codex_turn_context(row["payload"]))
         elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
             events.extend(_normalize_codex_response_item(row["payload"], tool_names_by_call_id))
     return _bundle_from_payloads(path, _derive_test_results(events))
@@ -253,6 +255,17 @@ def _normalize_codex_session_meta(payload: dict[str, Any]) -> dict[str, Any] | N
         "source": str(base_instructions.get("source", "base_instructions")),
         "text": str(text),
     }
+
+
+def _normalize_codex_turn_context(payload: dict[str, Any]) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": "policy_context",
+        "source": "codex_turn_context",
+    }
+    for key in ("approval_policy", "cwd", "current_date", "model", "sandbox_policy", "timezone"):
+        if key in payload:
+            event[key] = payload[key]
+    return event
 
 
 def _normalize_claude_message(

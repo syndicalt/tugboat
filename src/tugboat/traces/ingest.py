@@ -16,6 +16,7 @@ TRUST_BY_EVENT_TYPE = {
     "diff": "artifact",
     "test_result": "artifact",
     "instruction_snapshot": "artifact",
+    "policy_context": "policy",
     "final_answer": "agent",
     "subagent_report": "agent",
     "outcome_label": "verifier",
@@ -98,7 +99,8 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
         policy_events=tuple(
             event
             for event in bundle.events
-            if event.event_type in {"policy_violation", "policy_denial", "policy_failure"}
+            if event.event_type
+            in {"policy_context", "policy_violation", "policy_denial", "policy_failure"}
         ),
         user_corrections=_events_of_type(bundle.events, "user_correction"),
         subagent_reports=_events_of_type(bundle.events, "subagent_report"),

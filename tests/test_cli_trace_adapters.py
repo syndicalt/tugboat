@@ -403,6 +403,7 @@ def test_audit_cli_ingests_codex_local_session_export_fixture(tmp_path: Path):
     rows = _event_rows(repo)
     assert [event_type for event_type, _ in rows] == [
         "instruction_snapshot",
+        "policy_context",
         "user_request",
         "tool_call",
         "tool_result",
@@ -417,7 +418,17 @@ def test_audit_cli_ingests_codex_local_session_export_fixture(tmp_path: Path):
         "source": "CODEX.md",
         "text": original,
     }
-    assert json.loads(rows[4][1]) == {
+    assert json.loads(rows[1][1]) == {
+        "type": "policy_context",
+        "approval_policy": "never",
+        "cwd": "/workspace/example",
+        "current_date": "2026-05-20",
+        "model": "gpt-5.5",
+        "sandbox_policy": {"type": "danger-full-access"},
+        "source": "codex_turn_context",
+        "timezone": "America/Chicago",
+    }
+    assert json.loads(rows[5][1]) == {
         "type": "test_result",
         "suite": "pytest",
         "passed": False,
@@ -426,7 +437,7 @@ def test_audit_cli_ingests_codex_local_session_export_fixture(tmp_path: Path):
         "call_id": "call_test_1",
         "derived_from": "call_test_1",
     }
-    assert json.loads(rows[6][1])["path"] == "CODEX.md"
+    assert json.loads(rows[7][1])["path"] == "CODEX.md"
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
