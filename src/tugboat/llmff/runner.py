@@ -21,6 +21,10 @@ class OutputPathError(ValueError):
     pass
 
 
+class InputPathError(ValueError):
+    pass
+
+
 class CheckpointPathError(ValueError):
     pass
 
@@ -78,9 +82,12 @@ class LlmffRunSupervisor:
         trace_path = lifecycle_dir / "llmff-trace.jsonl"
         events_path = lifecycle_dir / "llmff-events.jsonl"
         actual_checkpoint_path = checkpoint_path or lifecycle_dir / "checkpoint.json"
+        inputs = dict(input_paths or {})
         outputs = dict(output_paths or {})
         ensure_private_dir(run_dir)
         ensure_private_dir(lifecycle_dir)
+        _validate_input_paths(run_dir, inputs)
+        _scan_input_paths(inputs)
         _validate_checkpoint_path(run_dir, actual_checkpoint_path)
         _reject_checkpoint_mismatch(actual_checkpoint_path, manifest_path)
         _validate_output_paths(run_dir, outputs)
@@ -104,7 +111,7 @@ class LlmffRunSupervisor:
             "--retry-backoff-ms",
             str(retry_backoff_ms),
         ]
-        for name, path in (input_paths or {}).items():
+        for name, path in inputs.items():
             command.extend(["--input", name, str(path)])
         for name, path in outputs.items():
             command.extend(["--output", name, str(path)])
@@ -199,6 +206,30 @@ def _validate_output_paths(run_dir: Path, output_paths: dict[str, Path]) -> None
             path.resolve().relative_to(run_root)
         except ValueError as exc:
             raise OutputPathError("llmff output path is outside run directory") from exc
+
+
+def _validate_input_paths(run_dir: Path, input_paths: dict[str, Path]) -> None:
+    sidecar_root = _sidecar_root_for_run_dir(run_dir).resolve()
+    for path in input_paths.values():
+        resolved = path.resolve()
+        if not resolved.exists():
+            raise InputPathError("llmff input path does not exist")
+        try:
+            resolved.relative_to(sidecar_root)
+        except ValueError as exc:
+            raise InputPathError("llmff input path is outside .sidecar") from exc
+
+
+def _scan_input_paths(input_paths: dict[str, Path]) -> None:
+    for path in input_paths.values():
+        scan_path(path)
+
+
+def _sidecar_root_for_run_dir(run_dir: Path) -> Path:
+    runs_dir = run_dir.parent
+    if runs_dir.name != "runs":
+        return run_dir
+    return runs_dir.parent
 
 
 def _validate_checkpoint_path(run_dir: Path, checkpoint_path: Path) -> None:

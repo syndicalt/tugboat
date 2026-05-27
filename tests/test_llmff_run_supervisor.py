@@ -12,6 +12,7 @@ import pytest
 from tugboat.llmff.runner import (
     CheckpointPathError,
     CheckpointMismatchError,
+    InputPathError,
     InspectPolicyError,
     MissingOutputError,
     OutputPathError,
@@ -346,6 +347,9 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
     manifest = tmp_path / "episode-audit.yaml"
     manifest.write_text("name: episode-audit\n", encoding="utf-8")
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    input_path = run_dir / "trace-input.jsonl"
+    input_path.parent.mkdir(parents=True)
+    input_path.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
 
     result = run_manifest(
         manifest,
@@ -354,7 +358,7 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
         timeout_ms=12_000,
         retry_attempts=2,
         retry_backoff_ms=250,
-        input_paths={"episode_trace": run_dir / "trace-input.jsonl"},
+        input_paths={"episode_trace": input_path},
         output_paths={"audit_report": run_dir / "audit.raw.json"},
     )
 
@@ -362,12 +366,75 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
     assert command[-6:] == [
         "--input",
         "episode_trace",
-        str(run_dir / "trace-input.jsonl"),
+        str(input_path),
         "--output",
         "audit_report",
         str(run_dir / "audit.raw.json"),
     ]
     assert result.output_paths == {"audit_report": run_dir / "audit.raw.json"}
+
+
+def test_run_manifest_rejects_inputs_outside_sidecar_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    outside_input = tmp_path / "outside-secret.txt"
+    outside_input.write_text("sk-abcdefghijklmnopqrstuvwx\n", encoding="utf-8")
+
+    with pytest.raises(InputPathError, match="outside .sidecar"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            input_paths={"policy": outside_input},
+        )
+
+    assert calls == []
+
+
+def test_run_manifest_scans_sidecar_inputs_before_subprocess(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    sidecar_input = tmp_path / ".sidecar" / "policy.yaml"
+    sidecar_input.parent.mkdir()
+    sidecar_input.write_text("api_key: sk-abcdefghijklmnopqrstuvwx\n", encoding="utf-8")
+
+    with pytest.raises(SecretScanError, match="openai_api_key"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            input_paths={"policy": sidecar_input},
+        )
+
+    assert calls == []
 
 
 def test_run_manifest_marks_lifecycle_artifacts_private_under_permissive_umask(
