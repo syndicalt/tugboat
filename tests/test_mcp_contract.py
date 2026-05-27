@@ -2743,6 +2743,53 @@ def test_bound_read_only_mcp_stdio_lists_only_read_tools(tmp_path: Path):
     assert all("repo" not in tool["inputSchema"]["required"] for tool in tools)
 
 
+def test_mcp_tool_registry_exposes_only_approved_non_mutating_tools():
+    approved_read_tools = {
+        "tugboat_active_instructions",
+        "tugboat_candidate",
+        "tugboat_candidate_report",
+        "tugboat_daemon_status",
+        "tugboat_decision_trace",
+        "tugboat_harness_findings",
+        "tugboat_index_summary",
+        "tugboat_instruction_graph",
+        "tugboat_latest_audit",
+        "tugboat_latest_runs",
+        "tugboat_run_report",
+        "tugboat_status",
+    }
+    approved_write_intent_tools = {
+        "tugboat_record_episode",
+        "tugboat_request_audit",
+        "tugboat_request_eval",
+        "tugboat_request_proposal",
+    }
+    deferred_authority_terms = {
+        "apply",
+        "rollback",
+        "policy",
+        "credential",
+        "provider",
+        "daemon_start",
+        "daemon_stop",
+        "daemon_control",
+    }
+
+    assert set(mcp_contracts.WRITE_INTENT_TOOLS) == approved_write_intent_tools
+    assert set(mcp_contracts.MCP_TOOLS) == approved_read_tools | approved_write_intent_tools
+    assert set(mcp_contracts.MCP_TOOL_INPUT_SCHEMAS) == set(mcp_contracts.MCP_TOOLS)
+
+    for tool_name in mcp_contracts.MCP_TOOLS:
+        assert not any(term in tool_name for term in deferred_authority_terms)
+
+    tools = list_mcp_tools()
+    assert {tool["name"] for tool in tools} == set(mcp_contracts.MCP_TOOLS)
+    assert all(tool["mutates_instructions"] is False for tool in tools)
+    assert {
+        tool["name"] for tool in tools if tool["write_intent"]
+    } == approved_write_intent_tools
+
+
 def test_bound_read_only_mcp_stdio_rejects_decision_trace_without_writing_artifact(
     tmp_path: Path,
 ):
