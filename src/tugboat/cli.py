@@ -2066,32 +2066,48 @@ def _assert_auto_apply_precheck(
 ) -> None:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo)
+    categories = _auto_apply_candidate_categories(candidate)
+    vcs_proof = VcsProof(
+        mode=mode,
+        commit_sha="pending",
+        branch_name=branch_name,
+        rollback_commands=(rollback_command,),
+    )
+    auto_apply_candidate = AutoApplyCandidate(
+        candidate_id=str(candidate_id),
+        repository=str(repo.resolve()),
+        change_class=candidate.risk_class,
+        categories=categories,
+        held_out_eval_passed=True,
+        governance_regression_passed=True,
+        rejection_rate=float(metrics["rejection_rate"]),
+        rollback_rate=float(metrics["rollback_rate"]),
+        vcs_proof=vcs_proof,
+    )
+    readiness = _auto_apply_readiness(
+        repo,
+        review_actor=review_actor,
+        confirmed=confirmed,
+        policy_version=policy_version,
+        burn_in_days=int(metrics["burn_in_days"]),
+    )
     decision = evaluate_auto_apply(
-        candidate=AutoApplyCandidate(
-            candidate_id=str(candidate_id),
-            repository=str(repo.resolve()),
-            change_class=candidate.risk_class,
-            categories=_auto_apply_candidate_categories(candidate),
-            held_out_eval_passed=True,
-            governance_regression_passed=True,
-            rejection_rate=float(metrics["rejection_rate"]),
-            rollback_rate=float(metrics["rollback_rate"]),
-            vcs_proof=VcsProof(
-                mode=mode,
-                commit_sha="pending",
-                branch_name=branch_name,
-                rollback_commands=(rollback_command,),
-            ),
-        ),
-        readiness=_auto_apply_readiness(
-            repo,
-            review_actor=review_actor,
-            confirmed=confirmed,
-            policy_version=policy_version,
-            burn_in_days=int(metrics["burn_in_days"]),
+        candidate=auto_apply_candidate,
+        readiness=readiness,
+    )
+    _record_auto_apply_decision(
+        repo,
+        candidate_id,
+        run_dir.name,
+        decision.reasons,
+        review_actor,
+        snapshot=_auto_apply_decision_snapshot(
+            phase="precheck",
+            candidate=auto_apply_candidate,
+            readiness=readiness,
+            metrics=metrics,
         ),
     )
-    _record_auto_apply_decision(repo, candidate_id, run_dir.name, decision.reasons, review_actor)
     if not decision.eligible:
         raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
 
@@ -2122,32 +2138,48 @@ def _assert_auto_apply_final(
 ) -> dict[str, object]:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo)
+    categories = _auto_apply_candidate_categories(candidate)
+    vcs_proof = VcsProof(
+        mode=mode,
+        commit_sha=applied_commit,
+        branch_name=branch_name,
+        rollback_commands=(rollback_command,),
+    )
+    auto_apply_candidate = AutoApplyCandidate(
+        candidate_id=str(candidate_id),
+        repository=str(repo.resolve()),
+        change_class=candidate.risk_class,
+        categories=categories,
+        held_out_eval_passed=True,
+        governance_regression_passed=True,
+        rejection_rate=float(metrics["rejection_rate"]),
+        rollback_rate=float(metrics["rollback_rate"]),
+        vcs_proof=vcs_proof,
+    )
+    readiness = _auto_apply_readiness(
+        repo,
+        review_actor=review_actor,
+        confirmed=confirmed,
+        policy_version=policy_version,
+        burn_in_days=int(metrics["burn_in_days"]),
+    )
     decision = evaluate_auto_apply(
-        candidate=AutoApplyCandidate(
-            candidate_id=str(candidate_id),
-            repository=str(repo.resolve()),
-            change_class=candidate.risk_class,
-            categories=_auto_apply_candidate_categories(candidate),
-            held_out_eval_passed=True,
-            governance_regression_passed=True,
-            rejection_rate=float(metrics["rejection_rate"]),
-            rollback_rate=float(metrics["rollback_rate"]),
-            vcs_proof=VcsProof(
-                mode=mode,
-                commit_sha=applied_commit,
-                branch_name=branch_name,
-                rollback_commands=(rollback_command,),
-            ),
-        ),
-        readiness=_auto_apply_readiness(
-            repo,
-            review_actor=review_actor,
-            confirmed=confirmed,
-            policy_version=policy_version,
-            burn_in_days=int(metrics["burn_in_days"]),
+        candidate=auto_apply_candidate,
+        readiness=readiness,
+    )
+    _record_auto_apply_decision(
+        repo,
+        candidate_id,
+        run_dir.name,
+        decision.reasons,
+        review_actor,
+        snapshot=_auto_apply_decision_snapshot(
+            phase="final",
+            candidate=auto_apply_candidate,
+            readiness=readiness,
+            metrics=metrics,
         ),
     )
-    _record_auto_apply_decision(repo, candidate_id, run_dir.name, decision.reasons, review_actor)
     if not decision.eligible or decision.approval_bundle is None:
         raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
     bundle = decision.approval_bundle.to_json_dict()
@@ -2271,12 +2303,62 @@ def _auto_apply_candidate_categories(candidate: CandidatePatch) -> tuple[str, ..
     return tuple(categories)
 
 
+def _auto_apply_decision_snapshot(
+    *,
+    phase: str,
+    candidate: AutoApplyCandidate,
+    readiness: AutoApplyReadiness,
+    metrics: dict[str, object],
+) -> dict[str, object]:
+    policy = readiness.policy
+    confirmation = readiness.confirmation
+    vcs = candidate.vcs_proof
+    return {
+        "phase": phase,
+        "candidate": {
+            "candidate_id": candidate.candidate_id,
+            "repository": candidate.repository,
+            "change_class": candidate.change_class,
+            "categories": list(candidate.categories),
+            "held_out_eval_passed": candidate.held_out_eval_passed,
+            "governance_regression_passed": candidate.governance_regression_passed,
+        },
+        "policy": None
+        if policy is None
+        else {
+            "enabled": policy.enabled,
+            "version": policy.version,
+            "allowed_repositories": list(policy.allowed_repositories),
+            "allowed_change_classes": list(policy.allowed_change_classes),
+            "minimum_burn_in_days": policy.minimum_burn_in_days,
+            "maximum_rejection_rate": policy.maximum_rejection_rate,
+            "maximum_rollback_rate": policy.maximum_rollback_rate,
+        },
+        "confirmation": None
+        if confirmation is None
+        else {
+            "confirmed": confirmation.confirmed,
+            "actor": confirmation.actor,
+            "policy_version": confirmation.policy_version,
+        },
+        "readiness_metrics": metrics,
+        "vcs": {
+            "mode": vcs.mode,
+            "commit_sha": vcs.commit_sha,
+            "branch_name": vcs.branch_name,
+            "rollback_commands": [list(command) for command in vcs.rollback_commands],
+        },
+    }
+
+
 def _record_auto_apply_decision(
     repo: Path,
     candidate_id: int,
     run_id: str,
     reasons: tuple[str, ...],
     actor: str,
+    *,
+    snapshot: dict[str, object],
 ) -> None:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
@@ -2287,6 +2369,7 @@ def _record_auto_apply_decision(
                 "actor": actor,
                 "eligible": not reasons,
                 "reasons": list(reasons),
+                **snapshot,
             },
         )
 

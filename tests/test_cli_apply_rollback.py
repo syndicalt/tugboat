@@ -223,6 +223,18 @@ def _seed_auto_apply_history(
         connection.commit()
 
 
+def _auto_apply_decision_payloads(repo: Path) -> list[dict[str, object]]:
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        rows = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.decided'
+            ORDER BY sequence
+            """
+        ).fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
 def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_path: Path):
     repo = _init_repo(tmp_path)
     original = (repo / "CODEX.md").read_text(encoding="utf-8")
@@ -1343,6 +1355,18 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
         apply_plan["applied_commit"],
         json.dumps(approval["rollback_command"], sort_keys=True),
     )
+    decisions = _auto_apply_decision_payloads(repo)
+    assert [payload["phase"] for payload in decisions] == ["precheck", "final"]
+    assert [payload["eligible"] for payload in decisions] == [True, True]
+    assert decisions[0]["candidate"]["change_class"] == "A"
+    assert decisions[0]["candidate"]["categories"] == ["A", "typo_fix"]
+    assert decisions[0]["vcs"]["commit_sha"] == "pending"
+    assert decisions[1]["vcs"]["commit_sha"] == apply_plan["applied_commit"]
+    assert decisions[1]["readiness_metrics"] == approval["readiness_metrics"]
+    serialized_decisions = json.dumps(decisions, sort_keys=True)
+    assert "candidate.diff" not in serialized_decisions
+    assert "eval-report" not in serialized_decisions
+    assert "rationale" not in serialized_decisions
 
 
 def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
@@ -1398,6 +1422,35 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
     event_payload = json.loads(event[0])
     assert event_payload["eligible"] is False
     assert event_payload["reasons"] == ["auto_apply_change_type_not_allowed"]
+    assert event_payload["phase"] == "precheck"
+    assert event_payload["candidate"]["change_class"] == "A"
+    assert event_payload["candidate"]["categories"] == ["A", "general"]
+    assert event_payload["policy"] == {
+        "allowed_change_classes": ["A"],
+        "allowed_repositories": [str(repo)],
+        "enabled": True,
+        "maximum_rejection_rate": 0.05,
+        "maximum_rollback_rate": 0.01,
+        "minimum_burn_in_days": 30,
+        "version": 9,
+    }
+    assert event_payload["readiness_metrics"] == {
+        "applied_count": 20,
+        "burn_in_days": event_payload["readiness_metrics"]["burn_in_days"],
+        "rejected_count": 0,
+        "rejection_rate": 0.0,
+        "reviewed_count": 20,
+        "rollback_count": 0,
+        "rollback_rate": 0.0,
+        "source_audit_range": event_payload["readiness_metrics"]["source_audit_range"],
+    }
+    assert event_payload["readiness_metrics"]["burn_in_days"] >= 30
+    assert event_payload["readiness_metrics"]["source_audit_range"]["first_sequence"] is not None
+    assert event_payload["readiness_metrics"]["source_audit_range"]["last_sequence"] is not None
+    serialized_payload = json.dumps(event_payload, sort_keys=True)
+    assert "candidate.diff" not in serialized_payload
+    assert "eval-report" not in serialized_payload
+    assert "rationale" not in serialized_payload
 
 
 def test_auto_apply_rejects_class_a_candidate_touching_forbidden_policy_domain(
@@ -1656,6 +1709,20 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_instead_of_cli_valu
     )
 
     assert not (run_dir / "apply-plan.json").exists()
+    decisions = _auto_apply_decision_payloads(repo)
+    assert len(decisions) == 1
+    event_payload = decisions[0]
+    assert event_payload["phase"] == "precheck"
+    assert event_payload["eligible"] is False
+    assert event_payload["readiness_metrics"]["reviewed_count"] == 20
+    assert event_payload["readiness_metrics"]["rejected_count"] == 2
+    assert event_payload["readiness_metrics"]["rejection_rate"] == 0.1
+    assert event_payload["readiness_metrics"]["rollback_count"] == 1
+    assert event_payload["readiness_metrics"]["rollback_rate"] == 0.05
+    assert event_payload["readiness_metrics"]["source_audit_range"]["first_sequence"] is not None
+    assert event_payload["readiness_metrics"]["source_audit_range"]["last_sequence"] is not None
+    assert "rejection_rate_too_high" in event_payload["reasons"]
+    assert "rollback_rate_too_high" in event_payload["reasons"]
 
 
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
