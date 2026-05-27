@@ -10,7 +10,11 @@ from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
 from tugboat.eval.pipeline import run_eval_pipeline
 from tugboat.paths import sidecar_dir
-from tugboat.propose.pipeline import _validate_no_batch_training_evidence_refs, run_propose_pipeline
+from tugboat.propose.pipeline import (
+    _audit_evidence_refs,
+    _validate_no_batch_training_evidence_refs,
+    run_propose_pipeline,
+)
 from tugboat.security.secrets import SecretScanError
 
 
@@ -280,6 +284,29 @@ if args[:1] == ["run"]:
             else:
                 outputs["evidence_ids"].write_text(json.dumps(EVIDENCE_IDS) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
+        audit_reports = None
+        if "audit_reports" in inputs and inputs["audit_reports"].exists():
+            audit_reports = json.loads(inputs["audit_reports"].read_text(encoding="utf-8"))
+        if isinstance(audit_reports, dict) and "reports" in audit_reports:
+            evidence_refs = []
+            for report in audit_reports["reports"]:
+                refs = (
+                    report.get("evidence_refs", [])
+                    if report.get("split") == "trigger"
+                    else report.get("source_refs", [])
+                )
+                evidence_refs.extend(str(ref) for ref in refs)
+            DRIFT_CLUSTERS = {
+                "clusters": [{"cluster_id": "drift-1", "evidence_refs": evidence_refs}]
+            }
+            OPTIMIZER_NOTES = {
+                "notes": [
+                    {
+                        "summary": "Use batch audit evidence for the proposal.",
+                        "evidence_refs": evidence_refs,
+                    }
+                ]
+            }
         if INVALID_JSON_OUTPUT == "drift_clusters":
             outputs["drift_clusters"].write_text("{not json\\n", encoding="utf-8")
         else:
@@ -5030,6 +5057,45 @@ def test_patch_propose_rejects_held_out_refs_as_training_evidence(tmp_path: Path
     )
 
 
+def test_batch_audit_evidence_refs_require_namespaced_training_refs(tmp_path: Path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "batch-audit-reports.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "primary_audit": "audit.raw.json",
+                "reports": [
+                    {
+                        "run_id": "train-run",
+                        "episode_id": "1",
+                        "split": "train",
+                        "path": "../train-run/audit.raw.json",
+                        "evidence_refs": ["ev_collision"],
+                        "source_refs": ["audit:train-run:ev_collision"],
+                    },
+                    {
+                        "run_id": "trigger-run",
+                        "episode_id": "2",
+                        "split": "trigger",
+                        "path": "audit.raw.json",
+                        "evidence_refs": ["ev_trigger"],
+                        "source_refs": ["audit:trigger-run:ev_trigger"],
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    refs = _audit_evidence_refs(run_dir)
+
+    assert "audit:train-run:ev_collision" in refs
+    assert "ev_collision" not in refs
+    assert "ev_trigger" in refs
+
+
 def test_optimize_minibatch_guidance_uses_prior_episode_history(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -5197,7 +5263,36 @@ llmff:
     )
     batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
 
-    assert Path(drift_inputs["audit_reports"]) == run_dir / "audit.raw.json"
+    audit_collection_path = run_dir / "batch-audit-reports.json"
+    audit_collection = json.loads(audit_collection_path.read_text(encoding="utf-8"))
+    assert Path(drift_inputs["audit_reports"]) == audit_collection_path
+    assert audit_collection == {
+        "schema_version": 1,
+        "primary_audit": "audit.raw.json",
+        "reports": [
+            {
+                "run_id": audit_collection["reports"][0]["run_id"],
+                "episode_id": "1",
+                "split": "train",
+                "path": f"../{audit_collection['reports'][0]['run_id']}/audit.raw.json",
+                "evidence_refs": [audit_collection["reports"][0]["evidence_refs"][0]],
+                "source_refs": [audit_collection["reports"][0]["source_refs"][0]],
+            },
+            {
+                "run_id": run_dir.name,
+                "episode_id": "2",
+                "split": "trigger",
+                "path": "audit.raw.json",
+                "evidence_refs": [audit_collection["reports"][1]["evidence_refs"][0]],
+                "source_refs": [audit_collection["reports"][1]["source_refs"][0]],
+            },
+        ],
+    }
+    drift = json.loads((run_dir / "drift.raw.json").read_text(encoding="utf-8"))
+    assert drift["clusters"][0]["evidence_refs"] == [
+        audit_collection["reports"][0]["source_refs"][0],
+        audit_collection["reports"][1]["evidence_refs"][0],
+    ]
     assert batch == {
         "schema_version": 1,
         "held_out_suite": "held-out",

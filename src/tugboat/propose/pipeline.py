@@ -475,6 +475,24 @@ def _unique_sources(candidates: list[dict[str, object]]) -> list[dict[str, objec
 
 
 def _audit_evidence_refs(run_dir: Path) -> set[str]:
+    batch_audits = run_dir / "batch-audit-reports.json"
+    if batch_audits.exists():
+        batch_payload = load_json_object_artifact(batch_audits, "batch-audit-reports.json")
+        validate_json_artifact("batch-audit-reports.json", batch_payload)
+        refs: set[str] = set()
+        for report in batch_payload.get("reports", []):
+            if not isinstance(report, dict):
+                continue
+            source_refs = report.get("source_refs", [])
+            if not isinstance(source_refs, list):
+                raise ValueError("batch-audit-reports.json source_refs must be JSON lists")
+            refs.update(str(ref) for ref in source_refs)
+            evidence_refs = report.get("evidence_refs", [])
+            if not isinstance(evidence_refs, list):
+                raise ValueError("batch-audit-reports.json evidence_refs must be JSON lists")
+            if report.get("split") == "trigger":
+                refs.update(str(ref) for ref in evidence_refs)
+        return refs
     audit_payload = load_json_object_artifact(run_dir / "audit.json", "audit.json")
     audit_evidence_refs = audit_payload.get("evidence_refs", [])
     if not isinstance(audit_evidence_refs, list):
@@ -575,7 +593,7 @@ def _run_drift_detect(
     input_paths = _filter_declared_manifest_inputs(
         manifest,
         {
-            "audit_reports": run_dir / "audit.raw.json",
+            "audit_reports": _audit_reports_input_path(run_dir),
             "instruction_index": run_dir / "instruction-snapshot",
             "instruction_index_artifact": instruction_index_path,
             "policy": sidecar_dir(repo) / "policy.yaml",
@@ -624,6 +642,17 @@ def _run_drift_detect(
     )
     validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
     return output_path, optimizer_notes_path
+
+
+def _audit_reports_input_path(run_dir: Path) -> Path:
+    batch_audits = run_dir / "batch-audit-reports.json"
+    if batch_audits.exists():
+        validate_json_artifact(
+            "batch-audit-reports.json",
+            load_json_object_artifact(batch_audits, "batch-audit-reports.json"),
+        )
+        return batch_audits
+    return run_dir / "audit.raw.json"
 
 
 def _filter_declared_manifest_inputs(

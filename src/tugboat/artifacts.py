@@ -114,6 +114,39 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "instruction_refs": {"type": "array", "items": {"type": "string"}},
         },
     },
+    "batch-audit-reports.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "primary_audit", "reports"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "primary_audit": {"type": "string"},
+            "reports": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "run_id",
+                        "episode_id",
+                        "split",
+                        "path",
+                        "evidence_refs",
+                        "source_refs",
+                    ],
+                    "properties": {
+                        "run_id": {"type": "string"},
+                        "episode_id": {"type": "string"},
+                        "split": {"type": "string", "enum": ["train", "trigger"]},
+                        "path": {"type": "string"},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                        "source_refs": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    },
     "evidence-ids.raw.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

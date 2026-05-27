@@ -95,7 +95,17 @@ def _run_manifest(args: argparse.Namespace) -> int:
         _write_json(outputs["evidence_ids"], {"evidence_ids": [evidence_id]})
     elif manifest == "drift-detect":
         audit = _read_json_object(inputs["audit_reports"])
-        evidence_refs = audit["evidence_refs"]
+        if "reports" in audit:
+            evidence_refs = []
+            for report in audit["reports"]:
+                refs = (
+                    report.get("evidence_refs", [])
+                    if report.get("split") == "trigger"
+                    else report.get("source_refs", [])
+                )
+                evidence_refs.extend(str(ref) for ref in refs)
+        else:
+            evidence_refs = audit["evidence_refs"]
         _write_json(
             outputs["drift_clusters"],
             {"clusters": [{"cluster_id": "drift-1", "evidence_refs": evidence_refs}]},

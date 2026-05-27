@@ -2795,6 +2795,7 @@ def _record_optimize_minibatch_guidance(
     }
     validate_json_artifact("optimization-batch.json", batch_payload)
     write_json_artifact(run_dir / "optimization-batch.json", batch_payload)
+    _write_batch_audit_reports(repo, run_dir, train_episodes=set(batches.train_episodes))
     guidance = _optimizer_guidance_from_minibatch(minibatch, suite_id=suite_id)
     if guidance is None:
         return
@@ -2809,6 +2810,54 @@ def _record_optimize_minibatch_guidance(
                 "note": guidance,
             },
         )
+
+
+def _write_batch_audit_reports(
+    repo: Path,
+    run_dir: Path,
+    *,
+    train_episodes: set[str],
+) -> None:
+    reports: list[dict[str, object]] = []
+    for candidate_run_dir in sorted(runs_dir(repo).iterdir()):
+        if not candidate_run_dir.is_dir() or candidate_run_dir.name > run_dir.name:
+            continue
+        audit_path = candidate_run_dir / "audit.raw.json"
+        if not audit_path.exists():
+            continue
+        episode_id = _episode_id_for_run(repo, candidate_run_dir)
+        if episode_id not in train_episodes:
+            continue
+        audit = load_json_object_artifact(audit_path, "audit.raw.json")
+        validate_json_artifact("audit.raw.json", audit)
+        evidence_refs = audit.get("evidence_refs", [])
+        if not isinstance(evidence_refs, list):
+            raise ValueError("audit.raw.json evidence_refs must be a JSON list")
+        raw_evidence_refs = [str(ref) for ref in evidence_refs]
+        reports.append(
+            {
+                "run_id": candidate_run_dir.name,
+                "episode_id": episode_id,
+                "split": "trigger" if candidate_run_dir == run_dir else "train",
+                "path": (
+                    "audit.raw.json"
+                    if candidate_run_dir == run_dir
+                    else f"../{candidate_run_dir.name}/audit.raw.json"
+                ),
+                "evidence_refs": raw_evidence_refs,
+                "source_refs": [
+                    f"audit:{candidate_run_dir.name}:{evidence_ref}"
+                    for evidence_ref in raw_evidence_refs
+                ],
+            }
+        )
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "primary_audit": "audit.raw.json",
+        "reports": reports,
+    }
+    validate_json_artifact("batch-audit-reports.json", payload)
+    write_json_artifact(run_dir / "batch-audit-reports.json", payload)
 
 
 def _episode_outcomes_for_minibatch(

@@ -263,6 +263,55 @@ def test_validate_audit_raw_artifact_requires_instruction_refs():
         )
 
 
+def test_validate_batch_audit_reports_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "batch-audit-reports.json",
+        {
+            "schema_version": 1,
+            "primary_audit": "audit.raw.json",
+            "reports": [
+                {
+                    "run_id": "20260527T000000Z",
+                    "episode_id": "1",
+                    "split": "train",
+                    "path": "../20260527T000000Z/audit.raw.json",
+                    "evidence_refs": ["ev_train"],
+                    "source_refs": ["audit:20260527T000000Z:ev_train"],
+                },
+                {
+                    "run_id": "20260527T000001Z",
+                    "episode_id": "2",
+                    "split": "trigger",
+                    "path": "audit.raw.json",
+                    "evidence_refs": ["ev_trigger"],
+                    "source_refs": ["audit:20260527T000001Z:ev_trigger"],
+                },
+            ],
+        },
+    )
+
+
+def test_validate_batch_audit_reports_artifact_rejects_unknown_split():
+    with pytest.raises(ArtifactValidationError, match="split"):
+        validate_json_artifact(
+            "batch-audit-reports.json",
+            {
+                "schema_version": 1,
+                "primary_audit": "audit.raw.json",
+                "reports": [
+                    {
+                        "run_id": "20260527T000000Z",
+                        "episode_id": "1",
+                        "split": "held_out",
+                        "path": "audit.raw.json",
+                        "evidence_refs": ["ev_held_out"],
+                        "source_refs": ["audit:20260527T000000Z:ev_held_out"],
+                    }
+                ],
+            },
+        )
+
+
 def test_validate_instruction_index_raw_artifact_accepts_current_schema():
     validate_json_artifact(
         "instruction-index.raw.json",
