@@ -540,6 +540,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("semantic policy lint failed")
             for finding in semantic_lint["findings"]:
                 print(finding)
+        harness_report = payload["checks"]["harness_report"]
+        if not harness_report["passed"]:
+            print("harness report failed")
+            for finding in harness_report["doc_gardening_tasks"]:
+                print(finding)
         if eval_check is not None and not eval_check["passed"]:
             print(f"eval suite {eval_check['suite_id']} failed")
         print(f"report: {report_path}")
@@ -1472,6 +1477,8 @@ def _write_ci_report(
     index = index_repo(repo, policy)
     manifest_contracts = validate_manifest_contracts(materialize_manifests(repo))
     harness = check_harness_legibility(repo, max_instruction_lines)
+    harness_report = generate_harness_report(repo)
+    harness_report_path = _persist_harness_report(repo, harness_report)
     semantic_findings = _semantic_policy_lint(repo, index)
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -1485,7 +1492,11 @@ def _write_ci_report(
             "harness": {
                 "passed": harness.passed,
                 "findings": list(harness.findings),
+                "report_path": harness_report_path.relative_to(repo).as_posix(),
+                "report_sha256": CandidatePatch.hash_file(harness_report_path),
+                "doc_gardening_task_count": len(harness_report.doc_gardening_tasks),
             },
+            "harness_report": _ci_harness_report_check_payload(harness_report),
             "manifest_contracts": {
                 "passed": manifest_contracts.passed,
                 "findings": list(manifest_contracts.findings),
@@ -1523,6 +1534,22 @@ def _write_ci_report(
     return report_path, payload
 
 
+def _ci_harness_report_check_payload(report) -> dict[str, Any]:
+    return {
+        "passed": not (
+            report.missing_docs
+            or report.stale_docs
+            or report.orphaned_runbooks
+            or report.recurring_failures_without_docs
+        ),
+        "missing_docs": list(report.missing_docs),
+        "stale_docs": list(report.stale_docs),
+        "orphaned_runbooks": list(report.orphaned_runbooks),
+        "recurring_failures_without_docs": list(report.recurring_failures_without_docs),
+        "doc_gardening_tasks": list(report.doc_gardening_tasks),
+    }
+
+
 def _ci_eval_check_payload(
     repo: Path,
     *,
@@ -1554,6 +1581,7 @@ def _ci_payload_passed(payload: dict[str, Any]) -> bool:
     return bool(
         checks["index"]["passed"]
         and checks["harness"]["passed"]
+        and checks["harness_report"]["passed"]
         and checks["manifest_contracts"]["passed"]
         and checks["semantic_policy_lint"]["passed"]
         and ("eval" not in checks or checks["eval"]["passed"])

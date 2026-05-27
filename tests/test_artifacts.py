@@ -1888,7 +1888,21 @@ def test_validate_ci_report_artifact_requires_check_results():
             "auto_apply": False,
             "checks": {
                 "index": {"passed": True, "indexed_documents": 1},
-                "harness": {"passed": True, "findings": []},
+                "harness": {
+                    "passed": True,
+                    "findings": [],
+                    "report_path": ".sidecar/harness-report.json",
+                    "report_sha256": "a" * 64,
+                    "doc_gardening_task_count": 0,
+                },
+                "harness_report": {
+                    "passed": True,
+                    "missing_docs": [],
+                    "stale_docs": [],
+                    "orphaned_runbooks": [],
+                    "recurring_failures_without_docs": [],
+                    "doc_gardening_tasks": [],
+                },
                 "manifest_contracts": {"passed": True, "findings": []},
                 "semantic_policy_lint": {"passed": True, "findings": []},
                 "eval": {

@@ -138,12 +138,31 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
         "mode": "ci_check",
         "auto_apply": False,
         "checks": {
-            "harness": {"passed": True, "findings": []},
+            "harness": {
+                "passed": True,
+                "findings": [],
+                "report_path": ".sidecar/harness-report.json",
+                "report_sha256": hashlib.sha256(
+                    (sidecar_dir(repo) / "harness-report.json").read_bytes()
+                ).hexdigest(),
+                "doc_gardening_task_count": 0,
+            },
+            "harness_report": {
+                "passed": True,
+                "missing_docs": [],
+                "stale_docs": [],
+                "orphaned_runbooks": [],
+                "recurring_failures_without_docs": [],
+                "doc_gardening_tasks": [],
+            },
             "index": {"passed": True, "indexed_documents": 1},
             "manifest_contracts": {"passed": True, "findings": []},
             "semantic_policy_lint": {"passed": True, "findings": []},
         },
     }
+    harness_report = json.loads((sidecar_dir(repo) / "harness-report.json").read_text(encoding="utf-8"))
+    assert harness_report["knowledge_map"] == {"AGENTS.md": ["docs/runbook.md"]}
+    assert harness_report["doc_gardening_tasks"] == []
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         event = store.connection.execute(
             "SELECT event_type, payload_json FROM audit_events ORDER BY sequence DESC LIMIT 1"
@@ -214,6 +233,49 @@ def test_ci_check_returns_nonzero_and_reports_harness_findings(tmp_path: Path, c
     assert "AGENTS.md references missing repo-local markdown file docs/missing.md." in output
     report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
     assert report["checks"]["harness"]["passed"] is False
+    assert report["checks"]["harness"]["report_path"] == ".sidecar/harness-report.json"
+    assert report["checks"]["harness"]["doc_gardening_task_count"] == 1
+    assert (sidecar_dir(repo) / "harness-report.json").exists()
+
+
+def test_ci_check_returns_nonzero_for_report_only_harness_debt(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (docs / "orphan.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Orphan\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    output = capsys.readouterr().out
+    assert "ci: failed" in output
+    assert "harness report failed" in output
+    assert "docs/orphan.md" in output
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["harness"]["passed"] is True
+    assert report["checks"]["harness_report"] == {
+        "passed": False,
+        "missing_docs": [],
+        "stale_docs": [],
+        "orphaned_runbooks": ["docs/orphan.md"],
+        "recurring_failures_without_docs": [],
+        "doc_gardening_tasks": [
+            "Either reference docs/orphan.md from an instruction map or remove/archive it."
+        ],
+    }
 
 
 def test_ci_check_returns_nonzero_for_semantic_policy_lint_findings(tmp_path: Path, capsys):

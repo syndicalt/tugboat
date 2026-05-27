@@ -1631,10 +1631,51 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "harness": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["passed", "findings"],
+                        "required": [
+                            "passed",
+                            "findings",
+                            "report_path",
+                            "report_sha256",
+                            "doc_gardening_task_count",
+                        ],
                         "properties": {
                             "passed": {"type": "boolean"},
                             "findings": {"type": "array", "items": {"type": "string"}},
+                            "report_path": {"type": "string"},
+                            "report_sha256": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$",
+                            },
+                            "doc_gardening_task_count": {"type": "integer", "minimum": 0},
+                        },
+                    },
+                    "harness_report": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "passed",
+                            "missing_docs",
+                            "stale_docs",
+                            "orphaned_runbooks",
+                            "recurring_failures_without_docs",
+                            "doc_gardening_tasks",
+                        ],
+                        "properties": {
+                            "passed": {"type": "boolean"},
+                            "missing_docs": {"type": "array", "items": {"type": "string"}},
+                            "stale_docs": {"type": "array", "items": {"type": "string"}},
+                            "orphaned_runbooks": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "recurring_failures_without_docs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "doc_gardening_tasks": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
                         },
                     },
                     "manifest_contracts": {
