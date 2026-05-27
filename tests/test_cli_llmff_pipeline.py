@@ -1732,6 +1732,11 @@ llmff:
         "merged": True,
         "rejected_candidates": [],
     }
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", run_dir.name]) == 0
+    decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    assert decision_trace["artifacts"]["candidate_ranking"] == (
+        f".sidecar/runs/{run_dir.name}/candidate-ranking.json"
+    )
 
 
 def test_propose_candidate_set_rejects_incompatible_bounded_edit(tmp_path: Path):

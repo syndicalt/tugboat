@@ -372,6 +372,7 @@ def _artifact_refs(repo: Path, run_dir: Path) -> dict[str, str]:
         ("optimizer_memory", run_dir / "optimizer-memory.json"),
         ("candidate_metadata", run_dir / "candidate.json"),
         ("candidate_raw", run_dir / "candidate.raw.json"),
+        ("candidate_ranking", run_dir / "candidate-ranking.json"),
         ("candidate_diff", run_dir / "candidate.diff"),
         ("proposal_rationale_raw", run_dir / "proposal-rationale.raw.json"),
         ("policy_gate", run_dir / "policy-gate.json"),
