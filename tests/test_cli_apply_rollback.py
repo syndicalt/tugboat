@@ -12,6 +12,7 @@ import pytest
 
 import tugboat.cli as cli_module
 from tugboat.cli import main
+from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
 from tugboat.vcs import VcsAdapter, VcsStateError
@@ -263,6 +264,24 @@ def _seed_apply_candidate_provenance(
             ),
         )
         store.connection.commit()
+
+
+def _seed_daemon_waiting_review_job(repo: Path, run_dir: Path, *, candidate_id: int = 7) -> int:
+    payload = {"candidate_id": str(candidate_id), "run_id": run_dir.name, "suite": "all"}
+    with DaemonQueue.open_sidecar(repo) as queue:
+        job = queue.enqueue(kind="eval", payload=payload)
+        queue.transition(job.id, JobState.INSPECTING)
+        queue.transition(job.id, JobState.RUNNING)
+        queue.transition(job.id, JobState.EVALUATING)
+        queue.transition(job.id, JobState.WAITING_REVIEW)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_daemon_job(
+            job_id=str(job.id),
+            repo_path=repo,
+            state=JobState.WAITING_REVIEW.value,
+            payload=payload,
+        )
+    return job.id
 
 
 def _write_auto_apply_policy(
@@ -1222,6 +1241,36 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
     )
 
 
+def test_rollback_execute_transitions_originating_daemon_job_to_rolled_back(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    job_id = _seed_daemon_waiting_review_job(repo, run_dir)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 0
+
+    with DaemonQueue.open_sidecar(repo) as queue:
+        job = queue.get_job(job_id)
+    assert job is not None
+    assert job.state is JobState.ROLLED_BACK
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            "SELECT state FROM daemon_jobs WHERE job_id = ? AND repo_path = ?",
+            (str(job_id), str(repo)),
+        ).fetchone()
+        event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert row == (JobState.ROLLED_BACK.value,)
+    assert event is not None
+    assert json.loads(event[0])["state"] == JobState.ROLLED_BACK.value
+
+
 def test_rollback_execute_is_blocked_by_read_only_kill_switch_before_revert(
     tmp_path: Path,
     capsys,
@@ -1296,6 +1345,76 @@ def test_apply_commit_mode_creates_branch_commit_and_rollback_command(tmp_path: 
         ["git", "switch", apply_plan["branch_name"]],
         ["git", "revert", "--no-edit", apply_plan["applied_commit"]],
     ]
+
+
+def test_apply_commit_transitions_originating_daemon_job_to_applied(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    job_id = _seed_daemon_waiting_review_job(repo, run_dir)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+
+    with DaemonQueue.open_sidecar(repo) as queue:
+        job = queue.get_job(job_id)
+    assert job is not None
+    assert job.state is JobState.APPLIED
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            "SELECT state FROM daemon_jobs WHERE job_id = ? AND repo_path = ?",
+            (str(job_id), str(repo)),
+        ).fetchone()
+        event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert row == (JobState.APPLIED.value,)
+    assert event is not None
+    payload = json.loads(event[0])
+    assert payload["job_id"] == str(job_id)
+    assert payload["state"] == JobState.APPLIED.value
+    assert apply_plan["candidate_id"] == 7
+
+
+def test_apply_without_daemon_origin_does_not_create_queue_state(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _candidate_run(repo)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+
+    assert not (repo / ".sidecar" / "daemon.sqlite").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+
+
+def test_daemon_payload_matching_recognizes_run_candidate_and_nested_shapes():
+    assert not cli_module._daemon_payload_matches_run_candidate("not-json", "run-1", 7)
+    assert cli_module._daemon_payload_matches_run_candidate({"run_id": "run-1"}, "run-1", 7)
+    assert cli_module._daemon_payload_matches_run_candidate({"candidate_id": 7}, "run-1", 7)
+    assert cli_module._daemon_payload_matches_run_candidate(
+        {"execution_payload": {"candidate_id": "7"}},
+        "run-1",
+        7,
+    )
+    assert cli_module._daemon_payload_matches_run_candidate(
+        {"resume": {"run_id": "run-1"}},
+        "run-1",
+        7,
+    )
+    assert cli_module._daemon_payload_matches_run_candidate(
+        {"payload": {"run_id": "run-1"}},
+        "run-1",
+        7,
+    )
+    assert not cli_module._daemon_payload_matches_run_candidate(
+        {"candidate_id": "latest"},
+        "run-1",
+        7,
+    )
 
 
 def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):

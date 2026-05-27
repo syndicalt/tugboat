@@ -51,7 +51,7 @@ from tugboat.daemon.service import (
     run_daemon_once,
     serve_daemon_socket,
 )
-from tugboat.daemon.queue import validate_local_bind_address
+from tugboat.daemon.queue import DaemonQueue, JobState, validate_local_bind_address
 from tugboat.db import Store
 from tugboat.eval.pipeline import run_eval_pipeline
 from tugboat.harness.checks import (
@@ -2278,6 +2278,13 @@ def _write_apply_plan(
                     rollback_command=rollback_command,
                 ),
             )
+            _transition_originating_daemon_job(
+                repo,
+                run_dir,
+                candidate_id=candidate_id,
+                source_state=JobState.WAITING_REVIEW,
+                target_state=JobState.APPLIED,
+            )
         if auto_apply and auto_apply_approval is not None:
             approval_path = run_dir / "auto-apply-approval.json"
             _write_secret_scanned_json_artifact(
@@ -3502,7 +3509,106 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                     "target_files": list(target_files),
                 },
             )
+            _transition_originating_daemon_job(
+                repo,
+                run_dir,
+                candidate_id=int(apply_plan["candidate_id"]),
+                source_state=JobState.APPLIED,
+                target_state=JobState.ROLLED_BACK,
+            )
     return path
+
+
+def _transition_originating_daemon_job(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    source_state: JobState,
+    target_state: JobState,
+) -> None:
+    queue_path = repo / ".sidecar" / "daemon.sqlite"
+    if not queue_path.exists():
+        return
+
+    matched_job_ids: list[str] = []
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rows = store.connection.execute(
+            """
+            SELECT job_id, payload_json
+            FROM daemon_jobs
+            WHERE repo_path = ? AND state = ?
+            ORDER BY rowid DESC
+            """,
+            (str(repo), source_state.value),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row[1]))
+            except json.JSONDecodeError:
+                continue
+            if _daemon_payload_matches_run_candidate(payload, run_dir.name, candidate_id):
+                matched_job_ids.append(str(row[0]))
+
+    if not matched_job_ids:
+        return
+
+    with DaemonQueue.open_sidecar(repo) as queue:
+        for job_id in matched_job_ids:
+            try:
+                numeric_job_id = int(job_id)
+            except ValueError:
+                continue
+            job = queue.get_job(numeric_job_id)
+            if job is None:
+                continue
+            if job.state is target_state:
+                _record_daemon_job_cli_state(repo, job.id, target_state, payload=job.payload)
+                return
+            if job.state is not source_state:
+                continue
+            updated = queue.transition(job.id, target_state)
+            _record_daemon_job_cli_state(repo, updated.id, updated.state, payload=updated.payload)
+            return
+
+
+def _daemon_payload_matches_run_candidate(
+    payload: object,
+    run_id: str,
+    candidate_id: int,
+) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("run_id") == run_id:
+        return True
+    candidate_value = payload.get("candidate_id")
+    if candidate_value is not None and str(candidate_value) == str(candidate_id):
+        return True
+    for key in ("execution_payload", "resume", "payload"):
+        nested = payload.get(key)
+        if isinstance(nested, dict) and _daemon_payload_matches_run_candidate(
+            nested,
+            run_id,
+            candidate_id,
+        ):
+            return True
+    return False
+
+
+def _record_daemon_job_cli_state(
+    repo: Path,
+    job_id: int,
+    state: JobState,
+    *,
+    payload: dict[str, Any],
+) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.update_daemon_job_state(
+            job_id=str(job_id),
+            repo_path=repo,
+            state=state.value,
+            payload=payload,
+        )
 
 
 def _assert_apply_plan_matches_provenance(
