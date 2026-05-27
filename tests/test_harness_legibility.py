@@ -179,6 +179,70 @@ def test_harness_legibility_flags_instruction_files_without_local_markdown_refs(
     ]
 
 
+def test_harness_legibility_uses_policy_configured_instruction_files(tmp_path: Path):
+    repo = tmp_path
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+instruction_files:
+  - path: docs/harness/AGENT-RUNBOOK.md
+    kind: repo_policy
+    precedence: 80
+    protected: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    harness_docs = repo / "docs" / "harness"
+    harness_docs.mkdir(parents=True)
+    (harness_docs / "AGENT-RUNBOOK.md").write_text(
+        "# Harness Runbook\n\nThis configured instruction map has no repo-local docs.\n",
+        encoding="utf-8",
+    )
+
+    result = check_harness_legibility(repo)
+
+    assert result.passed is False
+    assert result.findings == [
+        "docs/harness/AGENT-RUNBOOK.md has no repo-local markdown references; "
+        "keep instruction files as short maps to deeper docs."
+    ]
+
+
+def test_harness_report_uses_policy_globbed_instruction_files(tmp_path: Path):
+    repo = tmp_path
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+instruction_files:
+  - path: .codex/skills/**/SKILL.md
+    kind: skill
+    precedence: 60
+    protected: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    skill_dir = repo / ".codex" / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "# Review Skill\n\nSee [missing procedure](docs/review.md).\n",
+        encoding="utf-8",
+    )
+
+    report = generate_harness_report(repo)
+
+    assert report.knowledge_map == {
+        ".codex/skills/review/SKILL.md": ["docs/review.md"],
+    }
+    assert report.missing_docs == ["docs/review.md"]
+    assert report.doc_gardening_tasks == [
+        "Add or fix docs/review.md referenced by .codex/skills/review/SKILL.md."
+    ]
+
+
 def test_harness_legibility_flags_missing_ownership_and_verification_metadata(tmp_path: Path):
     repo = tmp_path
     docs = repo / "docs"

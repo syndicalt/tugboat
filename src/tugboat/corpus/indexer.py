@@ -13,7 +13,7 @@ def index_repo(repo: Path, policy: Policy) -> IndexResult:
     documents = []
     seen: set[Path] = set()
 
-    for path, entry in sorted(_instruction_paths(repo, policy.instruction_files)):
+    for path, entry in sorted(instruction_paths(repo, policy.instruction_files)):
         if path in seen:
             continue
         seen.add(path)
@@ -46,7 +46,7 @@ def _instruction_chunk_ref(
     return f"{document.path}#bytes-{byte_start}-{byte_end}"
 
 
-def _instruction_paths(
+def instruction_paths(
     repo: Path, entries: tuple[InstructionFilePolicy, ...]
 ) -> list[tuple[Path, InstructionFilePolicy]]:
     paths: list[tuple[Path, InstructionFilePolicy]] = []

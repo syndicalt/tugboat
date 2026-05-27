@@ -6,8 +6,10 @@ from pathlib import Path
 import re
 from typing import Any
 
+from tugboat.config import load_policy
+from tugboat.corpus.indexer import instruction_paths
 
-INSTRUCTION_FILES = ("AGENTS.md", "CODEX.md", "CLAUDE.md", "SKILL.md")
+
 MARKDOWN_LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 FENCE_PATTERN = re.compile(r"^[ \t]*(```|~~~)")
@@ -62,10 +64,8 @@ def check_harness_legibility(
     must_rules: set[str] = set()
     never_rules: set[str] = set()
 
-    for relative_path in INSTRUCTION_FILES:
-        path = repo / relative_path
-        if not path.exists():
-            continue
+    for path in _configured_instruction_paths(repo):
+        relative_path = path.relative_to(repo).as_posix()
 
         text = path.read_text(encoding="utf-8")
         line_count = len(text.splitlines())
@@ -119,10 +119,8 @@ def generate_harness_report(repo: Path) -> HarnessReport:
     referenced_docs: set[str] = set()
     doc_gardening_tasks: list[str] = []
 
-    for relative_path in INSTRUCTION_FILES:
-        path = repo / relative_path
-        if not path.exists():
-            continue
+    for path in _configured_instruction_paths(repo):
+        relative_path = path.relative_to(repo).as_posix()
         markdown_refs = sorted(
             _repo_local_markdown_refs(path.read_text(encoding="utf-8")),
             key=lambda ref: ref.path.as_posix(),
@@ -243,6 +241,21 @@ def _repo_local_markdown_refs(text: str) -> list[MarkdownRef]:
 class LinkDestination:
     path: str
     anchor: str
+
+
+def _configured_instruction_paths(repo: Path) -> list[Path]:
+    policy = load_policy(repo)
+    seen: set[Path] = set()
+    paths: list[Path] = []
+    for path, _entry in sorted(
+        instruction_paths(repo, policy.instruction_files),
+        key=lambda item: item[0].relative_to(repo).as_posix(),
+    ):
+        if path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
 
 
 def _link_destination(raw_target: str) -> LinkDestination | None:
