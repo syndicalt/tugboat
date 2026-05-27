@@ -332,21 +332,24 @@ def _rank_and_merge_candidate_payloads(
     ]
     if not candidates:
         raise ValueError("candidate-set.raw.json candidates must contain JSON objects")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory = OptimizationMemory.load(store, repo=repo)
     selected: list[dict[str, object]] = []
     rejected: list[dict[str, object]] = []
     for candidate in candidates:
         candidate_id = str(candidate.get("candidate_id", f"candidate-{len(selected) + len(rejected) + 1}"))
-        candidate_reasons = _candidate_set_merge_rejection_reasons(repo, selected, candidate)
+        candidate_reasons = _candidate_set_memory_rejection_reasons(memory, candidate)
+        if not candidate_reasons:
+            candidate_reasons = _candidate_set_merge_rejection_reasons(repo, selected, candidate)
         if candidate_reasons:
             rejected.append({"candidate_id": candidate_id, "reasons": candidate_reasons})
             continue
         selected.append(candidate)
     if not selected:
-        selected = [candidates[0]]
-        rejected = [
-            {"candidate_id": str(candidate.get("candidate_id", f"candidate-{index}")), "reasons": ["not_selected"]}
-            for index, candidate in enumerate(candidates[1:], start=2)
-        ]
+        reason_summary = "; ".join(
+            f"{item['candidate_id']}={','.join(item['reasons'])}" for item in rejected
+        )
+        raise ValueError(f"candidate-set.raw.json candidates were all rejected: {reason_summary}")
     merged_payload = _merged_candidate_payload(repo, selected)
     ranking = {
         "schema_version": SCHEMA_VERSION,
@@ -358,6 +361,22 @@ def _rank_and_merge_candidate_payloads(
         "rejected_candidates": rejected,
     }
     return merged_payload, ranking
+
+
+def _candidate_set_memory_rejection_reasons(
+    memory: OptimizationMemory,
+    candidate: dict[str, object],
+) -> list[str]:
+    for item in candidate.get("bounded_edit_metadata", []):
+        if not isinstance(item, dict):
+            continue
+        operator = str(item.get("operator", "unknown"))
+        target_file = str(item.get("file", candidate.get("base_file", "")))
+        section = str(item.get("section", ""))
+        fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
+        if fingerprint in memory.rejected_edits:
+            return ["suppressed_by_rejected_edit_memory"]
+    return []
 
 
 def _candidate_set_merge_rejection_reasons(

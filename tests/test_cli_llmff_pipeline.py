@@ -3240,6 +3240,132 @@ llmff:
     )
 
 
+def test_propose_candidate_set_skips_suppressed_edit_and_selects_viable_alternative(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Approval\n\nKeep human review.\n\n# Rules\n\nUse tests.\n",
+        encoding="utf-8",
+    )
+    base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    candidate_set = {
+        "candidates": [
+            {
+                "candidate_id": "suppressed-approval-delete",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": (
+                    "--- a/CODEX.md\n"
+                    "+++ b/CODEX.md\n"
+                    "@@ -1,0 +1,1 @@\n"
+                    "+Remove approval guidance.\n"
+                ),
+                "risk_class": "instruction_clarification",
+                "rationale": "Approval guidance was rejected before.",
+                "expected_behavior_change": "Agents remove approval wording.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "delete",
+                        "file": "CODEX.md",
+                        "section": "Approval",
+                        "changed_lines": 2,
+                        "normative_changes": 1,
+                    }
+                ],
+            },
+            {
+                "candidate_id": "viable-testing-add",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add regression test guidance.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Testing guidance is missing.",
+                "expected_behavior_change": "Agents add regression tests.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Testing",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+        ]
+    }
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", candidate_set=candidate_set)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    fingerprint = hashlib.sha256(b"delete\nCODEX.md\nApproval").hexdigest()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                "semantic_fingerprint": fingerprint,
+                "rejection_reason": "held_out_not_improved",
+                "source_refs": ["audit:1"],
+            },
+        )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    ranking = json.loads((run_dir / "candidate-ranking.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+
+    assert candidate["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+    assert ranking == {
+        "schema_version": 1,
+        "selected_candidate_ids": ["viable-testing-add"],
+        "merged": False,
+        "rejected_candidates": [
+            {
+                "candidate_id": "suppressed-approval-delete",
+                "reasons": ["suppressed_by_rejected_edit_memory"],
+            }
+        ],
+    }
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": True,
+        "reasons": [],
+    }
+
+
 def test_propose_rejects_candidate_over_learning_rate_budget(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
