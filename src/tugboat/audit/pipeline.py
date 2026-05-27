@@ -306,6 +306,15 @@ def run_audit_pipeline(
                 "evidence-ids.raw.json",
             )
             validate_json_artifact("evidence-ids.raw.json", raw_evidence_ids)
+            citation_failure = _edit_warranted_citation_failure(raw_audit)
+            if citation_failure is not None:
+                return _failed_audit_result(
+                    repo,
+                    run_dir,
+                    manifest_hash=inspect.manifest_hash,
+                    episode_id=episode_id,
+                    message=f"audit rejected: {citation_failure}",
+                )
             unknown_declared_refs = _undeclared_evidence_refs(
                 raw_evidence_ids["evidence_ids"],
                 [event.evidence_id for event in bundle.events],
@@ -343,14 +352,6 @@ def run_audit_pipeline(
                 manifest_hash=inspect.manifest_hash,
                 episode_id=episode_id,
                 message=f"audit rejected: {error}",
-            )
-        if "instruction_refs" not in raw_audit:
-            return _failed_audit_result(
-                repo,
-                run_dir,
-                manifest_hash=inspect.manifest_hash,
-                episode_id=episode_id,
-                message="audit rejected: llmff audit_report instruction_refs is required",
             )
         audit_payload.update(raw_audit)
     indexed_instructions = index_repo(repo, policy)
@@ -425,6 +426,16 @@ def _undeclared_evidence_refs(
 ) -> list[str]:
     declared = set(declared_refs)
     return sorted({ref for ref in audit_refs if ref not in declared})
+
+
+def _edit_warranted_citation_failure(raw_audit: dict[str, object]) -> str | None:
+    if raw_audit.get("edit_warranted") is not True:
+        return None
+    if not raw_audit["evidence_refs"]:
+        return "edit-warranted audit requires evidence_refs"
+    if not raw_audit["instruction_refs"]:
+        return "edit-warranted audit requires instruction_refs"
+    return None
 
 
 def _secret_scan_audit_payload(

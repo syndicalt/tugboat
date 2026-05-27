@@ -237,6 +237,20 @@ def test_validate_audit_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_audit_raw_artifact_requires_instruction_refs():
+    with pytest.raises(ArtifactValidationError, match="instruction_refs"):
+        validate_json_artifact(
+            "audit.raw.json",
+            {
+                "edit_warranted": True,
+                "failure_class": "instruction_conflict",
+                "severity": "high",
+                "confidence": 0.91,
+                "evidence_refs": ["ev_fake"],
+            },
+        )
+
+
 def test_validate_instruction_index_raw_artifact_accepts_current_schema():
     validate_json_artifact(
         "instruction-index.raw.json",

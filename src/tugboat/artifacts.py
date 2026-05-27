@@ -103,6 +103,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "failure_class",
             "severity",
             "confidence",
+            "instruction_refs",
         ],
         "properties": {
             "edit_warranted": {"type": "boolean"},
