@@ -29,6 +29,7 @@ def _seed_candidate(
     run_id: str = "run-1",
     state: str = "needs_review",
 ) -> int:
+    _seed_run(store, tmp_path, run_id=run_id)
     audit_id = store.insert_audit(
         run_id=run_id,
         failure_class="instruction_missing",
@@ -612,6 +613,7 @@ def test_insert_core_decision_rows_without_provenance_backfill(tmp_path: Path):
     eval_report.write_text("{}\n", encoding="utf-8")
 
     with Store.open(tmp_path / "db.sqlite") as store:
+        _seed_run(store, tmp_path)
         audit_id = store.insert_audit(
             run_id="run-1",
             failure_class="instruction_missing",
@@ -1034,6 +1036,7 @@ def test_record_rollback_stores_audit_event_sequence(tmp_path: Path):
 
 def test_insert_audit_stores_audit_event_sequence(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
+        _seed_run(store, tmp_path)
         audit_id = store.insert_audit(
             run_id="run-1",
             failure_class="instruction_missing",
@@ -1056,8 +1059,30 @@ def test_insert_audit_stores_audit_event_sequence(tmp_path: Path):
     assert row[1] is not None
 
 
+def test_insert_audit_rejects_missing_run_parent_without_audit_event(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(ValueError, match="audit run_id does not reference runs"):
+            store.insert_audit(
+                run_id="missing-run",
+                failure_class="instruction_missing",
+                severity="medium",
+                confidence=0.75,
+                evidence_refs=["event:1"],
+                instruction_refs=["CODEX.md#rules"],
+            )
+
+        assert store.connection.execute("SELECT COUNT(*) FROM audits").fetchone()[0] == 0
+        assert (
+            store.connection.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE event_type = 'audit.recorded'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
 def test_insert_candidate_stores_audit_event_sequence(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
+        _seed_run(store, tmp_path)
         audit_id = store.insert_audit(
             run_id="run-1",
             failure_class="instruction_missing",

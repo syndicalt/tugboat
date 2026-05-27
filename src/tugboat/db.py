@@ -763,6 +763,7 @@ class Store:
         evidence_refs: list[str],
         instruction_refs: list[str],
     ) -> int:
+        self._require_run(run_id, context="audit")
         audit_id = _next_integer_id(self.connection, "audits")
         event = self.append_audit_event("audit.recorded", {"audit_id": audit_id, "run_id": run_id})
         self.connection.execute(

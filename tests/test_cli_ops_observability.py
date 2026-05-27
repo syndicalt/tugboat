@@ -53,6 +53,14 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             status="completed",
             run_dir=run_dir,
         )
+        for run_id in ("run-2", "run-3", "run-4"):
+            store.insert_run(
+                run_id=run_id,
+                stage="proposal",
+                manifest_hash="manifest-hash",
+                status="completed",
+                run_dir=sidecar / "runs" / run_id,
+            )
         audit_id = store.insert_audit(
             run_id="run-2",
             failure_class="missing_tests",
@@ -188,7 +196,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     assert f"observability summary: {output_path}" in output
     assert payload["schema_version"] == 1
     summary = payload["summary"]
-    assert summary["run_duration"]["count"] == 2
+    assert summary["run_duration"]["count"] == 5
     assert summary["failure_kind_counts"] == {"provider_error": 1}
     assert summary["edits"] == {"accepted": 1, "rejected": 1, "rolled_back": 1}
     assert summary["eval_suite_trends"]["all"]["latest_score"] == 0.9

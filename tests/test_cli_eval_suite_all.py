@@ -45,8 +45,16 @@ def _seed_candidate_row(run_dir: Path) -> tuple[int, int]:
     repo = _repo_from_run_dir(run_dir)
     diff_path = run_dir / "candidate.diff"
     diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use regression tests.\n"
+    run_dir.mkdir(parents=True, exist_ok=True)
     diff_path.write_text(diff, encoding="utf-8")
     with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="proposal",
+            manifest_hash="fixture-manifest",
+            status="completed",
+            run_dir=run_dir,
+        )
         audit_id = store.insert_audit(
             run_id=run_dir.name,
             failure_class="instruction_missing",
@@ -153,6 +161,14 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
             {"candidate_id": candidate_id, "changed_lines": 6},
         )
         store.append_audit_event("rollback.applied", {"candidate_id": 9})
+        for run_id in ("incident-1", "incident-2"):
+            store.insert_run(
+                run_id=run_id,
+                stage="audit",
+                manifest_hash="fixture-manifest",
+                status="completed",
+                run_dir=repo / ".sidecar" / "runs" / run_id,
+            )
         store.insert_audit(
             run_id="incident-1",
             failure_class="missing_tests",

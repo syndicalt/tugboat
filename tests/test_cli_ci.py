@@ -43,6 +43,13 @@ def _seed_candidate_row(run_dir: Path) -> tuple[int, int]:
     run_dir.mkdir(parents=True, exist_ok=True)
     diff_path.write_text(diff, encoding="utf-8")
     with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="proposal",
+            manifest_hash="fixture-manifest",
+            status="completed",
+            run_dir=run_dir,
+        )
         audit_id = store.insert_audit(
             run_id=run_dir.name,
             failure_class="instruction_missing",

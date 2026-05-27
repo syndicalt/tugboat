@@ -13,6 +13,15 @@ from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
 def _insert_candidate(store: Store, tmp_path: Path) -> int:
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    store.insert_run(
+        run_id="run-1",
+        stage="proposal",
+        manifest_hash="fixture-manifest",
+        status="completed",
+        run_dir=run_dir,
+    )
     audit_id = store.insert_audit(
         run_id="run-1",
         failure_class="instruction_missing",

@@ -208,6 +208,13 @@ def _seed_review_target(repo: Path) -> tuple[int, int]:
     run_dir = sidecar_dir(repo) / "runs" / "seed-review-target"
     run_dir.mkdir(parents=True, exist_ok=True)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="seed-review-target",
+            stage="proposal",
+            manifest_hash="fixture-manifest",
+            status="completed",
+            run_dir=run_dir,
+        )
         audit_id = store.insert_audit(
             run_id="seed-review-target",
             failure_class="instruction_missing",
@@ -265,6 +272,16 @@ mcp:
     tugboat_request_proposal: allow
 """.lstrip(),
         encoding="utf-8",
+    )
+
+
+def _insert_fixture_run(store: Store, run_id: str, run_dir: Path) -> None:
+    store.insert_run(
+        run_id=run_id,
+        stage="proposal",
+        manifest_hash="fixture-manifest",
+        status="completed",
+        run_dir=run_dir,
     )
 
 
@@ -843,6 +860,7 @@ def test_candidate_returns_summary_and_diff_ref_without_raw_diff(tmp_path: Path)
     run_dir.mkdir(parents=True)
     (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        _insert_fixture_run(store, "run-1", run_dir)
         audit_id = store.insert_audit(
             run_id="run-1",
             failure_class="instruction_missing",
@@ -890,6 +908,7 @@ def test_candidate_report_returns_eval_and_decision_refs_without_raw_payloads(tm
     run_dir.mkdir(parents=True)
     (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        _insert_fixture_run(store, "run-1", run_dir)
         audit_id = store.insert_audit(
             run_id="run-1",
             failure_class="instruction_missing",
@@ -973,6 +992,7 @@ def test_candidate_report_uses_latest_eval_and_decision_rows(tmp_path: Path):
     run_dir.mkdir(parents=True)
     (repo / "CODEX.md").write_text("# Rules\n", encoding="utf-8")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        _insert_fixture_run(store, "run-1", run_dir)
         audit_id = store.insert_audit(
             run_id="run-1",
             failure_class="instruction_missing",
