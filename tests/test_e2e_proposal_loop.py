@@ -465,6 +465,151 @@ llmff:
     assert codex.read_text(encoding="utf-8") == original
 
 
+def test_auto_detected_codex_raw_episode_runs_full_proposal_loop(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    original = "# Rules\n\nUse tests.\n"
+    codex.write_text(original, encoding="utf-8")
+    trace = tmp_path / "codex-raw.jsonl"
+    patch_text = (
+        "*** Begin Patch\n"
+        "*** Update File: CODEX.md\n"
+        "@@\n"
+        " Use tests.\n"
+        "+Add regression-test guidance.\n"
+        "*** End Patch\n"
+    )
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "base_instructions": {
+                                "source": "CODEX.md",
+                                "text": original,
+                            }
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix the regression bug"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-pytest",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-pytest",
+                            "output": "1 failed\nProcess exited with code 1",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-patch",
+                            "name": "apply_patch",
+                            "arguments": patch_text,
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-patch",
+                            "output": "Success. Updated files.",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Done"}],
+                        },
+                    }
+                ),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
+    assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    event_types = [event["event_type"] for event in canonical["events"]]
+    assert event_types == [
+        "instruction_snapshot",
+        "user_request",
+        "tool_call",
+        "tool_result",
+        "test_result",
+        "tool_call",
+        "diff",
+        "tool_result",
+        "final_answer",
+    ]
+    assert canonical["events"][6]["payload"]["path"] == "CODEX.md"
+    assert canonical["events"][4]["payload"]["passed"] is False
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    evidence_id = canonical["events"][0]["evidence_id"]
+    assert audit["evidence_refs"] == [evidence_id]
+    assert candidate["sources"] == [{"source_id": evidence_id, "trusted": True}]
+    assert decision_trace["trace_events"][0]["evidence_id"] == evidence_id
+    assert decision_trace["trace_events"][0]["event_type"] == "instruction_snapshot"
+    assert decision_trace["candidate"]["candidate_id"] == candidate["candidate_id"]
+    assert (run_dir / "report.md").exists()
+    assert codex.read_text(encoding="utf-8") == original
+
+
 def test_provider_backed_llmff_requires_explicit_network_policy(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
