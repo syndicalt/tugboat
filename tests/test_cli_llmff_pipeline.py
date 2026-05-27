@@ -4411,6 +4411,158 @@ llmff:
     }
 
 
+def test_optimize_accepts_multiple_training_traces_and_records_batch_metadata(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    success_trace = tmp_path / "success.jsonl"
+    success_trace.write_text(
+        "\n".join(
+            [
+                '{"event":"request","text":"Added regression coverage"}',
+                '{"event":"outcome.label","label":"accepted"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    failure_trace = tmp_path / "failure.jsonl"
+    failure_trace.write_text(
+        "\n".join(
+            [
+                '{"event":"request","text":"Fix bug"}',
+                '{"event":"user.correction","text":"You skipped regression tests"}',
+                '{"event":"outcome.label","label":"rejected"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(failure_trace),
+                "--train-trace",
+                str(success_trace),
+                "--trace-format",
+                "mcp",
+                "--suite",
+                "held-out",
+                "--held-out-episode",
+                "held-out:no-regression",
+                "--unseen-suite",
+                "governance",
+                "--unseen-suite",
+                "adversarial",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    inputs_by_manifest = [
+        json.loads(line)
+        for line in (run_dir / "llmff-inputs-by-manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    drift_inputs = next(
+        item["inputs"] for item in inputs_by_manifest if item["manifest"] == "drift-detect"
+    )
+    batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
+
+    assert Path(drift_inputs["audit_reports"]) == run_dir / "audit.raw.json"
+    assert batch == {
+        "schema_version": 1,
+        "held_out_suite": "held-out",
+        "train_episodes": ["1", "2"],
+        "held_out_episodes": ["held-out:no-regression"],
+        "unseen_suites": ["governance", "adversarial"],
+        "success_episodes": ["1"],
+        "failure_episodes": ["2"],
+        "success_patterns": ["Added regression coverage"],
+        "failure_patterns": ["You skipped regression tests"],
+    }
+
+
+def test_optimize_rejects_held_out_episode_overlap_with_training_batch(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                '{"event":"request","text":"Fix bug"}',
+                '{"event":"outcome.label","label":"rejected"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--train-trace",
+                str(trace),
+                "--trace-format",
+                "mcp",
+                "--suite",
+                "held-out",
+                "--held-out-episode",
+                "1",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "optimize blocked: train and held-out episodes must be separate" in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert not (run_dir / "optimization-batch.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+
+
 def test_optimize_rejects_candidate_when_held_out_does_not_beat_validation_baseline(
     tmp_path: Path,
 ):

@@ -145,7 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     optimize = subcommands.add_parser("optimize")
     optimize.add_argument("--repo", required=True)
     optimize.add_argument("--trace", required=True)
+    optimize.add_argument("--train-trace", action="append", default=[])
     optimize.add_argument("--suite", required=True)
+    optimize.add_argument("--held-out-episode", action="append", default=[])
+    optimize.add_argument("--unseen-suite", action="append", default=[])
     optimize.add_argument(
         "--trace-format",
         choices=("auto", "generic-jsonl", "codex", "claude", "ci", "mcp"),
@@ -477,6 +480,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "optimize":
         repo = Path(args.repo)
+        for trace in args.train_trace:
+            audit_exit = main(
+                [
+                    "audit",
+                    "--repo",
+                    str(repo),
+                    "--trace",
+                    str(Path(trace)),
+                    "--trace-format",
+                    args.trace_format,
+                ]
+            )
+            if audit_exit != 0:
+                return audit_exit
         audit_exit = main(
             [
                 "audit",
@@ -491,12 +508,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         if audit_exit != 0:
             return audit_exit
         run_dir = latest_run_dir(repo)
-        _record_optimize_minibatch_guidance(repo, run_dir, suite_id=args.suite)
-        propose_exit = main(["propose", "--repo", str(repo), "--audit", "latest"])
-        run_dir = latest_run_dir(repo)
+        trigger_run_id = run_dir.name
+        try:
+            _record_optimize_minibatch_guidance(
+                repo,
+                run_dir,
+                suite_id=args.suite,
+                held_out_episodes=tuple(args.held_out_episode),
+                unseen_suites=tuple(args.unseen_suite),
+            )
+        except ValueError as error:
+            print(f"optimize blocked: {error}")
+            return 1
+        propose_exit = main(["propose", "--repo", str(repo), "--audit", trigger_run_id])
+        run_dir = runs_dir(repo) / trigger_run_id
         if propose_exit != 0:
             return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
-        eval_result = run_eval_pipeline(repo, "latest", args.suite)
+        eval_result = run_eval_pipeline(repo, trigger_run_id, args.suite)
         print(eval_result.message)
         return _finalize_governed_candidate_evaluation(
             repo,
@@ -2182,15 +2210,22 @@ def _record_validation_baseline_score(
     )
 
 
-def _record_optimize_minibatch_guidance(repo: Path, run_dir: Path, *, suite_id: str) -> None:
+def _record_optimize_minibatch_guidance(
+    repo: Path,
+    run_dir: Path,
+    *,
+    suite_id: str,
+    held_out_episodes: tuple[str, ...] = (),
+    unseen_suites: tuple[str, ...] = (),
+) -> None:
     outcomes = _episode_outcomes_for_minibatch(repo, current_run_dir=run_dir)
     if not outcomes:
         return
     minibatch = build_success_failure_minibatch(tuple(outcomes))
     batches = build_minibatches(
         train_episodes=tuple(outcome.episode_id for outcome in outcomes),
-        held_out_episodes=(),
-        unseen_suites=(),
+        held_out_episodes=held_out_episodes,
+        unseen_suites=unseen_suites,
     )
     batch_payload = {
         "schema_version": SCHEMA_VERSION,
