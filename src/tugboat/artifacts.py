@@ -24,6 +24,33 @@ BOUNDED_EDIT_OPERATORS = (
     "split",
 )
 
+
+def _audited_object_schema(
+    required: list[str],
+    properties: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [*required, "audit_event_sequence", "event_hash"],
+        "properties": {
+            **properties,
+            "audit_event_sequence": {"type": "integer"},
+            "event_hash": {"type": "string"},
+        },
+    }
+
+
+def _audited_array_schema(
+    required: list[str],
+    properties: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "type": "array",
+        "items": _audited_object_schema(required, properties),
+    }
+
+
 JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     "audit.json": {
         "$schema": JSON_SCHEMA_URI,
@@ -1778,12 +1805,25 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "schema_version",
             "decision_ref",
             "run_id",
+            "run",
+            "episode",
             "decision",
             "candidate",
             "audit",
             "trace_events",
             "unresolved_evidence_refs",
+            "instruction_snapshots",
+            "instruction_graphs",
+            "reflections",
+            "edit_operations",
+            "candidate_edits",
             "evals",
+            "eval_runs",
+            "eval_cases",
+            "validation_splits",
+            "review_actions",
+            "rollbacks",
+            "optimizer_memory",
             "llmff_jobs",
             "artifacts",
         ],
@@ -1791,6 +1831,56 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
             "decision_ref": {"type": "string"},
             "run_id": {"type": "string"},
+            "run": {
+                "oneOf": [
+                    {"type": "null"},
+                    _audited_object_schema(
+                        [
+                            "run_id",
+                            "episode_id",
+                            "stage",
+                            "manifest_hash",
+                            "status",
+                            "run_dir",
+                            "created_at",
+                            "updated_at",
+                        ],
+                        {
+                            "run_id": {"type": "string"},
+                            "episode_id": {"type": ["integer", "null"]},
+                            "stage": {"type": "string"},
+                            "manifest_hash": {"type": "string"},
+                            "status": {"type": "string"},
+                            "run_dir": {"type": "string"},
+                            "created_at": {"type": "string"},
+                            "updated_at": {"type": "string"},
+                        },
+                    ),
+                ],
+            },
+            "episode": {
+                "oneOf": [
+                    {"type": "null"},
+                    _audited_object_schema(
+                        [
+                            "episode_id",
+                            "repo_path",
+                            "trace_path",
+                            "started_at",
+                            "outcome",
+                            "summary_hash",
+                        ],
+                        {
+                            "episode_id": {"type": "integer"},
+                            "repo_path": {"type": "string"},
+                            "trace_path": {"type": "string"},
+                            "started_at": {"type": "string"},
+                            "outcome": {"type": "string"},
+                            "summary_hash": {"type": "string"},
+                        },
+                    ),
+                ],
+            },
             "decision": {
                 "type": "object",
                 "additionalProperties": False,
@@ -1901,6 +1991,79 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
             },
             "unresolved_evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "instruction_snapshots": _audited_array_schema(
+                [
+                    "snapshot_id",
+                    "run_id",
+                    "path",
+                    "content_hash",
+                    "artifact_path",
+                ],
+                {
+                    "snapshot_id": {"type": "integer"},
+                    "run_id": {"type": "string"},
+                    "path": {"type": "string"},
+                    "content_hash": {"type": "string"},
+                    "artifact_path": {"type": "string"},
+                },
+            ),
+            "instruction_graphs": _audited_array_schema(
+                ["graph_id", "run_id", "graph_hash", "artifact_path"],
+                {
+                    "graph_id": {"type": "integer"},
+                    "run_id": {"type": "string"},
+                    "graph_hash": {"type": "string"},
+                    "artifact_path": {"type": "string"},
+                },
+            ),
+            "reflections": _audited_array_schema(
+                [
+                    "reflection_id",
+                    "run_id",
+                    "source_ref",
+                    "reflection_hash",
+                    "artifact_path",
+                ],
+                {
+                    "reflection_id": {"type": "integer"},
+                    "run_id": {"type": "string"},
+                    "source_ref": {"type": "string"},
+                    "reflection_hash": {"type": "string"},
+                    "artifact_path": {"type": "string"},
+                },
+            ),
+            "edit_operations": _audited_array_schema(
+                [
+                    "edit_operation_id",
+                    "candidate_id",
+                    "operator",
+                    "target_path",
+                    "payload",
+                ],
+                {
+                    "edit_operation_id": {"type": "integer"},
+                    "candidate_id": {"type": "integer"},
+                    "operator": {"type": "string"},
+                    "target_path": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+            ),
+            "candidate_edits": _audited_array_schema(
+                [
+                    "candidate_edit_id",
+                    "candidate_id",
+                    "edit_operation_id",
+                    "target_path",
+                    "risk_class",
+                ],
+                {
+                    "candidate_edit_id": {"type": "integer"},
+                    "candidate_id": {"type": "integer"},
+                    "edit_operation_id": {"type": "integer"},
+                    "target_path": {"type": "string"},
+                    "risk_class": {"type": "string"},
+                },
+            ),
             "evals": {
                 "type": "array",
                 "items": {
@@ -1926,6 +2089,75 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+            "eval_runs": _audited_array_schema(
+                ["eval_run_id", "candidate_id", "suite_id", "status", "report_path"],
+                {
+                    "eval_run_id": {"type": "integer"},
+                    "candidate_id": {"type": "integer"},
+                    "suite_id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "report_path": {"type": "string"},
+                },
+            ),
+            "eval_cases": _audited_array_schema(
+                ["eval_case_id", "suite_id", "case_id", "case_hash"],
+                {
+                    "eval_case_id": {"type": "integer"},
+                    "suite_id": {"type": "string"},
+                    "case_id": {"type": "string"},
+                    "case_hash": {"type": "string"},
+                },
+            ),
+            "validation_splits": _audited_array_schema(
+                ["validation_split_id", "suite_id", "split_name", "case_ids"],
+                {
+                    "validation_split_id": {"type": "integer"},
+                    "suite_id": {"type": "string"},
+                    "split_name": {"type": "string"},
+                    "case_ids": {"type": "array", "items": {"type": "string"}},
+                },
+            ),
+            "review_actions": _audited_array_schema(
+                ["review_action_id", "candidate_id", "actor", "action", "reason"],
+                {
+                    "review_action_id": {"type": "integer"},
+                    "candidate_id": {"type": "integer"},
+                    "actor": {"type": "string"},
+                    "action": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            ),
+            "rollbacks": _audited_array_schema(
+                [
+                    "rollback_id",
+                    "decision_id",
+                    "candidate_id",
+                    "reason",
+                    "revert_commit",
+                    "post_rollback_eval_result",
+                    "rollback_plan",
+                    "executed",
+                ],
+                {
+                    "rollback_id": {"type": "integer"},
+                    "decision_id": {"type": "string"},
+                    "candidate_id": {"type": "integer"},
+                    "reason": {"type": "string"},
+                    "revert_commit": {"type": "string"},
+                    "post_rollback_eval_result": {"type": "object"},
+                    "rollback_plan": {"type": "string"},
+                    "executed": {"type": "boolean"},
+                },
+            ),
+            "optimizer_memory": _audited_array_schema(
+                ["optimizer_memory_id", "memory_type", "key", "payload"],
+                {
+                    "optimizer_memory_id": {"type": "integer"},
+                    "memory_type": {"type": "string"},
+                    "key": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+            ),
             "llmff_jobs": {
                 "type": "array",
                 "items": {

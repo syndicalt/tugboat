@@ -1673,6 +1673,28 @@ def test_validate_decision_trace_artifact_accepts_provenance_payload():
             "schema_version": 1,
             "decision_ref": "latest",
             "run_id": "run-1",
+            "run": {
+                "run_id": "run-1",
+                "episode_id": 1,
+                "stage": "eval",
+                "manifest_hash": "f" * 64,
+                "status": "completed",
+                "run_dir": ".sidecar/runs/run-1",
+                "created_at": "2026-05-26T00:00:00Z",
+                "updated_at": "2026-05-26T00:00:00Z",
+                "audit_event_sequence": 37,
+                "event_hash": "d" * 64,
+            },
+            "episode": {
+                "episode_id": 1,
+                "repo_path": ".",
+                "trace_path": "trace.jsonl",
+                "started_at": "2026-05-26T00:00:00Z",
+                "outcome": "captured",
+                "summary_hash": "e" * 64,
+                "audit_event_sequence": 38,
+                "event_hash": "f" * 64,
+            },
             "decision": {
                 "decision_id": 3,
                 "candidate_id": 7,
@@ -1721,6 +1743,11 @@ def test_validate_decision_trace_artifact_accepts_provenance_payload():
                 }
             ],
             "unresolved_evidence_refs": [],
+            "instruction_snapshots": [],
+            "instruction_graphs": [],
+            "reflections": [],
+            "edit_operations": [],
+            "candidate_edits": [],
             "evals": [
                 {
                     "eval_id": 4,
@@ -1732,6 +1759,12 @@ def test_validate_decision_trace_artifact_accepts_provenance_payload():
                     "event_hash": "6" * 64,
                 }
             ],
+            "eval_runs": [],
+            "eval_cases": [],
+            "validation_splits": [],
+            "review_actions": [],
+            "rollbacks": [],
+            "optimizer_memory": [],
             "llmff_jobs": [
                 {
                     "job_id": 5,
