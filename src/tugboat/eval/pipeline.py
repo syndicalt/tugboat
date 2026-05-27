@@ -119,6 +119,17 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 governance_passed = False
                 recommendation = "reject"
                 eval_failure_message = "eval rejected: deterministic policy gate rejected candidate"
+            if (
+                passed
+                and recommendation == "accept"
+                and not _has_eval_field(eval_payload, metrics, "governance_passed")
+            ):
+                passed = False
+                governance_passed = False
+                recommendation = "reject"
+                eval_failure_message = (
+                    "eval rejected: llmff eval_report cannot accept without governance result"
+                )
             if passed and recommendation == "accept" and not _has_held_out_validation_cases(metrics):
                 passed = False
                 governance_passed = False
@@ -224,6 +235,14 @@ def _has_held_out_validation_cases(metrics: dict[str, object]) -> bool:
     if isinstance(raw, int | float):
         return raw > 0
     return False
+
+
+def _has_eval_field(
+    payload: dict[str, object],
+    metrics: dict[str, object],
+    field: str,
+) -> bool:
+    return field in payload or field in metrics
 
 
 def _validation_splits_from_eval_payload(
