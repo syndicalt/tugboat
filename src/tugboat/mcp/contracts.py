@@ -46,6 +46,7 @@ WRITE_INTENT_TOOLS = frozenset(
         "tugboat_request_proposal",
     }
 )
+READ_ONLY_EXCLUDED_TOOLS = frozenset({"tugboat_decision_trace"})
 
 
 def _object_schema(
@@ -723,7 +724,8 @@ def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dic
 def list_mcp_tools(*, bound_repo: Path | None = None, read_only: bool = False) -> list[dict[str, Any]]:
     tool_names = sorted(MCP_TOOLS)
     if read_only:
-        tool_names = [name for name in tool_names if name not in WRITE_INTENT_TOOLS]
+        excluded_tools = WRITE_INTENT_TOOLS | READ_ONLY_EXCLUDED_TOOLS
+        tool_names = [name for name in tool_names if name not in excluded_tools]
     return [
         {
             "inputSchema": _mcp_display_schema(
@@ -802,8 +804,8 @@ def handle_jsonrpc_request(
             tool = MCP_TOOLS.get(name)
             if tool is None:
                 return _jsonrpc_error(request_id, -32601, f"unknown MCP tool: {name}")
-            if read_only and name in WRITE_INTENT_TOOLS:
-                reason = f"bound read-only MCP session does not expose write-intent tool: {name}"
+            if read_only and name in (WRITE_INTENT_TOOLS | READ_ONLY_EXCLUDED_TOOLS):
+                reason = f"bound read-only MCP session does not expose side-effecting tool: {name}"
                 if bound_repo is not None:
                     _audit_bound_mcp_denial(bound_repo, name, arguments, reason)
                 return _jsonrpc_error(request_id, -32000, reason)

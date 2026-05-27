@@ -2697,10 +2697,38 @@ def test_bound_read_only_mcp_stdio_lists_only_read_tools(tmp_path: Path):
     tool_names = {tool["name"] for tool in tools}
     assert "tugboat_status" in tool_names
     assert "tugboat_index_summary" in tool_names
+    assert "tugboat_decision_trace" not in tool_names
     assert not (tool_names & mcp_contracts.WRITE_INTENT_TOOLS)
     assert all(tool["write_intent"] is False for tool in tools)
     assert all(tool["mutates_instructions"] is False for tool in tools)
     assert all("repo" not in tool["inputSchema"]["required"] for tool in tools)
+
+
+def test_bound_read_only_mcp_stdio_rejects_decision_trace_without_writing_artifact(
+    tmp_path: Path,
+):
+    _allow_mcp_repo(tmp_path)
+    _, _, decision_id = _seed_decision_trace_target(tmp_path)
+    trace_path = sidecar_dir(tmp_path) / "runs" / "seed-review-target" / "decision-trace.json"
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "tugboat_decision_trace",
+                    "arguments": {"decision": str(decision_id)},
+                },
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    assert "read-only MCP session" in responses[0]["error"]["message"]
+    assert not trace_path.exists()
 
 
 def test_bound_read_only_mcp_stdio_injects_repo_for_read_tool_calls(tmp_path: Path):
