@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import tugboat.cli as cli_module
+import tugboat.mcp.contracts as mcp_contracts
 from tugboat.cli import main
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState
 from tugboat.daemon.service import (
@@ -1048,6 +1050,61 @@ mcp:
     assert "kill_switch_enabled: false" in output
     assert "queued: 1" in output
     assert tugboat_daemon_status(tmp_path)["jobs_by_state"] == {"queued": 1}
+
+
+def test_daemon_status_cli_and_mcp_delegate_to_service_layer(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[tuple[str, Path, str]] = []
+
+    def cli_status(repo: Path, *, kill_switch: FileKillSwitch):
+        calls.append(("cli", repo.resolve(), kill_switch.path.relative_to(repo).as_posix()))
+        return {
+            "queue_path": ".sidecar/daemon.sqlite",
+            "kill_switch_enabled": False,
+            "jobs_by_state": {"queued": 2},
+            "oldest_queued_job_id": 7,
+        }
+
+    def mcp_status(repo: Path, *, kill_switch: FileKillSwitch):
+        calls.append(("mcp", repo.resolve(), kill_switch.path.relative_to(repo).as_posix()))
+        return {
+            "queue_path": ".sidecar/daemon.sqlite",
+            "kill_switch_enabled": True,
+            "jobs_by_state": {"running": 1},
+            "oldest_queued_job_id": None,
+        }
+
+    monkeypatch.setattr(cli_module, "daemon_status", cli_status)
+    assert main(["daemon", "status", "--repo", str(tmp_path)]) == 0
+    output = capsys.readouterr().out
+    assert "queued: 2" in output
+    assert "oldest_queued_job_id: 7" in output
+
+    (tmp_path / ".sidecar").mkdir(exist_ok=True)
+    (tmp_path / ".sidecar" / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {tmp_path.resolve().as_posix()}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mcp_contracts, "daemon_status", mcp_status)
+
+    assert tugboat_daemon_status(tmp_path) == {
+        "queue_path": ".sidecar/daemon.sqlite",
+        "kill_switch_enabled": True,
+        "jobs_by_state": {"running": 1},
+        "oldest_queued_job_id": None,
+    }
+    assert calls == [
+        ("cli", tmp_path.resolve(), ".sidecar/read-only.kill"),
+        ("mcp", tmp_path.resolve(), ".sidecar/read-only.kill"),
+    ]
 
 
 def test_daemon_read_only_cli_enables_and_disables_global_kill_switch(
