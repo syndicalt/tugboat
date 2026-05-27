@@ -5804,6 +5804,16 @@ llmff:
     )
     batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
     summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        reflection_row = store.connection.execute(
+            """
+            SELECT r.source_ref, r.artifact_path, a.event_type
+            FROM reflections r
+            JOIN audit_events a ON a.sequence = r.audit_event_sequence
+            WHERE r.run_id = ? AND r.artifact_path = ?
+            """,
+            (run_dir.name, str(run_dir / "reflection.json")),
+        ).fetchone()
 
     assert batch == {
         "schema_version": 1,
@@ -5829,6 +5839,11 @@ llmff:
         "proposed_root_cause": "Recurring failures indicate instruction guidance is incomplete.",
     }
     assert summary["reflection_artifact_path"] == f".sidecar/runs/{run_dir.name}/reflection.json"
+    assert reflection_row == (
+        "optimization-batch.json",
+        str(run_dir / "reflection.json"),
+        "reflection.recorded",
+    )
     assert optimizer_memory["slow_update_records"] == [
         {
             "category": "optimizer_guidance",

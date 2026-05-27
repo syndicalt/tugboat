@@ -2232,6 +2232,13 @@ def _write_apply_plan(
             adapter.switch_branch(base_branch)
             adapter.delete_branch(branch_name)
         raise
+    except ValueError:
+        if auto_apply and branch_created:
+            if not applied_commit:
+                adapter.discard_worktree_changes()
+            adapter.switch_branch(base_branch)
+            adapter.delete_branch(branch_name)
+        raise
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -3120,7 +3127,14 @@ def _write_optimization_reflection_artifact(repo: Path, run_dir: Path, minibatch
         "proposed_root_cause": artifact.proposed_root_cause,
     }
     validate_json_artifact("reflection.json", payload)
-    write_json_artifact(run_dir / "reflection.json", payload)
+    artifact_path = run_dir / "reflection.json"
+    write_json_artifact(artifact_path, payload)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_reflection(
+            run_id=run_dir.name,
+            source_ref=str(payload["source_ref"]),
+            artifact_path=artifact_path,
+        )
 
 
 def _affected_instruction_chunks_for_reflection(repo: Path, run_dir: Path) -> tuple[str, ...]:

@@ -1681,6 +1681,69 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
     assert "rationale" not in serialized_decisions
 
 
+def test_auto_apply_final_gate_failure_cleans_committed_branch_without_silent_apply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    base_branch = _git(repo, "branch", "--show-current")
+    base_head = _git(repo, "rev-parse", "HEAD")
+    generated_branch = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+
+    def fail_final_gate(*args: object, **kwargs: object) -> dict[str, object]:
+        raise ValueError("simulated final gate failure")
+
+    monkeypatch.setattr(cli_module, "_assert_auto_apply_final", fail_final_gate)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert _git(repo, "branch", "--show-current") == base_branch
+    assert _git(repo, "rev-parse", "HEAD") == base_head
+    assert _git(repo, "status", "--porcelain=v1", "--", "CODEX.md") == ""
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        silent_apply_events = connection.execute(
+            """
+            SELECT COUNT(*) FROM audit_events
+            WHERE event_type IN ('apply.applied', 'auto_apply.applied')
+            """
+        ).fetchone()[0]
+        auto_apply_decision = connection.execute(
+            """
+            SELECT COUNT(*) FROM decisions
+            WHERE candidate_id = 7 AND policy = 'auto_apply_controller'
+            """
+        ).fetchone()[0]
+
+    assert silent_apply_events == 0
+    assert auto_apply_decision == 0
+
+
 def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
     tmp_path: Path,
 ):
