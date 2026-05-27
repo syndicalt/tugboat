@@ -407,12 +407,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ci":
         repo = Path(args.repo).resolve()
-        report_path, payload = _write_ci_report(
-            repo,
-            max_instruction_lines=args.max_instruction_lines,
-            candidate=args.candidate,
-            suite=args.suite,
-        )
+        try:
+            report_path, payload = _write_ci_report(
+                repo,
+                max_instruction_lines=args.max_instruction_lines,
+                candidate=args.candidate,
+                suite=args.suite,
+            )
+        except SecretScanError as error:
+            print(f"ci blocked: {error}")
+            return 1
         harness = payload["checks"]["harness"]
         eval_check = payload["checks"].get("eval")
         if _ci_payload_passed(payload):
@@ -1129,7 +1133,8 @@ def _write_ci_report(
     validate_json_artifact("ci-report.json", payload)
     report_path = sidecar_dir(repo) / "ci" / "ci-report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(report_path, "ci-report.json", payload)
+    mark_private_file(report_path)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
             "ci.check_completed",

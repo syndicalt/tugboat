@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from shutil import copytree
 
@@ -69,11 +70,17 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
     original = "# Agent Map\n\nSee [runbook](docs/runbook.md).\n"
     agents.write_text(original, encoding="utf-8")
 
-    assert main(["ci", "--repo", str(repo)]) == 0
+    previous_umask = os.umask(0o022)
+    try:
+        assert main(["ci", "--repo", str(repo)]) == 0
+    finally:
+        os.umask(previous_umask)
 
     assert "ci: ok" in capsys.readouterr().out
     assert agents.read_text(encoding="utf-8") == original
-    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    report_path = sidecar_dir(repo) / "ci" / "ci-report.json"
+    assert report_path.stat().st_mode & 0o777 == 0o600
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report == {
         "schema_version": 1,
         "mode": "ci_check",
@@ -94,6 +101,50 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
     assert payload["artifact_sha256"] == hashlib.sha256(
         (sidecar_dir(repo) / "ci" / "ci-report.json").read_bytes()
     ).hexdigest()
+
+
+def test_ci_check_blocks_secret_bearing_report_payload_without_writing(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text("# Agent Map\n\nSee [runbook](docs/runbook.md).\n", encoding="utf-8")
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou must run tests before final answers.\n",
+    )
+    _write_candidate_json(run_dir)
+
+    assert (
+        main(
+            [
+                "ci",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "run-1",
+                "--suite",
+                "sk-thissecretkeyvalue1234567890",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "ci blocked: secret scan failed" in output
+    assert "sk-thissecret" not in output
+    assert not (sidecar_dir(repo) / "ci" / "ci-report.json").exists()
 
 
 def test_ci_check_returns_nonzero_and_reports_harness_findings(tmp_path: Path, capsys):
