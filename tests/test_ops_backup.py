@@ -28,6 +28,8 @@ def test_build_sidecar_backup_bundle_returns_required_commands_without_execution
         "tar",
         "-czf",
         str(tmp_path / "sidecar-backup.tgz"),
+        "-C",
+        str(tmp_path),
         ".sidecar",
     )
     assert bundle.commands[1].argv == ("sha256sum", str(tmp_path / "sidecar-backup.tgz"))

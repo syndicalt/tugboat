@@ -26,7 +26,7 @@ def test_ops_backup_writes_non_executing_sidecar_backup_plan(
     assert payload["bundle"]["name"] == "sidecar-backup"
     assert payload["bundle"]["commands"][0] == {
         "label": "create sidecar archive",
-        "argv": ["tar", "-czf", str(archive.resolve()), ".sidecar"],
+        "argv": ["tar", "-czf", str(archive.resolve()), "-C", str(repo.resolve()), ".sidecar"],
     }
     assert payload["bundle"]["commands"][1]["stdout_path"] == str(archive.resolve()) + ".sha256"
     assert not archive.exists()

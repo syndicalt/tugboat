@@ -41,7 +41,7 @@ def build_sidecar_backup_bundle(*, repo: Path, archive_path: Path) -> OpsCommand
         commands=(
             OpsCommand(
                 "create sidecar archive",
-                ("tar", "-czf", str(archive_path), ".sidecar"),
+                ("tar", "-czf", str(archive_path), "-C", str(repo), ".sidecar"),
             ),
             OpsCommand(
                 "write archive checksum",
