@@ -1149,6 +1149,7 @@ def _write_release_artifact_manifest(
                 for finding in error.findings
             )
             raise ValueError(f"retained evidence contains secret: {findings}") from error
+        _validate_release_evidence_content(resolved_evidence)
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
     missing_release_evidence = _missing_release_evidence(retained_evidence)
     if missing_release_evidence is not None:
@@ -1257,6 +1258,51 @@ def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) ->
         if not any(required_token in name for name in evidence_names):
             return label
     return None
+
+
+def _validate_release_evidence_content(path: Path) -> None:
+    name = path.name
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lowered = text.lower()
+    if "pytest-coverage" in name:
+        if " passed" not in lowered or _contains_failed_release_signal(lowered):
+            raise ValueError("pytest coverage evidence did not pass")
+        return
+    if "doctor" in name or "install-smoke" in name:
+        if (
+            "tugboat: ok" not in lowered
+            or "mode: proposal_only" not in lowered
+            or "auto_apply: disabled" not in lowered
+            or "auto_apply: enabled" in lowered
+            or _contains_failed_release_signal(lowered)
+        ):
+            label = "install smoke" if "install-smoke" in name else "doctor output"
+            raise ValueError(f"{label} evidence did not pass")
+        return
+    if "index-check" in name:
+        if "index: ok" not in lowered or _contains_failed_release_signal(lowered):
+            raise ValueError("index check evidence did not pass")
+        return
+    if "harness" in name:
+        if "harness: ok" not in lowered or _contains_failed_release_signal(lowered):
+            raise ValueError("harness check evidence did not pass")
+        return
+    if "build-wheel" in name:
+        if ".whl" not in lowered or _contains_failed_release_signal(lowered):
+            raise ValueError("wheel build evidence did not pass")
+        return
+    if "twine-check" in name:
+        if "passed" not in lowered or _contains_failed_release_signal(lowered):
+            raise ValueError("twine check evidence did not pass")
+
+
+def _contains_failed_release_signal(lowered_text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(failed|failure|error|traceback|exception)\b",
+            lowered_text,
+        )
+    )
 
 
 def _provider_backed_release_evidence(

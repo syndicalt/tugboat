@@ -272,6 +272,108 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     }
 
 
+def test_ops_release_manifest_blocks_failed_pytest_coverage_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["coverage"].write_text("1 failed, 999 passed\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: pytest coverage evidence did not pass"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_failed_twine_check_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["twine"].write_text("FAILED dist/tugboat-0.1.0-py3-none-any.whl\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: twine check evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_failed_installed_wheel_smoke_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["install"].write_text(
+        "tugboat: ok\nmode: proposal_only\nauto_apply: enabled\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: install smoke evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
 def test_ops_release_manifest_blocks_provider_backed_review_without_provider_evidence(
     tmp_path: Path,
     capsys,
