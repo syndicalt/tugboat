@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Tugboat Policy Examples
 
 ## Proposal Only

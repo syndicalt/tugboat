@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Tugboat: turning agent traces into durable instruction updates
 
 I’ve been building Tugboat, a developer utility for maintaining the instruction and config layer around coding agents.

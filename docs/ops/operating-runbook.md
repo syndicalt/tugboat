@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Tugboat Operating Runbook
 
 ## Purpose

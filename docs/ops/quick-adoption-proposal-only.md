@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Quick Adoption for Proposal-Only Mode
 
 ## Purpose

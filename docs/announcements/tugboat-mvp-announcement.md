@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Tugboat MVP: proposal-only harness/config observability for coding agents
 
 I'm releasing the first MVP of Tugboat, a local-first sidecar for maintaining the instruction and config layer around coding agents.

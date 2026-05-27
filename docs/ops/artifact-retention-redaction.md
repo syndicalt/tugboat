@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Artifact Retention and Redaction Controls
 
 ## Purpose

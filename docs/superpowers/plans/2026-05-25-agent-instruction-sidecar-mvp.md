@@ -1,3 +1,8 @@
+---
+owner: platform
+verification_status: verified
+---
+
 # Agent Instruction Sidecar MVP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -1954,7 +1959,7 @@ def test_harness_check_accepts_short_instruction_map(tmp_path: Path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "ARCHITECTURE.md").write_text("# Architecture\n", encoding="utf-8")
     (tmp_path / "AGENTS.md").write_text(
-        "# Agent Map\n\nSee [Architecture](docs/ARCHITECTURE.md).\n",
+        "# Agent Map\n\nSee [Architecture]\\(docs/ARCHITECTURE.md).\n",
         encoding="utf-8",
     )
 
@@ -1966,7 +1971,7 @@ def test_harness_check_accepts_short_instruction_map(tmp_path: Path):
 
 def test_harness_check_flags_missing_repo_local_reference(tmp_path: Path):
     (tmp_path / "AGENTS.md").write_text(
-        "# Agent Map\n\nSee [Architecture](docs/MISSING.md).\n",
+        "# Agent Map\n\nSee [Architecture]\\(docs/MISSING.md).\n",
         encoding="utf-8",
     )
 
@@ -1986,7 +1991,7 @@ def test_harness_check_flags_monolithic_instruction_file(tmp_path: Path):
 
 
 def test_harness_check_cli_reports_findings(tmp_path: Path, capsys):
-    (tmp_path / "AGENTS.md").write_text("# Agent Map\n\nSee [Missing](docs/MISSING.md).\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# Agent Map\n\nSee [Missing]\\(docs/MISSING.md).\n", encoding="utf-8")
 
     exit_code = main(["harness", "check", "--repo", str(tmp_path)])
 
