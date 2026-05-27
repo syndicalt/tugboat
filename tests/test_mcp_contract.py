@@ -1554,6 +1554,55 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
     assert not request_dir.exists() or list(request_dir.glob("*.json")) == []
 
 
+def test_write_intent_request_marks_store_job_failed_when_queue_commit_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    audit_id, _ = _seed_review_target(repo)
+    original_open_sidecar = DaemonQueue.open_sidecar
+
+    class FailingCommitConnection:
+        def __init__(self, connection: sqlite3.Connection):
+            self._connection = connection
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._connection, name)
+
+        def commit(self) -> None:
+            raise RuntimeError("queue commit failed")
+
+    def open_with_failing_commit(root: Path) -> DaemonQueue:
+        queue = original_open_sidecar(root)
+        queue.connection = FailingCommitConnection(queue.connection)  # type: ignore[assignment]
+        return queue
+
+    monkeypatch.setattr(DaemonQueue, "open_sidecar", open_with_failing_commit)
+
+    with pytest.raises(RuntimeError, match="queue commit failed"):
+        tugboat_request_proposal(repo, str(audit_id))
+
+    request_dir = sidecar_dir(repo) / "mcp" / "requests"
+    assert not request_dir.exists() or list(request_dir.glob("*.json")) == []
+    with DaemonQueue.open(repo / ".sidecar" / "daemon.sqlite") as queue:
+        assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        row = store.connection.execute(
+            """
+            SELECT d.job_id, d.state, d.payload_json, a.event_type
+            FROM daemon_jobs d
+            JOIN audit_events a ON a.sequence = d.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "1"
+    assert row[1] == "failed"
+    assert row[2] is not None
+    assert row[3] == "daemon_job.state_changed"
+
+
 def test_mcp_write_intent_request_writes_private_request_artifact(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)

@@ -1022,6 +1022,7 @@ def _write_request_artifact(
             "artifact_ref": artifact_ref,
             **(queue_payload or payload),
         }
+        recorded_daemon_job_id: str | None = None
         try:
             with DaemonQueue.open_sidecar(repo_path) as queue:
                 job = queue.enqueue_uncommitted(
@@ -1035,8 +1036,17 @@ def _write_request_artifact(
                         state=job.state.value,
                         payload=daemon_payload,
                     )
+                recorded_daemon_job_id = str(job.id)
                 queue.connection.commit()
         except Exception:
+            if recorded_daemon_job_id is not None:
+                with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
+                    store.update_daemon_job_state(
+                        job_id=recorded_daemon_job_id,
+                        repo_path=repo_path,
+                        state="failed",
+                        payload=daemon_payload,
+                    )
             path.unlink(missing_ok=True)
             raise
         return {
