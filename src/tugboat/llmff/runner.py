@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -62,18 +63,18 @@ class SubprocessLlmffRunner:
 
     def inspect(self, manifest_path: Path) -> dict[str, Any]:
         try:
+            env = self._subprocess_env()
+            kwargs: dict[str, Any] = {
+                "check": True,
+                "capture_output": True,
+                "text": True,
+                "timeout": self.timeout_seconds,
+            }
+            if env is not None:
+                kwargs["env"] = env
             completed = subprocess.run(
-                [
-                    *_command_prefix(self.binary),
-                    "inspect",
-                    "--format",
-                    "json",
-                    str(manifest_path),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
+                [*self._command_prefix(), "inspect", "--format", "json", str(manifest_path)],
+                **kwargs,
             )
             payload = json.loads(completed.stdout)
         except FileNotFoundError as exc:
@@ -92,6 +93,12 @@ class SubprocessLlmffRunner:
         if not isinstance(payload, dict):
             raise ValueError("llmff inspect output must be a JSON object")
         return payload
+
+    def _command_prefix(self) -> list[str]:
+        return _command_prefix(self.binary)
+
+    def _subprocess_env(self) -> dict[str, str] | None:
+        return _fixture_backend_env(self._command_prefix())
 
 
 class LlmffRunSupervisor:
@@ -151,12 +158,18 @@ class LlmffRunSupervisor:
 
         boundary_timeout = False
         try:
+            env = _fixture_backend_env(command)
+            kwargs: dict[str, Any] = {
+                "check": False,
+                "capture_output": True,
+                "text": True,
+                "timeout": timeout_ms / 1000,
+            }
+            if env is not None:
+                kwargs["env"] = env
             completed = subprocess.run(
                 command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout_ms / 1000,
+                **kwargs,
             )
         except subprocess.TimeoutExpired:
             boundary_timeout = True
@@ -389,6 +402,26 @@ def _command_prefix(binary: str) -> list[str]:
     if not prefix:
         raise ValueError("llmff binary command must not be empty")
     return prefix
+
+
+def _fixture_backend_env(command: list[str]) -> dict[str, str] | None:
+    if not _is_fixture_backend_command(command):
+        return None
+    source_root = Path(__file__).resolve().parents[2]
+    if not (source_root / "tugboat").is_dir():
+        return None
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(source_root)
+        if not pythonpath
+        else f"{source_root}{os.pathsep}{pythonpath}"
+    )
+    return env
+
+
+def _is_fixture_backend_command(command: list[str]) -> bool:
+    return len(command) >= 3 and command[1] == "-m" and command[2] == "tugboat.llmff.fixture_backend"
 
 
 def _require_matching_inspect_artifact(manifest_path: Path, *, run_dir: Path, policy: Policy) -> None:

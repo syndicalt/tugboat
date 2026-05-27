@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -216,6 +219,84 @@ def test_acquire_can_reclaim_expired_active_lease(tmp_path: Path):
         assert acquired.attempts == 2
 
 
+def test_acquire_next_is_atomic_across_two_worker_connections(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as setup_queue:
+        job = setup_queue.enqueue(kind="inspect", payload={}, now=_at(0))
+
+    selected = threading.Event()
+    release = threading.Event()
+    worker_b_started = threading.Event()
+    results: dict[str, Any] = {}
+
+    worker_a_connection = _BlockingSelectConnection(
+        sqlite3.connect(tmp_path / ".sidecar" / "daemon.sqlite", check_same_thread=False),
+        selected=selected,
+        release=release,
+    )
+    worker_a_connection.row_factory = sqlite3.Row
+    worker_b_connection = sqlite3.connect(
+        tmp_path / ".sidecar" / "daemon.sqlite",
+        check_same_thread=False,
+    )
+    worker_b_connection.row_factory = sqlite3.Row
+
+    worker_a = DaemonQueue(tmp_path / ".sidecar" / "daemon.sqlite", worker_a_connection)
+    worker_b = DaemonQueue(tmp_path / ".sidecar" / "daemon.sqlite", worker_b_connection)
+
+    def acquire_a() -> None:
+        try:
+            results["a"] = worker_a.acquire_next(
+                lease_owner="worker-a",
+                now=_at(10),
+                lease_duration=timedelta(seconds=30),
+            )
+        except BaseException as error:  # pragma: no cover - re-raised below
+            results["a_error"] = error
+
+    def acquire_b() -> None:
+        worker_b_started.set()
+        try:
+            results["b"] = worker_b.acquire_next(
+                lease_owner="worker-b",
+                now=_at(10),
+                lease_duration=timedelta(seconds=30),
+            )
+        except BaseException as error:  # pragma: no cover - re-raised below
+            results["b_error"] = error
+
+    thread_a = threading.Thread(target=acquire_a)
+    thread_a.start()
+    assert selected.wait(timeout=2)
+
+    thread_b = threading.Thread(target=acquire_b)
+    thread_b.start()
+    assert worker_b_started.wait(timeout=2)
+    release.set()
+    thread_a.join(timeout=2)
+    thread_b.join(timeout=2)
+
+    worker_a.close()
+    worker_b.close()
+
+    assert not thread_a.is_alive()
+    assert not thread_b.is_alive()
+    if "a_error" in results:
+        raise results["a_error"]
+    if "b_error" in results:
+        raise results["b_error"]
+
+    acquired = [item for item in (results["a"], results["b"]) if item is not None]
+    assert len(acquired) == 1
+    assert acquired[0].id == job.id
+
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        stored = queue.get_job(job.id)
+
+    assert stored is not None
+    assert stored.attempts == 1
+    assert stored.lease_owner == acquired[0].lease_owner
+
+
 def test_transition_enforces_allowed_state_machine(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         job = queue.enqueue(kind="inspect", payload={}, now=_at(0))
@@ -298,3 +379,48 @@ def test_bind_address_validation_rejects_public_listeners(address: str):
 
 def _at(seconds: int) -> datetime:
     return datetime(2026, 1, 1, 0, 0, seconds, tzinfo=timezone.utc)
+
+
+class _BlockingSelectConnection:
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        selected: threading.Event,
+        release: threading.Event,
+    ):
+        self._connection = connection
+        self._selected = selected
+        self._release = release
+
+    def execute(self, sql: str, parameters: object = ()) -> sqlite3.Cursor:
+        cursor = self._connection.execute(sql, parameters)
+        normalized = " ".join(sql.split()).lower()
+        if normalized.startswith("select * from daemon_jobs where state = ?"):
+            self._selected.set()
+            assert self._release.wait(timeout=2)
+        return cursor
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+    def rollback(self) -> None:
+        self._connection.rollback()
+
+    def close(self) -> None:
+        self._connection.close()
+
+    @property
+    def row_factory(self) -> object:
+        return self._connection.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value: object) -> None:
+        self._connection.row_factory = value
+
+    def __enter__(self) -> "_BlockingSelectConnection":
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self._connection.__exit__(exc_type, exc, traceback)

@@ -220,7 +220,8 @@ class DaemonQueue:
         timestamp_text = _serialize_datetime(timestamp)
         lease_expires_at_text = _serialize_datetime(lease_expires_at)
 
-        with self.connection:
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
             row = self.connection.execute(
                 """
                 SELECT * FROM daemon_jobs
@@ -243,6 +244,7 @@ class DaemonQueue:
                 ),
             ).fetchone()
             if row is None:
+                self.connection.commit()
                 return None
             job_id = int(row["id"])
             if not _payload_is_valid_object(str(row["payload_json"])):
@@ -258,12 +260,20 @@ class DaemonQueue:
                 self.connection.commit()
                 raise QueuePayloadError(job_id)
 
-            self.connection.execute(
+            cursor = self.connection.execute(
                 """
                 UPDATE daemon_jobs
                 SET state = ?, attempts = attempts + 1, lease_owner = ?,
                     lease_expires_at = ?, updated_at = ?
                 WHERE id = ?
+                  AND (
+                    state = ?
+                    OR (
+                      state IN (?, ?, ?)
+                      AND lease_expires_at IS NOT NULL
+                      AND lease_expires_at <= ?
+                    )
+                  )
                 """,
                 (
                     JobState.INSPECTING.value,
@@ -271,8 +281,20 @@ class DaemonQueue:
                     lease_expires_at_text,
                     timestamp_text,
                     job_id,
+                    JobState.QUEUED.value,
+                    JobState.INSPECTING.value,
+                    JobState.RUNNING.value,
+                    JobState.EVALUATING.value,
+                    timestamp_text,
                 ),
             )
+            if cursor.rowcount == 0:
+                self.connection.commit()
+                return None
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
 
         return self._require_job(job_id)
 
