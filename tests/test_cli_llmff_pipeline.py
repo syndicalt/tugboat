@@ -194,6 +194,10 @@ def _write_fake_llmff(
             {
                 "source_ref": "ev_fake",
                 "summary": "Tests were skipped because regression guidance was missing.",
+                "recurring_failure_patterns": ["Bug fixes closed without regression tests."],
+                "preserved_success_patterns": ["Keep concise repo-local test guidance."],
+                "affected_instruction_chunks": ["CODEX.md#rules"],
+                "proposed_root_cause": "Regression-test expectations were implicit.",
             }
         ]
     path.write_text(
@@ -2103,6 +2107,10 @@ llmff:
             {
                 "source_ref": source_id,
                 "summary": "The event asked for policy treatment.",
+                "recurring_failure_patterns": ["Policy treatment was requested repeatedly."],
+                "preserved_success_patterns": ["Keep policy wording review-gated."],
+                "affected_instruction_chunks": ["CODEX.md#rules"],
+                "proposed_root_cause": "Policy treatment was not explicit enough.",
             }
         ],
     )
@@ -3428,6 +3436,10 @@ def test_propose_rejects_reflection_source_ref_not_declared_by_audit(
             {
                 "source_ref": "ev_hallucinated",
                 "summary": "This reflection cites undeclared evidence.",
+                "recurring_failure_patterns": ["Bug fixes closed without regression tests."],
+                "preserved_success_patterns": ["Keep concise repo-local test guidance."],
+                "affected_instruction_chunks": ["CODEX.md#rules"],
+                "proposed_root_cause": "Regression-test expectations were implicit.",
             }
         ],
     )
@@ -3471,6 +3483,10 @@ def test_propose_rejects_artifact_reflection_source_ref_not_declared_by_audit(
             {
                 "source_ref": "audit:latest",
                 "summary": "This reflection cites an artifact instead of evidence.",
+                "recurring_failure_patterns": ["Bug fixes closed without regression tests."],
+                "preserved_success_patterns": ["Keep concise repo-local test guidance."],
+                "affected_instruction_chunks": ["CODEX.md#rules"],
+                "proposed_root_cause": "Regression-test expectations were implicit.",
             }
         ],
     )

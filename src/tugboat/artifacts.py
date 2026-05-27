@@ -366,7 +366,14 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["source_ref", "summary"],
+                    "required": [
+                        "source_ref",
+                        "summary",
+                        "recurring_failure_patterns",
+                        "preserved_success_patterns",
+                        "affected_instruction_chunks",
+                        "proposed_root_cause",
+                    ],
                     "properties": {
                         "source_ref": {"type": "string"},
                         "summary": {"type": "string"},
@@ -458,7 +465,14 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                             "type": "array",
                             "items": {
                                 "type": "object",
-                                "required": ["source_ref", "summary"],
+                                "required": [
+                                    "source_ref",
+                                    "summary",
+                                    "recurring_failure_patterns",
+                                    "preserved_success_patterns",
+                                    "affected_instruction_chunks",
+                                    "proposed_root_cause",
+                                ],
                                 "properties": {
                                     "source_ref": {"type": "string"},
                                     "summary": {"type": "string"},
@@ -798,7 +812,14 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
         "additionalProperties": False,
-        "required": ["source_ref", "summary"],
+        "required": [
+            "source_ref",
+            "summary",
+            "recurring_failure_patterns",
+            "preserved_success_patterns",
+            "affected_instruction_chunks",
+            "proposed_root_cause",
+        ],
         "properties": {
             "source_ref": {"type": "string"},
             "summary": {"type": "string"},
