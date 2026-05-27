@@ -210,7 +210,7 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
     running = queue.transition(job_id, JobState.RUNNING, now=now)
     _record_job_state(repo, running.id, running.state, payload=running.payload)
     try:
-        result: AuditPipelineResult | ProposePipelineResult | EvalPipelineResult | None = None
+        result: Any = None
         if running.kind == "trace_audit":
             result = _execute_trace_audit(
                 repo,
@@ -223,6 +223,11 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
             )
         elif running.kind == "eval":
             result = _execute_eval(
+                repo,
+                _authoritative_execution_payload(repo, running.kind, running.payload),
+            )
+        elif running.kind == "optimization":
+            result = _execute_optimization(
                 repo,
                 _authoritative_execution_payload(repo, running.kind, running.payload),
             )
@@ -271,6 +276,44 @@ def _execute_eval(repo: Path, payload: dict[str, Any]) -> EvalPipelineResult:
         _required_payload_text(payload, "candidate_id"),
         _required_payload_text(payload, "suite"),
     )
+
+
+def _execute_optimization(repo: Path, payload: dict[str, Any]) -> Any:
+    from tugboat.cli import run_optimize_workflow
+
+    trace_path = _trace_path_from_payload(repo, payload)
+    train_traces = tuple(
+        _repo_relative_artifact_path(repo, artifact_ref)
+        for artifact_ref in _payload_text_list(payload, "train_trace_artifact_refs")
+    )
+    return run_optimize_workflow(
+        repo,
+        trace_path,
+        suite_id=_required_payload_text(payload, "suite"),
+        train_traces=train_traces,
+        held_out_episodes=tuple(_payload_text_list(payload, "held_out_episode_ids")),
+        unseen_suites=tuple(_payload_text_list(payload, "unseen_suites")),
+        trace_format=str(payload.get("trace_format", "auto")),
+    )
+
+
+def _trace_path_from_payload(repo: Path, payload: dict[str, Any]) -> Path:
+    if "trace_artifact_ref" in payload:
+        return _repo_relative_artifact_path(
+            repo,
+            _required_payload_text(payload, "trace_artifact_ref"),
+        )
+    trace_path = Path(_required_payload_text(payload, "trace_path")).expanduser().resolve()
+    if not trace_path.is_relative_to(repo.resolve()):
+        raise DaemonJobPayloadError("trace_path must resolve inside repo")
+    return trace_path
+
+
+def _payload_text_list(payload: dict[str, Any], key: str) -> list[str]:
+    raw = payload.get(key, [])
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise DaemonJobPayloadError(f"{key} must be a list of strings")
+    return list(raw)
 
 
 def _fail_daemon_job(
@@ -342,6 +385,7 @@ def _load_mcp_request_artifact(
         "trace_audit": "audit",
         "proposal": "proposal",
         "eval": "eval",
+        "optimization": "optimization",
     }.get(queue_kind)
     if artifact.get("kind") != expected_request_kind:
         raise DaemonJobPayloadError("mcp request kind does not match queue job")

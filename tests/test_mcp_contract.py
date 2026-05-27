@@ -34,6 +34,7 @@ from tugboat.mcp import (
     tugboat_record_episode,
     tugboat_request_audit,
     tugboat_request_eval,
+    tugboat_request_optimization,
     tugboat_request_proposal,
     tugboat_run_report,
     tugboat_status,
@@ -194,6 +195,14 @@ if args[:1] == ["run"]:
         outputs["policy_decision"].write_text(json.dumps({
             "allowed": True,
             "reasons": [],
+        }) + "\\n", encoding="utf-8")
+    elif manifest == "acceptance-summary":
+        outputs["acceptance_summary"].write_text(json.dumps({
+            "decision_recommendation": "needs_review",
+            "reasons": ["held-out score improved"],
+            "evidence": ["eval-report.json: held_out_score improved"],
+            "reviewer_checklist": ["Review candidate diff", "Run rollback if rejected"],
+            "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
@@ -1921,6 +1930,135 @@ llmff:
     ]
 
 
+def test_request_optimization_enqueues_daemon_executable_skillopt_loop(tmp_path: Path):
+    repo = tmp_path
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_optimization: allow
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    train = tugboat_record_episode(
+        repo,
+        '{"event":"request","text":"Preserve concise verification"}\n'
+        '{"event":"outcome.label","label":"success","trusted":true}\n',
+    )
+    trigger = tugboat_record_episode(
+        repo,
+        '{"event":"request","text":"Fix bug"}\n'
+        '{"event":"user.correction","text":"Need regression tests before final answer"}\n'
+        '{"event":"outcome.label","label":"failure","trusted":true}\n',
+    )
+
+    request = tugboat_request_optimization(
+        repo,
+        trigger["trace_id"],
+        "held-out",
+        train_trace_ids=[train["trace_id"]],
+        held_out_episode_ids=["held-out-episode"],
+        unseen_suites=["governance"],
+    )
+    result = run_daemon_once(
+        repo,
+        DaemonRunConfig(
+            worker_id="mcp-worker",
+            lease_duration=timedelta(seconds=30),
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert request["kind"] == "optimization"
+    assert result["processed"] is True
+    assert result["final_state"] == "waiting_review"
+    run_dir = sorted(runs_dir(repo).iterdir())[-1]
+    for artifact in (
+        "optimization-batch.json",
+        "batch-audit-reports.json",
+        "reflection.json",
+        "candidate.json",
+        "eval-report.json",
+        "acceptance-summary.raw.json",
+        "optimization-summary.json",
+    ):
+        assert (run_dir / artifact).exists()
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    assert summary["decision"] == "needs_review"
+    assert summary["suite_id"] == "held-out"
+    assert summary["unseen_suite_results"][0]["suite_id"] == "governance"
+    batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
+    assert batch["held_out_episodes"] == ["held-out-episode"]
+    assert batch["unseen_suites"] == ["governance"]
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+    assert ("acceptance-summary.yaml", "completed") in [tuple(row) for row in jobs]
+
+
+def test_request_optimization_rejects_missing_train_trace_before_queueing(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    (repo / ".sidecar" / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+    tugboat_request_optimization: allow
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trigger = tugboat_record_episode(repo, '{"event":"request","text":"Fix bug"}\n')
+
+    with pytest.raises(ValueError, match="unknown train_trace_id"):
+        tugboat_request_optimization(
+            repo,
+            trigger["trace_id"],
+            "held-out",
+            train_trace_ids=["mcp-trace-missing"],
+        )
+
+    with DaemonQueue.open_sidecar(repo) as queue:
+        assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+
+
+def test_request_optimization_rejects_unsafe_split_ids_before_queueing(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+
+    with pytest.raises(ValueError, match="held_out_episode_id"):
+        tugboat_request_optimization(
+            repo,
+            "mcp-trace-missing",
+            "held-out",
+            held_out_episode_ids=["../escape"],
+        )
+
+    assert not (sidecar_dir(repo) / "mcp" / "requests").exists()
+
+
 def test_request_eval_enqueues_daemon_executable_patch_eval(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
@@ -2762,6 +2900,7 @@ def test_mcp_tool_registry_exposes_only_approved_non_mutating_tools():
         "tugboat_record_episode",
         "tugboat_request_audit",
         "tugboat_request_eval",
+        "tugboat_request_optimization",
         "tugboat_request_proposal",
     }
     deferred_authority_terms = {

@@ -11,6 +11,7 @@ import sys
 import tomllib
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -91,6 +92,13 @@ from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.report.service import write_report
 from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 from tugboat.vcs import PullRequestResult, VcsAdapter, VcsStateError
+
+
+@dataclass(frozen=True)
+class OptimizeWorkflowResult:
+    exit_code: int
+    run_dir: Path
+    message: str
 
 
 def _write_blocked_by_read_only(repo: Path, action: str) -> bool:
@@ -590,61 +598,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "optimize":
         repo = Path(args.repo)
-        for trace in args.train_trace:
-            audit_exit = main(
-                [
-                    "audit",
-                    "--repo",
-                    str(repo),
-                    "--trace",
-                    str(Path(trace)),
-                    "--trace-format",
-                    args.trace_format,
-                ]
-            )
-            if audit_exit != 0:
-                return audit_exit
-        audit_exit = main(
-            [
-                "audit",
-                "--repo",
-                str(repo),
-                "--trace",
-                str(Path(args.trace)),
-                "--trace-format",
-                args.trace_format,
-            ]
-        )
-        if audit_exit != 0:
-            return audit_exit
-        run_dir = latest_run_dir(repo)
-        trigger_run_id = run_dir.name
-        try:
-            _record_optimize_minibatch_guidance(
-                repo,
-                run_dir,
-                suite_id=args.suite,
-                held_out_episodes=tuple(args.held_out_episode),
-                unseen_suites=tuple(args.unseen_suite),
-            )
-        except ValueError as error:
-            print(f"optimize blocked: {error}")
-            return 1
-        propose_exit = main(["propose", "--repo", str(repo), "--audit", trigger_run_id])
-        run_dir = runs_dir(repo) / trigger_run_id
-        if propose_exit != 0:
-            if not (run_dir / "candidate.json").exists():
-                return propose_exit
-            return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
-        eval_result = run_eval_pipeline(repo, trigger_run_id, args.suite)
-        print(eval_result.message)
-        return _finalize_governed_candidate_evaluation(
+        result = run_optimize_workflow(
             repo,
-            run_dir,
+            Path(args.trace),
             suite_id=args.suite,
-            eval_exit_code=eval_result.exit_code,
+            train_traces=tuple(Path(trace) for trace in args.train_trace),
+            held_out_episodes=tuple(args.held_out_episode),
             unseen_suites=tuple(args.unseen_suite),
+            trace_format=args.trace_format,
         )
+        return result.exit_code
 
     if args.command == "apply":
         repo = Path(args.repo)
@@ -3133,6 +3096,71 @@ def _record_optimize_minibatch_guidance(
                 "note": guidance,
             },
         )
+
+
+def run_optimize_workflow(
+    repo: Path,
+    trace: Path,
+    *,
+    suite_id: str,
+    train_traces: tuple[Path, ...] = (),
+    held_out_episodes: tuple[str, ...] = (),
+    unseen_suites: tuple[str, ...] = (),
+    trace_format: str = "auto",
+) -> OptimizeWorkflowResult:
+    for train_trace in train_traces:
+        train_result = run_audit_pipeline(repo, train_trace, trace_format=trace_format)
+        print(train_result.message)
+        if train_result.exit_code != 0:
+            return OptimizeWorkflowResult(
+                train_result.exit_code,
+                train_result.run_dir,
+                train_result.message,
+            )
+    audit_result = run_audit_pipeline(repo, trace, trace_format=trace_format)
+    print(audit_result.message)
+    if audit_result.exit_code != 0:
+        return OptimizeWorkflowResult(
+            audit_result.exit_code,
+            audit_result.run_dir,
+            audit_result.message,
+        )
+    run_dir = audit_result.run_dir
+    trigger_run_id = run_dir.name
+    try:
+        _record_optimize_minibatch_guidance(
+            repo,
+            run_dir,
+            suite_id=suite_id,
+            held_out_episodes=held_out_episodes,
+            unseen_suites=unseen_suites,
+        )
+    except ValueError as error:
+        message = f"optimize blocked: {error}"
+        print(message)
+        return OptimizeWorkflowResult(1, run_dir, message)
+    propose_result = run_propose_pipeline(repo, trigger_run_id)
+    print(propose_result.message)
+    run_dir = runs_dir(repo) / trigger_run_id
+    if propose_result.exit_code != 0:
+        if not (run_dir / "candidate.json").exists():
+            return OptimizeWorkflowResult(
+                propose_result.exit_code,
+                run_dir,
+                propose_result.message,
+            )
+        exit_code = _write_optimization_summary(repo, run_dir, suite_id=suite_id)
+        return OptimizeWorkflowResult(exit_code, run_dir, "optimization summary written")
+    eval_result = run_eval_pipeline(repo, trigger_run_id, suite_id)
+    print(eval_result.message)
+    exit_code = _finalize_governed_candidate_evaluation(
+        repo,
+        run_dir,
+        suite_id=suite_id,
+        eval_exit_code=eval_result.exit_code,
+        unseen_suites=unseen_suites,
+    )
+    return OptimizeWorkflowResult(exit_code, run_dir, eval_result.message)
 
 
 def _write_optimization_reflection_artifact(repo: Path, run_dir: Path, minibatch, *, suite_id: str) -> None:

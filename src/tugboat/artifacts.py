@@ -1589,7 +1589,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": ["request_id", "kind", "state", "write_intent", "repo_policy", "execution"],
         "properties": {
             "request_id": {"type": "string"},
-            "kind": {"type": "string", "enum": ["audit", "proposal", "eval"]},
+            "kind": {"type": "string", "enum": ["audit", "proposal", "eval", "optimization"]},
             "state": {"type": "string", "const": "queued"},
             "write_intent": {"type": "boolean", "const": True},
             "repo_policy": {
@@ -1607,11 +1607,21 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "additionalProperties": False,
                 "required": ["kind", "payload"],
                 "properties": {
-                    "kind": {"type": "string", "enum": ["trace_audit", "proposal", "eval"]},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["trace_audit", "proposal", "eval", "optimization"],
+                    },
                     "payload": {
                         "type": "object",
                         "additionalProperties": {
-                            "type": ["string", "integer", "number", "boolean", "null"],
+                            "type": [
+                                "array",
+                                "string",
+                                "integer",
+                                "number",
+                                "boolean",
+                                "null",
+                            ],
                         },
                     },
                 },
@@ -1620,7 +1630,10 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "trace_format": {"type": "string"},
             "audit_id": {"type": "string"},
             "candidate_id": {"type": "string"},
+            "held_out_episode_ids": {"type": "array", "items": {"type": "string"}},
             "suite": {"type": "string"},
+            "train_trace_ids": {"type": "array", "items": {"type": "string"}},
+            "unseen_suites": {"type": "array", "items": {"type": "string"}},
         },
     },
     "daemon-discovered-traces.json": {

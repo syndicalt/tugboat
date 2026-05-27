@@ -43,6 +43,7 @@ WRITE_INTENT_TOOLS = frozenset(
         "tugboat_record_episode",
         "tugboat_request_audit",
         "tugboat_request_eval",
+        "tugboat_request_optimization",
         "tugboat_request_proposal",
     }
 )
@@ -108,6 +109,26 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "suite": {"pattern": _SAFE_MCP_SUITE_PATTERN_TEXT, "type": "string"},
         },
         ("repo", "candidate_id", "suite"),
+    ),
+    "tugboat_request_optimization": _object_schema(
+        {
+            "repo": _REPO_SCHEMA,
+            "trace_id": _STRING_ID_SCHEMA,
+            "suite": {"pattern": _SAFE_MCP_SUITE_PATTERN_TEXT, "type": "string"},
+            "train_trace_ids": {
+                "items": _STRING_ID_SCHEMA,
+                "type": "array",
+            },
+            "held_out_episode_ids": {
+                "items": _STRING_ID_SCHEMA,
+                "type": "array",
+            },
+            "unseen_suites": {
+                "items": {"pattern": _SAFE_MCP_SUITE_PATTERN_TEXT, "type": "string"},
+                "type": "array",
+            },
+        },
+        ("repo", "trace_id", "suite"),
     ),
     "tugboat_request_proposal": _object_schema(
         {"repo": _REPO_SCHEMA, "audit_id": _DECIMAL_ID_SCHEMA},
@@ -655,7 +676,7 @@ def _read_episode_trace_format(trace_path: Path) -> str:
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
     _validate_mcp_artifact_id("trace_id", trace_id)
-    trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
+    trace_path = _mcp_episode_path(repo_path, trace_id)
     trace_format = _read_episode_trace_format(trace_path)
     queue_payload = {
         "trace_path": str(trace_path),
@@ -677,6 +698,10 @@ def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
         queue_payload=queue_payload,
         preflight=validate_trace,
     )
+
+
+def _mcp_episode_path(repo: Path, trace_id: str) -> Path:
+    return sidecar_dir(repo) / "mcp" / "episodes" / f"{trace_id}.jsonl"
 
 
 def tugboat_request_proposal(repo: str | Path, audit_id: str) -> dict[str, Any]:
@@ -719,6 +744,64 @@ def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dic
         kind="eval",
         payload={"candidate_id": candidate_id, "suite": suite},
         preflight=validate_candidate_id,
+    )
+
+
+def tugboat_request_optimization(
+    repo: str | Path,
+    trace_id: str,
+    suite: str,
+    *,
+    train_trace_ids: list[str] | None = None,
+    held_out_episode_ids: list[str] | None = None,
+    unseen_suites: list[str] | None = None,
+) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+    train_trace_ids = train_trace_ids or []
+    held_out_episode_ids = held_out_episode_ids or []
+    unseen_suites = unseen_suites or []
+    _validate_mcp_artifact_id("trace_id", trace_id)
+    _validate_mcp_suite_id(suite)
+    for train_trace_id in train_trace_ids:
+        _validate_mcp_artifact_id("train_trace_id", train_trace_id)
+    for held_out_episode_id in held_out_episode_ids:
+        _validate_mcp_artifact_id("held_out_episode_id", held_out_episode_id)
+    for unseen_suite in unseen_suites:
+        _validate_mcp_suite_id(unseen_suite)
+    trace_path = _mcp_episode_path(repo_path, trace_id)
+    train_trace_paths = [_mcp_episode_path(repo_path, item) for item in train_trace_ids]
+
+    def validate_traces() -> None:
+        if not trace_path.is_file():
+            raise ValueError(f"unknown trace_id: {trace_id}")
+        for train_trace_id, train_trace_path in zip(train_trace_ids, train_trace_paths, strict=True):
+            if not train_trace_path.is_file():
+                raise ValueError(f"unknown train_trace_id: {train_trace_id}")
+
+    return _write_request_artifact(
+        repo_path,
+        tool="tugboat_request_optimization",
+        kind="optimization",
+        payload={
+            "held_out_episode_ids": list(held_out_episode_ids),
+            "suite": suite,
+            "trace_id": trace_id,
+            "train_trace_ids": list(train_trace_ids),
+            "unseen_suites": list(unseen_suites),
+        },
+        queue_kind="optimization",
+        queue_payload={
+            "held_out_episode_ids": list(held_out_episode_ids),
+            "suite": suite,
+            "trace_artifact_ref": _relative_ref(repo_path, trace_path),
+            "trace_format": _read_episode_trace_format(trace_path),
+            "train_trace_artifact_refs": [
+                _relative_ref(repo_path, train_trace_path)
+                for train_trace_path in train_trace_paths
+            ],
+            "unseen_suites": list(unseen_suites),
+        },
+        preflight=validate_traces,
     )
 
 
@@ -850,6 +933,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_record_episode": tugboat_record_episode,
     "tugboat_request_audit": tugboat_request_audit,
     "tugboat_request_eval": tugboat_request_eval,
+    "tugboat_request_optimization": tugboat_request_optimization,
     "tugboat_request_proposal": tugboat_request_proposal,
     "tugboat_run_report": tugboat_run_report,
     "tugboat_status": tugboat_status,

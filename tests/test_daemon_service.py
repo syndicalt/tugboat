@@ -995,6 +995,39 @@ def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
     assert tuple(row) == (JobState.FAILED.value, 0, None, None)
 
 
+def test_run_daemon_once_fails_malformed_optimization_payload_without_crashing(
+    tmp_path: Path,
+):
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","content":"Fix"}\n', encoding="utf-8")
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="optimization",
+            payload={
+                "trace_path": str(trace),
+                "suite": "held-out",
+                "held_out_episode_ids": "../escape",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": job.id,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+
+
 def test_daemon_status_cli_and_mcp_read_queue_state(tmp_path: Path, capsys):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(kind="eval", payload={"candidate_id": "candidate-1"}, now=_at(0))
