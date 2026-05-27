@@ -493,3 +493,117 @@ retention:
         ],
     }
     assert "sk-1234567890abcdefghijkl" in trace.read_text(encoding="utf-8")
+
+
+def test_retention_redaction_scan_covers_retained_review_artifacts(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    secret = "sk-1234567890abcdefghijkl"
+    for name in ("audit.json", "candidate.diff", "eval-report.json", "report.md"):
+        (run_dir / name).write_text(f"secret={secret}\n", encoding="utf-8")
+
+    assert main(["retention", "--repo", str(tmp_path)]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert "candidates: 0" in output
+    assert "redaction_candidates: 4" in output
+    assert {
+        line for line in output if line.startswith("redaction_candidate: ")
+    } == {
+        f"redaction_candidate: .sidecar/runs/run-1/{name}:1:openai_api_key"
+        for name in ("audit.json", "candidate.diff", "eval-report.json", "report.md")
+    }
+
+
+def test_retention_redact_output_writes_redacted_copy_without_mutating_original(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    secret = "sk-1234567890abcdefghijkl"
+    report = run_dir / "report.md"
+    report.write_text(f"token {secret}\n", encoding="utf-8")
+    export_dir = tmp_path / "redacted-export"
+
+    assert (
+        main(
+            [
+                "retention",
+                "--repo",
+                str(tmp_path),
+                "--redact-output",
+                str(export_dir),
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out.splitlines()
+    assert "retention_mode: redact" in output
+    assert "redaction_candidates: 1" in output
+    assert f"redacted_export: {export_dir.resolve()}" in output
+    redacted_report = export_dir / ".sidecar" / "runs" / "run-1" / "report.md"
+    assert redacted_report.read_text(encoding="utf-8") == "token [REDACTED:openai_api_key]\n"
+    assert secret in report.read_text(encoding="utf-8")
+
+
+def test_retention_redact_output_is_blocked_by_read_only_kill_switch(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+    (policy_dir / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "retention",
+                "--repo",
+                str(tmp_path),
+                "--redact-output",
+                str(tmp_path / "redacted-export"),
+            ]
+        )
+        == 1
+    )
+
+    assert "redaction blocked: read-only kill switch is enabled" in capsys.readouterr().out
+
+
+def test_retention_redact_output_rejects_sidecar_internal_destination(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "retention",
+                "--repo",
+                str(tmp_path),
+                "--redact-output",
+                str(policy_dir / "redacted-export"),
+            ]
+        )
+        == 1
+    )
+
+    assert (
+        "redaction blocked: redaction output must resolve outside .sidecar"
+        in capsys.readouterr().out
+    )

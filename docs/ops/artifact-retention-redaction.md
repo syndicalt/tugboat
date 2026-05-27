@@ -25,6 +25,14 @@ Before sharing or uploading artifacts, scan for common secret patterns:
 rg -n "OPENAI_API_KEY|ANTHROPIC_API_KEY|api[_-]?key|token|secret|password|Bearer " .sidecar/runs
 ```
 
+Tugboat also scans retained run artifacts during retention previews and can write a redacted export without mutating the originals:
+
+```bash
+tugboat retention --repo . --redact-output /tmp/tugboat-redacted-export
+```
+
+The export preserves `.sidecar/runs/...` relative paths under the output directory, replaces common credential values with `[REDACTED:<kind>]`, and writes owner-only files. Redaction export is blocked while `.sidecar/read-only.kill` exists and the output directory must be outside `.sidecar`.
+
 If the scan finds sensitive content:
 
 - Replace the value with `[redacted]` in the shared copy.

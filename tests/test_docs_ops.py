@@ -109,6 +109,7 @@ DOC_CONTRACTS = {
             "rg -n",
             "OPENAI_API_KEY",
             "redacted",
+            "tugboat retention --repo . --redact-output",
             "optimization-summary.json",
             "| Runtime lifecycle streams | events, checkpoints | 7 days |",
             "tugboat retention --repo .",

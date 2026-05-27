@@ -76,7 +76,7 @@ from tugboat.ops.backup import (
 )
 from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
 from tugboat.ops.observability import summarize_sidecar_observability
-from tugboat.ops.retention import apply_retention_policy
+from tugboat.ops.retention import apply_retention_policy, export_redacted_artifacts
 from tugboat.optimization import (
     REJECTED_EDIT_SUPPRESSION_SIGNAL,
     EpisodeOutcome,
@@ -173,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     retention = subcommands.add_parser("retention")
     retention.add_argument("--repo", required=True)
     retention.add_argument("--apply", action="store_true")
+    retention.add_argument("--redact-output")
 
     ci = subcommands.add_parser("ci")
     ci.add_argument("--repo", required=True)
@@ -438,7 +439,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "retention":
         repo = Path(args.repo)
         policy = load_policy(repo)
-        if args.apply:
+        redaction_export = None
+        if args.redact_output is not None:
+            if _write_blocked_by_read_only(repo, "redaction"):
+                return 1
+            try:
+                result = apply_retention_policy(repo, policy, dry_run=True)
+                redaction_export = export_redacted_artifacts(repo, Path(args.redact_output))
+            except ValueError as error:
+                print(f"redaction blocked: {error}")
+                return 1
+            report_path = _write_retention_report(
+                repo,
+                mode="dry-run",
+                status="complete",
+                candidates=result.candidates,
+                deleted=result.deleted,
+                redaction_candidates=result.redaction_candidates,
+            )
+        elif args.apply:
             if _write_blocked_by_read_only(repo, "retention"):
                 return 1
             preflight = apply_retention_policy(repo, policy, dry_run=True)
@@ -469,11 +488,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 deleted=result.deleted,
                 redaction_candidates=result.redaction_candidates,
             )
-        print(f"retention_mode: {'apply' if args.apply else 'dry-run'}")
+        mode = "redact" if redaction_export is not None else "apply" if args.apply else "dry-run"
+        print(f"retention_mode: {mode}")
         print(f"candidates: {len(result.candidates)}")
         print(f"deleted: {len(result.deleted)}")
         print(f"redaction_candidates: {len(result.redaction_candidates)}")
         print(f"retention_report: {report_path}")
+        if redaction_export is not None:
+            print(f"redacted_export: {redaction_export.output_dir}")
         for candidate in result.candidates:
             print(f"candidate: {candidate}")
         for deleted in result.deleted:
