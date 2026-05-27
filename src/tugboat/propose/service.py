@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
 from tugboat.patches import apply_unified_diff
-from tugboat.paths import runs_dir
+from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
 from tugboat.policy.gate import CandidatePatch
 from tugboat.security.secrets import scan_text
 
@@ -22,7 +22,8 @@ class CandidateArtifacts:
 
 def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> CandidateArtifacts:
     run_dir = _repo_local_run_dir(repo, run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(runs_dir(repo))
+    ensure_private_dir(run_dir)
     diff_path = run_dir / "candidate.diff"
     json_path = run_dir / "candidate.json"
     preview_path = run_dir / "candidate-preview" / candidate.base_file
@@ -34,6 +35,7 @@ def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> Candi
 
             raise SecretScanError(findings)
         diff_path.write_text(candidate.diff, encoding="utf-8")
+        mark_private_file(diff_path)
         artifact = {"schema_version": SCHEMA_VERSION, **candidate.to_json_dict()}
         validate_json_artifact("candidate.json", artifact)
         candidate_text = json.dumps(artifact, indent=2, sort_keys=True) + "\n"
@@ -43,6 +45,7 @@ def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> Candi
 
             raise SecretScanError(findings)
         json_path.write_text(candidate_text, encoding="utf-8")
+        mark_private_file(json_path)
         preview_path, preview_manifest_path = _write_candidate_preview(repo, run_dir, candidate)
     except Exception:
         _remove_candidate_artifacts(
@@ -107,8 +110,10 @@ def _write_candidate_preview(
         from tugboat.security.secrets import SecretScanError
 
         raise SecretScanError(findings)
-    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(run_dir / "candidate-preview")
+    ensure_private_dir(preview_path.parent)
     preview_path.write_text(preview_text, encoding="utf-8")
+    mark_private_file(preview_path)
 
     preview_manifest_path = run_dir / "candidate-preview.json"
     manifest = {
@@ -124,4 +129,5 @@ def _write_candidate_preview(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    mark_private_file(preview_manifest_path)
     return preview_path, preview_manifest_path

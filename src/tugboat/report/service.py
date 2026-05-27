@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from tugboat.artifacts import validate_json_artifact, validate_report_markdown
-from tugboat.paths import runs_dir
+from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
 from tugboat.policy.gate import CandidatePatch, PolicyDecision
 from tugboat.security.secrets import SecretScanError, scan_text
 
@@ -19,7 +19,8 @@ def write_report(
     eval_report_path: Path,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(runs_dir(repo))
+    ensure_private_dir(run_dir)
     report_path = run_dir / "report.md"
     evidence_chain = _evidence_chain_lines(repo, run_dir, eval_report_path)
     eval_summary = _eval_summary_lines(eval_report_path)
@@ -48,6 +49,7 @@ def write_report(
     if findings:
         raise SecretScanError(findings)
     report_path.write_text(text, encoding="utf-8")
+    mark_private_file(report_path)
     return report_path
 
 

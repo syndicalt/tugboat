@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
-from tugboat.paths import runs_dir
+from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
 from tugboat.security.secrets import SecretScanError, scan_text
 
 
@@ -25,7 +25,8 @@ def write_eval_report(
     validation_splits: dict[str, tuple[str, ...]] | None = None,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(runs_dir(repo))
+    ensure_private_dir(run_dir)
     report_path = run_dir / "eval-report.json"
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -50,6 +51,7 @@ def write_eval_report(
     if findings:
         raise SecretScanError(findings)
     report_path.write_text(report_text, encoding="utf-8")
+    mark_private_file(report_path)
     return report_path
 
 

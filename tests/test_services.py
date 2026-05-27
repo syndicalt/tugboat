@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,33 @@ def test_write_candidate_writes_candidate_preview_artifacts(tmp_path: Path):
     }
 
 
+def test_write_candidate_marks_generated_artifacts_private_under_permissive_umask(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Rules\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n # Rules\n+Clarify this.\n",
+    )
+
+    previous_umask = os.umask(0o022)
+    try:
+        artifacts = write_candidate(tmp_path, "run-1", candidate)
+    finally:
+        os.umask(previous_umask)
+
+    generated_files = (
+        artifacts.diff_path,
+        artifacts.json_path,
+        artifacts.preview_path,
+        artifacts.preview_manifest_path,
+    )
+    assert [path.stat().st_mode & 0o777 for path in generated_files] == [0o600] * 4
+    assert artifacts.diff_path.parent.stat().st_mode & 0o777 == 0o700
+    assert artifacts.preview_path.parent.stat().st_mode & 0o777 == 0o700
+
+
 def test_write_candidate_cleans_published_artifacts_when_preview_validation_fails(
     tmp_path: Path,
 ):
@@ -224,6 +252,28 @@ def test_write_eval_report_writes_json_report(tmp_path: Path):
         "suite_id": "unit",
         "trigger_score": 1.0,
     }
+
+
+def test_write_eval_report_marks_report_private_under_permissive_umask(tmp_path: Path):
+    previous_umask = os.umask(0o022)
+    try:
+        report_path = write_eval_report(
+            tmp_path,
+            "run-1",
+            candidate_id=5,
+            suite_id="unit",
+            passed=True,
+            metrics={"failures": 0},
+            trigger_score=1.0,
+            held_out_score=1.0,
+            governance_passed=True,
+            recommendation="accept",
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert report_path.stat().st_mode & 0o777 == 0o600
+    assert report_path.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_write_eval_report_rejects_secret_in_metrics(tmp_path: Path):
@@ -357,6 +407,43 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "",
         ]
     )
+
+
+def test_write_report_marks_report_private_under_permissive_umask(tmp_path: Path):
+    eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    eval_report_path.parent.mkdir(parents=True)
+    eval_report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 5,
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "metrics": {},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "unit",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    previous_umask = os.umask(0o022)
+    try:
+        report_path = write_report(
+            tmp_path,
+            "run-1",
+            candidate=_candidate(),
+            decision=PolicyDecision(True, ()),
+            eval_report_path=eval_report_path,
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert report_path.stat().st_mode & 0o777 == 0o600
+    assert report_path.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_write_report_rejects_malformed_eval_report(tmp_path: Path):
