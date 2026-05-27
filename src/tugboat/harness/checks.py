@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+import yaml
+
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import instruction_paths
 
@@ -338,23 +340,31 @@ def _file_ref_findings(repo: Path, source_path: Path, ref: Path) -> list[str]:
     return []
 
 
-def _frontmatter(text: str) -> dict[str, str]:
+def _frontmatter(text: str) -> dict[str, object]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}
-    metadata: dict[str, str] = {}
-    for line in lines[1:]:
+    closing_index = None
+    for index, line in enumerate(lines[1:], start=1):
         if line.strip() == "---":
-            return metadata
-        key, separator, value = line.partition(":")
-        if separator:
-            metadata[key.strip()] = value.strip()
+            closing_index = index
+            break
+    if closing_index is None:
+        return {}
+    raw_frontmatter = "\n".join(lines[1:closing_index])
+    payload = yaml.safe_load(raw_frontmatter) if raw_frontmatter.strip() else {}
+    if isinstance(payload, dict):
+        return {str(key).strip(): value for key, value in payload.items() if str(key).strip()}
     return {}
 
 
-def _source_file_refs(frontmatter: dict[str, str]) -> list[str]:
+def _source_file_refs(frontmatter: dict[str, object]) -> list[str]:
     raw = frontmatter.get("source_files") or frontmatter.get("source-files") or ""
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    if isinstance(raw, str):
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return []
 
 
 def _must_count(text: str) -> int:

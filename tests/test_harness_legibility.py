@@ -393,6 +393,75 @@ def test_harness_legibility_flags_docs_older_than_declared_source_files(tmp_path
     ]
 
 
+def test_harness_legibility_flags_docs_older_than_yaml_list_source_files(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    source = repo / "src"
+    docs.mkdir()
+    source.mkdir()
+    source_file = source / "service.py"
+    doc = docs / "service.md"
+    source_file.write_text("def run():\n    return 'new'\n", encoding="utf-8")
+    doc.write_text(
+        "---\n"
+        "owner: platform\n"
+        "verification_status: verified\n"
+        "source_files:\n"
+        "  - src/service.py\n"
+        "---\n"
+        "# Service\n",
+        encoding="utf-8",
+    )
+    old_time = time.time() - 20
+    new_time = time.time()
+    os.utime(doc, (old_time, old_time))
+    os.utime(source_file, (new_time, new_time))
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [service](docs/service.md).\n",
+        encoding="utf-8",
+    )
+
+    result = check_harness_legibility(repo)
+    report = generate_harness_report(repo)
+
+    expected = "docs/service.md is older than source file src/service.py."
+    assert result.findings == [expected]
+    assert report.doc_gardening_tasks == ["Refresh docs/service.md from src/service.py."]
+
+
+def test_harness_legibility_accepts_hyphenated_yaml_list_source_files(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    (repo / "docs").mkdir()
+    (repo / "src").mkdir()
+    source_file = repo / "src" / "service.py"
+    doc = repo / "docs" / "service.md"
+    source_file.write_text("changed = True\n", encoding="utf-8")
+    doc.write_text(
+        "---\n"
+        "owner: platform\n"
+        "verification_status: verified\n"
+        "source-files:\n"
+        "  - src/service.py\n"
+        "---\n"
+        "# Service\n",
+        encoding="utf-8",
+    )
+    os.utime(doc, (time.time() - 20, time.time() - 20))
+    os.utime(source_file, None)
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [service](docs/service.md).\n",
+        encoding="utf-8",
+    )
+
+    assert check_harness_legibility(repo).findings == [
+        "docs/service.md is older than source file src/service.py."
+    ]
+
+
 def test_harness_legibility_flags_duplicate_conflicting_rules_and_too_many_musts(tmp_path: Path):
     repo = tmp_path
     docs = repo / "docs"
