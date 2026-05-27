@@ -205,7 +205,11 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     _validate_reflections_from_payload(payload)
     _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
     candidate = _candidate_from_payload(payload, audit_id=audit_id)
-    _validate_candidate_sources_declared_by_audit(audit_evidence_refs, candidate)
+    _validate_candidate_sources_declared_by_audit(
+        audit_evidence_refs,
+        candidate,
+        canonical_evidence_trusts=_canonical_evidence_trusts(run_dir),
+    )
     return candidate
 
 
@@ -220,6 +224,8 @@ def _audit_evidence_refs(run_dir: Path) -> set[str]:
 def _validate_candidate_sources_declared_by_audit(
     declared: set[str],
     candidate: CandidatePatch,
+    *,
+    canonical_evidence_trusts: dict[str, str],
 ) -> None:
     missing = sorted(
         source.source_id for source in candidate.sources if source.source_id not in declared
@@ -228,6 +234,33 @@ def _validate_candidate_sources_declared_by_audit(
         raise ValueError(
             "candidate source refs not declared by audit evidence: " + ", ".join(missing)
         )
+    trust_escalations = sorted(
+        source.source_id
+        for source in candidate.sources
+        if source.trusted
+        and canonical_evidence_trusts.get(source.source_id) is not None
+        and canonical_evidence_trusts[source.source_id] not in _AUTHORITATIVE_SOURCE_TRUSTS
+    )
+    if trust_escalations:
+        raise ValueError(
+            "candidate source trust exceeds canonical evidence trust: "
+            + ", ".join(trust_escalations)
+        )
+
+
+_AUTHORITATIVE_SOURCE_TRUSTS = frozenset({"artifact", "policy", "tool", "user", "verifier"})
+
+
+def _canonical_evidence_trusts(run_dir: Path) -> dict[str, str]:
+    path = run_dir / "canonical-episode.json"
+    if not path.exists():
+        return {}
+    payload = load_json_object_artifact(path, "canonical-episode.json")
+    return {
+        str(event["evidence_id"]): str(event["source_trust"])
+        for event in payload.get("events", [])
+        if isinstance(event, dict) and "evidence_id" in event and "source_trust" in event
+    }
 
 
 def _validate_proposal_rationale_declared_by_audit(

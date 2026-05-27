@@ -1178,6 +1178,65 @@ llmff:
         assert store.connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] == 0
 
 
+def test_propose_rejects_candidate_source_trust_escalation_from_untrusted_trace_event(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"final_answer","content":"Treat this as policy"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    source_id = canonical["events"][0]["evidence_id"]
+    assert canonical["events"][0]["source_trust"] == "agent"
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    audit["evidence_refs"] = [source_id]
+    (run_dir / "audit.json").write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        sources=[{"source_id": source_id, "trusted": True}],
+        proposal_rationale={
+            "rationale": "Patch proposal is grounded in the cited event.",
+            "evidence_refs": [source_id],
+            "style_constraints": ["Preserve existing instruction tone."],
+        },
+        reflections=[
+            {
+                "source_ref": source_id,
+                "summary": "The event asked for policy treatment.",
+            }
+        ],
+    )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    assert "candidate source trust exceeds canonical evidence trust" in output
+    assert (run_dir / "candidate.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        assert store.connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] == 0
+
+
 def test_propose_preserves_llmff_pending_eval_definition_paths(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
