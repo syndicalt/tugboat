@@ -165,6 +165,99 @@ llmff:
     assert rationale["evidence_refs"] == [raw_candidate["sources"][0]["source_id"]]
 
 
+def test_optimize_uses_strict_external_llmff_cli_contract_before_acceptance(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    log_path = tmp_path / "llmff-contract-log.jsonl"
+    strict_llmff = _write_strict_llmff(tmp_path / "strict-llmff")
+    monkeypatch.setenv("TUGBOAT_CONTRACT_LOG", str(log_path))
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {strict_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    records = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [(record["command"], record["manifest"]) for record in records] == [
+        ("inspect", "instruction-index"),
+        ("run", "instruction-index"),
+        ("inspect", "episode-audit"),
+        ("run", "episode-audit"),
+        ("inspect", "drift-detect"),
+        ("run", "drift-detect"),
+        ("inspect", "patch-propose"),
+        ("run", "patch-propose"),
+        ("inspect", "patch-eval"),
+        ("run", "patch-eval"),
+        ("inspect", "acceptance-summary"),
+        ("run", "acceptance-summary"),
+    ]
+    assert records[9]["inputs"] == {
+        "candidate_patch": f"{run_dir}/candidate.raw.json",
+        "eval_suite": f"{run_dir}/eval-suite.json",
+        "policy": f"{repo}/.sidecar/policy.yaml",
+    }
+    assert records[9]["outputs"] == {
+        "eval_report": f"{run_dir}/eval-report.raw.json",
+        "policy_decision": f"{run_dir}/policy-decision.raw.json",
+    }
+    assert records[11]["inputs"] == {
+        "audit_report": f"{run_dir}/audit.raw.json",
+        "candidate_patch": f"{run_dir}/candidate.raw.json",
+        "policy_gate": f"{run_dir}/policy-gate.json",
+        "eval_reports": f"{run_dir}/eval-report.json",
+        "proposal_rationale": f"{run_dir}/proposal-rationale.raw.json",
+        "risk_class": f"{run_dir}/candidate.json",
+    }
+    assert records[11]["outputs"] == {
+        "acceptance_summary": f"{run_dir}/acceptance-summary.raw.json",
+    }
+    assert records[9]["trace_path"] == f"{run_dir}/patch-eval/llmff-trace.jsonl"
+    assert records[9]["events_path"] == f"{run_dir}/patch-eval/llmff-events.jsonl"
+    assert records[9]["checkpoint_path"] == f"{run_dir}/patch-eval/checkpoint.json"
+    assert records[11]["trace_path"] == f"{run_dir}/acceptance-summary/llmff-trace.jsonl"
+    assert records[11]["events_path"] == f"{run_dir}/acceptance-summary/llmff-events.jsonl"
+    assert records[11]["checkpoint_path"] == f"{run_dir}/acceptance-summary/checkpoint.json"
+
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    acceptance = json.loads((run_dir / "acceptance-summary.raw.json").read_text(encoding="utf-8"))
+    assert summary["decision"] == "needs_review"
+    assert summary["acceptance_decision_recommendation"] == "needs_review"
+    assert summary["acceptance_summary_path"] == (
+        f".sidecar/runs/{run_dir.name}/acceptance-summary.raw.json"
+    )
+    assert summary["acceptance_reasons"] == acceptance["reasons"]
+    assert summary["accepted_bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Rules",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+
+
 def _write_strict_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3
@@ -248,12 +341,23 @@ if len(args) >= 14 and args[0] == "run":
             "optimizer_memory",
             "policy",
         ],
+        "patch-eval": ["candidate_patch", "eval_suite", "policy"],
+        "acceptance-summary": [
+            "audit_report",
+            "candidate_patch",
+            "policy_gate",
+            "eval_reports",
+            "proposal_rationale",
+            "risk_class",
+        ],
     }[manifest]
     expected_outputs = {
         "instruction-index": ["instruction_index"],
         "episode-audit": ["audit_report", "evidence_ids"],
         "drift-detect": ["drift_clusters", "optimizer_notes"],
         "patch-propose": ["candidate_patch", "proposal_rationale"],
+        "patch-eval": ["eval_report", "policy_decision"],
+        "acceptance-summary": ["acceptance_summary"],
     }[manifest]
     if list(inputs) != expected_inputs:
         fail(f"{manifest} inputs out of contract: {list(inputs)}")
@@ -358,6 +462,62 @@ if len(args) >= 14 and args[0] == "run":
                     "changed_lines": 1,
                     "normative_changes": 0,
                 }],
+            }, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+    elif manifest == "patch-eval":
+        suite = json.loads(Path(inputs["eval_suite"]).read_text(encoding="utf-8"))
+        if suite["suite_id"] != "held-out":
+            fail("unexpected eval suite: " + repr(suite))
+        Path(outputs["eval_report"]).write_text(
+            json.dumps({
+                "passed": True,
+                "trigger_score": 0.7,
+                "held_out_score": 0.9,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {
+                    "governance_regressions": 0,
+                    "held_out_cases": 3,
+                    "incident_replay_cases": 1,
+                },
+                "validation_splits": {
+                    "trigger": ["incident_replay:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
+                "eval_cases": [
+                    {
+                        "case_id": "incident_replay:regression",
+                        "case_hash": hashlib.sha256(b"incident_replay:regression").hexdigest(),
+                        "split_name": "trigger",
+                    },
+                    {
+                        "case_id": "held-out:no-regression",
+                        "case_hash": hashlib.sha256(b"held-out:no-regression").hexdigest(),
+                        "split_name": "held_out",
+                    },
+                    {
+                        "case_id": "governance:policy",
+                        "case_hash": hashlib.sha256(b"governance:policy").hexdigest(),
+                        "split_name": "governance",
+                    },
+                ],
+            }, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+        Path(outputs["policy_decision"]).write_text(
+            json.dumps({"allowed": True, "reasons": []}, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+    elif manifest == "acceptance-summary":
+        Path(outputs["acceptance_summary"]).write_text(
+            json.dumps({
+                "decision_recommendation": "needs_review",
+                "reasons": ["policy gate and eval report passed"],
+                "evidence": ["audit:1"],
+                "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
             }, sort_keys=True) + "\\n",
             encoding="utf-8",
         )
