@@ -129,6 +129,39 @@ def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp
     assert (run_dir / "candidate.diff").exists()
 
 
+def test_retention_policy_skips_symlinked_runtime_artifacts_without_reading_target(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    outside = tmp_path / "outside-secret.jsonl"
+    outside.write_text('{"token":"sk-thissecretkeyvalue1234567890"}\n', encoding="utf-8")
+    timestamp = time.time() - 15 * 24 * 60 * 60
+    os.utime(outside, (timestamp, timestamp))
+    link = run_dir / "trace-input.jsonl"
+    link.symlink_to(outside)
+
+    dry_run = apply_retention_policy(
+        tmp_path,
+        Policy(raw_traces_retention_days=14, checkpoints_retention_days=7),
+        dry_run=True,
+    )
+    applied = apply_retention_policy(
+        tmp_path,
+        Policy(raw_traces_retention_days=14, checkpoints_retention_days=7),
+        dry_run=False,
+    )
+
+    assert dry_run.candidates == ()
+    assert dry_run.deleted == ()
+    assert dry_run.redaction_candidates == ()
+    assert applied.candidates == ()
+    assert applied.deleted == ()
+    assert applied.redaction_candidates == ()
+    assert link.is_symlink()
+    assert outside.exists()
+
+
 def test_retention_cli_dry_run_reports_expired_runtime_artifacts(
     tmp_path: Path, capsys
 ):

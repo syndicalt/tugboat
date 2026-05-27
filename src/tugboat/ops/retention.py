@@ -22,8 +22,10 @@ class RetentionResult:
 
 def apply_retention_policy(repo: Path, policy: Policy, *, dry_run: bool = True) -> RetentionResult:
     repo = repo.resolve()
+    runs_root = runs_dir(repo).resolve()
     candidates = _expired_runtime_artifacts(
         repo,
+        runs_root=runs_root,
         raw_trace_days=policy.raw_traces_retention_days,
         checkpoint_days=policy.checkpoints_retention_days,
     )
@@ -43,16 +45,20 @@ def apply_retention_policy(repo: Path, policy: Policy, *, dry_run: bool = True) 
 def _expired_runtime_artifacts(
     repo: Path,
     *,
+    runs_root: Path,
     raw_trace_days: int,
     checkpoint_days: int,
 ) -> tuple[Path, ...]:
-    root = runs_dir(repo)
-    if not root.exists():
+    if not runs_root.exists():
         return ()
     now = time.time()
     candidates: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
+    for path in runs_root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            path.relative_to(runs_root)
+        except ValueError:
             continue
         age_days = (now - path.stat().st_mtime) / (24 * 60 * 60)
         if path.name in RAW_TRACE_FILES and age_days > raw_trace_days:
@@ -63,7 +69,7 @@ def _expired_runtime_artifacts(
 
 
 def _relative(repo: Path, path: Path) -> str:
-    return path.resolve().relative_to(repo).as_posix()
+    return path.relative_to(repo).as_posix()
 
 
 def _redaction_candidates(
