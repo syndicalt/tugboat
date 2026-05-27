@@ -9,6 +9,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+from tugboat.paths import ensure_private_dir, mark_private_file
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS daemon_jobs (
@@ -134,12 +136,13 @@ class DaemonQueue:
 
     @classmethod
     def open(cls, path: Path) -> "DaemonQueue":
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(path.parent)
         connection = sqlite3.connect(path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(SCHEMA)
         connection.commit()
+        mark_private_file(path)
         return cls(path, connection)
 
     def close(self) -> None:

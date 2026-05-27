@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,6 +33,20 @@ def test_sidecar_queue_initializes_and_enqueues_jobs(tmp_path: Path):
         assert loaded is not None
         assert loaded.kind == "patch-proposal"
         assert loaded.state is JobState.QUEUED
+
+
+def test_sidecar_queue_database_is_private_under_permissive_umask(tmp_path: Path):
+    previous_umask = os.umask(0o022)
+    try:
+        with DaemonQueue.open_sidecar(tmp_path) as queue:
+            queue.enqueue(kind="trace_audit", payload={"trace_id": "trace-1"}, now=_at(0))
+    finally:
+        os.umask(previous_umask)
+
+    sidecar = tmp_path / ".sidecar"
+    queue_path = sidecar / "daemon.sqlite"
+    assert sidecar.stat().st_mode & 0o777 == 0o700
+    assert queue_path.stat().st_mode & 0o777 == 0o600
 
 
 def test_acquire_leases_next_queued_job(tmp_path: Path):
