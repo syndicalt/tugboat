@@ -11,6 +11,10 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
 
     assert policy.mode == "proposal_only"
     assert policy.auto_apply_enabled is False
+    assert policy.auto_apply_max_changed_lines == 30
+    assert policy.auto_apply_minimum_burn_in_days == 14
+    assert policy.auto_apply_maximum_rejection_rate == 0.10
+    assert policy.auto_apply_maximum_rollback_rate == 0.02
     assert policy.roadmap_learning_rate_max_files_touched == 2
     assert policy.roadmap_learning_rate_max_sections_touched == 4
     assert policy.roadmap_learning_rate_max_changed_lines == 20

@@ -50,9 +50,9 @@ class AutoApplyPolicy:
     version: int = 1
     allowed_repositories: tuple[str, ...] = field(default_factory=tuple)
     allowed_change_classes: tuple[str, ...] = ("A",)
-    minimum_burn_in_days: int = 30
-    maximum_rejection_rate: float = 0.05
-    maximum_rollback_rate: float = 0.01
+    minimum_burn_in_days: int = 14
+    maximum_rejection_rate: float = 0.10
+    maximum_rollback_rate: float = 0.02
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowed_repositories", tuple(self.allowed_repositories))

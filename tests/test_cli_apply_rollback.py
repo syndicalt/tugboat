@@ -329,9 +329,9 @@ auto_apply:
 {allowed_risk_classes_yaml}
   allowed_repositories:
     - {repo}
-  minimum_burn_in_days: 30
-  maximum_rejection_rate: 0.05
-  maximum_rollback_rate: 0.01
+  minimum_burn_in_days: 14
+  maximum_rejection_rate: 0.10
+  maximum_rollback_rate: 0.02
 """,
         encoding="utf-8",
     )
@@ -340,7 +340,7 @@ auto_apply:
 def _seed_auto_apply_history(
     repo: Path,
     *,
-    days_ago: int = 31,
+    days_ago: int = 15,
     reviewed: int = 20,
     rejected: int = 0,
     applied: int = 20,
@@ -499,12 +499,6 @@ def test_auto_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
                 "9",
                 "--actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 1
@@ -1604,8 +1598,6 @@ def test_auto_apply_commit_blocks_without_enabled_policy_or_confirmation(tmp_pat
                 "--mode",
                 "commit",
                 "--auto-apply",
-                "--burn-in-days",
-                "30",
             ]
         )
         == 1
@@ -1614,6 +1606,23 @@ def test_auto_apply_commit_blocks_without_enabled_policy_or_confirmation(tmp_pat
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     assert not (run_dir / "apply-plan.json").exists()
     assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+@pytest.mark.parametrize("command", ("apply", "auto-apply"))
+@pytest.mark.parametrize("removed_flag", ("--burn-in-days", "--rejection-rate", "--rollback-rate"))
+def test_auto_apply_thresholds_are_policy_owned_not_runtime_cli_knobs(
+    command: str,
+    removed_flag: str,
+):
+    args = [command, "--repo", ".", "--candidate", "latest"]
+    if command == "auto-apply":
+        args.extend(["--actor", "operator@example.com"])
+    args.extend([removed_flag, "1"])
+
+    with pytest.raises(SystemExit) as error:
+        cli_module.build_parser().parse_args(args)
+
+    assert error.value.code == 2
 
 
 def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_audit(
@@ -1640,12 +1649,6 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
                 "9",
                 "--review-actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 0
@@ -1687,7 +1690,7 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
             "source_audit_range": approval["readiness_metrics"]["source_audit_range"],
         },
     }
-    assert approval["readiness_metrics"]["burn_in_days"] >= 30
+    assert approval["readiness_metrics"]["burn_in_days"] >= 14
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         event = connection.execute(
             """
@@ -1753,12 +1756,6 @@ def test_auto_apply_commit_executes_recorded_rollback_and_restores_file(tmp_path
                 "9",
                 "--review-actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 0
@@ -1887,12 +1884,6 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
                 "9",
                 "--review-actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 1
@@ -1922,9 +1913,9 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
         "allowed_change_classes": ["A"],
         "allowed_repositories": [str(repo)],
         "enabled": True,
-        "maximum_rejection_rate": 0.05,
-        "maximum_rollback_rate": 0.01,
-        "minimum_burn_in_days": 30,
+        "maximum_rejection_rate": 0.10,
+        "maximum_rollback_rate": 0.02,
+        "minimum_burn_in_days": 14,
         "version": 9,
     }
     assert event_payload["readiness_metrics"] == {
@@ -1937,7 +1928,7 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
         "rollback_rate": 0.0,
         "source_audit_range": event_payload["readiness_metrics"]["source_audit_range"],
     }
-    assert event_payload["readiness_metrics"]["burn_in_days"] >= 30
+    assert event_payload["readiness_metrics"]["burn_in_days"] >= 14
     assert event_payload["readiness_metrics"]["source_audit_range"]["first_sequence"] is not None
     assert event_payload["readiness_metrics"]["source_audit_range"]["last_sequence"] is not None
     serialized_payload = json.dumps(event_payload, sort_keys=True)
@@ -1972,12 +1963,6 @@ def test_auto_apply_blocks_underclassified_class_a_candidate_touching_policy_dom
                 "9",
                 "--review-actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 1
@@ -2062,12 +2047,6 @@ auto_apply:
                 "--confirm-auto-apply",
                 "--review-actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 1
@@ -2095,12 +2074,6 @@ def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
                 "3",
                 "--actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "30",
-                "--rejection-rate",
-                "0.02",
-                "--rollback-rate",
-                "0.001",
             ]
         )
         == 0
@@ -2113,7 +2086,7 @@ def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
     assert approval["actor"] == "operator@example.com"
 
 
-def test_auto_apply_uses_ledger_burn_in_instead_of_favorable_cli_value(tmp_path: Path):
+def test_auto_apply_uses_ledger_burn_in_without_cli_override(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
     _write_auto_apply_policy(repo, version=4)
@@ -2131,12 +2104,6 @@ def test_auto_apply_uses_ledger_burn_in_instead_of_favorable_cli_value(tmp_path:
                 "4",
                 "--actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "999",
-                "--rejection-rate",
-                "0",
-                "--rollback-rate",
-                "0",
             ]
         )
         == 1
@@ -2145,13 +2112,13 @@ def test_auto_apply_uses_ledger_burn_in_instead_of_favorable_cli_value(tmp_path:
     assert not (run_dir / "apply-plan.json").exists()
 
 
-def test_auto_apply_uses_ledger_rejection_and_rollback_rates_instead_of_cli_values(
+def test_auto_apply_uses_ledger_rejection_and_rollback_rates_without_cli_overrides(
     tmp_path: Path,
 ):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
     _write_auto_apply_policy(repo, version=5)
-    _seed_auto_apply_history(repo, reviewed=20, rejected=2, applied=20, rollbacks=1)
+    _seed_auto_apply_history(repo, reviewed=20, rejected=3, applied=20, rollbacks=1)
 
     assert (
         main(
@@ -2166,12 +2133,6 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_instead_of_cli_valu
                 "5",
                 "--actor",
                 "operator@example.com",
-                "--burn-in-days",
-                "999",
-                "--rejection-rate",
-                "0",
-                "--rollback-rate",
-                "0",
             ]
         )
         == 1
@@ -2184,8 +2145,8 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_instead_of_cli_valu
     assert event_payload["phase"] == "precheck"
     assert event_payload["eligible"] is False
     assert event_payload["readiness_metrics"]["reviewed_count"] == 20
-    assert event_payload["readiness_metrics"]["rejected_count"] == 2
-    assert event_payload["readiness_metrics"]["rejection_rate"] == 0.1
+    assert event_payload["readiness_metrics"]["rejected_count"] == 3
+    assert event_payload["readiness_metrics"]["rejection_rate"] == 0.15
     assert event_payload["readiness_metrics"]["rollback_count"] == 1
     assert event_payload["readiness_metrics"]["rollback_rate"] == 0.05
     assert event_payload["readiness_metrics"]["source_audit_range"]["first_sequence"] is not None
@@ -2216,9 +2177,6 @@ def test_auto_apply_precheck_blocks_without_eval_evidence(tmp_path: Path):
             review_actor="operator@example.com",
             confirmed=True,
             policy_version=6,
-            burn_in_days=30,
-            rejection_rate=0.0,
-            rollback_rate=0.0,
         )
 
     decision = _auto_apply_decision_payloads(repo)[-1]
@@ -2258,9 +2216,6 @@ def test_auto_apply_final_uses_eval_report_governance_result(tmp_path: Path):
             review_actor="operator@example.com",
             confirmed=True,
             policy_version=7,
-            burn_in_days=30,
-            rejection_rate=0.0,
-            rollback_rate=0.0,
         )
 
     decision = _auto_apply_decision_payloads(repo)[-1]

@@ -57,7 +57,7 @@ class Policy:
     mode: str = "proposal_only"
     instruction_files: tuple[InstructionFilePolicy, ...] = field(default_factory=tuple)
     auto_apply_enabled: bool = False
-    auto_apply_max_changed_lines: int = 20
+    auto_apply_max_changed_lines: int = 30
     auto_apply_allowed_repositories: tuple[str, ...] = field(default_factory=tuple)
     auto_apply_allowed_risk_classes: tuple[str, ...] = ("A",)
     roadmap_learning_rate_max_files_touched: int = 2
@@ -67,9 +67,9 @@ class Policy:
     roadmap_learning_rate_operator_risk_limits: dict[str, int] = field(default_factory=dict)
     risk_class_changed_line_budgets: dict[str, int] = field(default_factory=dict)
     editable_headings: tuple[str, ...] = field(default_factory=tuple)
-    auto_apply_minimum_burn_in_days: int = 30
-    auto_apply_maximum_rejection_rate: float = 0.05
-    auto_apply_maximum_rollback_rate: float = 0.01
+    auto_apply_minimum_burn_in_days: int = 14
+    auto_apply_maximum_rejection_rate: float = 0.10
+    auto_apply_maximum_rollback_rate: float = 0.02
     forbidden_terms: tuple[str, ...] = (
         "approval",
         "sandbox",

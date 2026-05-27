@@ -36,7 +36,7 @@ from tugboat.auto_apply import (
     evaluate_auto_apply,
 )
 from tugboat.config import DEFAULT_INSTRUCTION_FILES, load_policy
-from tugboat.models import DEFAULT_FIXTURE_LLMFF_BINARY
+from tugboat.models import DEFAULT_FIXTURE_LLMFF_BINARY, Policy
 from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.runner import (
     DaemonLoopConfig,
@@ -144,7 +144,13 @@ def _initialize_repo_policy(repo: Path) -> Path:
             }
             for item in DEFAULT_INSTRUCTION_FILES
         ],
-        "auto_apply": {"enabled": False},
+        "auto_apply": {
+            "enabled": False,
+            "max_changed_lines": Policy().auto_apply_max_changed_lines,
+            "minimum_burn_in_days": Policy().auto_apply_minimum_burn_in_days,
+            "maximum_rejection_rate": Policy().auto_apply_maximum_rejection_rate,
+            "maximum_rollback_rate": Policy().auto_apply_maximum_rollback_rate,
+        },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,
@@ -235,9 +241,6 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--auto-apply", action="store_true")
     apply.add_argument("--confirm-auto-apply", action="store_true")
     apply.add_argument("--auto-apply-policy-version", type=int)
-    apply.add_argument("--burn-in-days", type=int, default=0)
-    apply.add_argument("--rejection-rate", type=float, default=1.0)
-    apply.add_argument("--rollback-rate", type=float, default=1.0)
 
     auto_apply = subcommands.add_parser("auto-apply")
     auto_apply.add_argument("--repo", required=True)
@@ -245,9 +248,6 @@ def build_parser() -> argparse.ArgumentParser:
     auto_apply.add_argument("--confirm-auto-apply", action="store_true")
     auto_apply.add_argument("--auto-apply-policy-version", type=int)
     auto_apply.add_argument("--actor", required=True)
-    auto_apply.add_argument("--burn-in-days", type=int, default=0)
-    auto_apply.add_argument("--rejection-rate", type=float, default=1.0)
-    auto_apply.add_argument("--rollback-rate", type=float, default=1.0)
 
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("--repo", required=True)
@@ -624,9 +624,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 auto_apply=args.auto_apply,
                 confirm_auto_apply=args.confirm_auto_apply,
                 auto_apply_policy_version=args.auto_apply_policy_version,
-                burn_in_days=args.burn_in_days,
-                rejection_rate=args.rejection_rate,
-                rollback_rate=args.rollback_rate,
             )
         except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
             print(f"apply blocked: {error}")
@@ -649,9 +646,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 auto_apply=True,
                 confirm_auto_apply=args.confirm_auto_apply,
                 auto_apply_policy_version=args.auto_apply_policy_version,
-                burn_in_days=args.burn_in_days,
-                rejection_rate=args.rejection_rate,
-                rollback_rate=args.rollback_rate,
             )
         except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
             print(f"auto-apply blocked: {error}")
@@ -2022,9 +2016,6 @@ def _write_apply_plan(
     auto_apply: bool = False,
     confirm_auto_apply: bool = False,
     auto_apply_policy_version: int | None = None,
-    burn_in_days: int = 0,
-    rejection_rate: float = 1.0,
-    rollback_rate: float = 1.0,
 ) -> Path:
     candidate = _candidate_from_artifacts(run_dir)
     candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
@@ -2139,9 +2130,6 @@ def _write_apply_plan(
             review_actor=review_actor,
             confirmed=confirm_auto_apply,
             policy_version=auto_apply_policy_version,
-            burn_in_days=burn_in_days,
-            rejection_rate=rejection_rate,
-            rollback_rate=rollback_rate,
         )
 
     try:
@@ -2184,9 +2172,6 @@ def _write_apply_plan(
                     review_actor=review_actor,
                     confirmed=confirm_auto_apply,
                     policy_version=auto_apply_policy_version,
-                    burn_in_days=burn_in_days,
-                    rejection_rate=rejection_rate,
-                    rollback_rate=rollback_rate,
                 )
         elif mode == "pr":
             adapter.create_branch(branch_name)
@@ -2408,9 +2393,6 @@ def _assert_auto_apply_precheck(
     review_actor: str,
     confirmed: bool,
     policy_version: int | None,
-    burn_in_days: int,
-    rejection_rate: float,
-    rollback_rate: float,
 ) -> None:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
@@ -2484,9 +2466,6 @@ def _assert_auto_apply_final(
     review_actor: str,
     confirmed: bool,
     policy_version: int | None,
-    burn_in_days: int,
-    rejection_rate: float,
-    rollback_rate: float,
 ) -> dict[str, object]:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)

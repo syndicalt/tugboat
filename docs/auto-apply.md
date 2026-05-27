@@ -32,6 +32,8 @@ Auto-apply is only for narrow Class A changes after a burn-in period. A candidat
 - allowed change category;
 - no protected policy-domain escalation.
 
+Default policy thresholds are intentionally usable but still bounded: 14 burn-in days, 10% maximum rejection rate, 2% maximum rollback rate, and 30 changed lines. Repos can tighten these values in `.sidecar/policy.yaml`; runtime auto-apply commands cannot override them.
+
 Allowed examples include typo fixes, broken internal links, formatting normalization, duplicate sentence removal, and verified stale command references.
 
 ## Dry Check
@@ -51,13 +53,10 @@ Only after review:
 ```bash
 tugboat auto-apply --repo . --candidate latest --actor <name> \
   --confirm-auto-apply \
-  --auto-apply-policy-version 1 \
-  --burn-in-days 30 \
-  --rejection-rate 0.01 \
-  --rollback-rate 0.0
+  --auto-apply-policy-version 1
 ```
 
-The command writes an audited commit-mode apply plan and records rollback metadata.
+The command writes an audited commit-mode apply plan and records rollback metadata. Burn-in, rejection rate, and rollback rate are computed from the ledger and checked against policy.
 
 ## Rollback
 

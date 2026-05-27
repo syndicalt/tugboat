@@ -38,7 +38,13 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
                 "protected": False,
             },
         ],
-        "auto_apply": {"enabled": False},
+        "auto_apply": {
+            "enabled": False,
+            "max_changed_lines": 30,
+            "minimum_burn_in_days": 14,
+            "maximum_rejection_rate": 0.10,
+            "maximum_rollback_rate": 0.02,
+        },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,

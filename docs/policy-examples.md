@@ -86,7 +86,10 @@ Use `allowed_repositories` and `tool_policy` to keep MCP access scoped to review
 ```yaml
 auto_apply:
   enabled: false
-  max_changed_lines: 20
+  max_changed_lines: 30
+  minimum_burn_in_days: 14
+  maximum_rejection_rate: 0.10
+  maximum_rollback_rate: 0.02
 ```
 
 Auto-apply remains disabled unless a separate burn-in, confirmation, VCS, and rollback policy is satisfied.

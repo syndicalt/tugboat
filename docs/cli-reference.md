@@ -77,13 +77,10 @@ Auto-apply is a separate, narrow lane:
 tugboat auto-apply --repo . --candidate latest --actor <name>
 tugboat auto-apply --repo . --candidate latest --actor <name> \
   --confirm-auto-apply \
-  --auto-apply-policy-version 1 \
-  --burn-in-days 30 \
-  --rejection-rate 0.01 \
-  --rollback-rate 0.0
+  --auto-apply-policy-version 1
 ```
 
-The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, burn-in, eval, governance, VCS, and rollback evidence all pass.
+The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, ledger-derived burn-in and reliability metrics, eval, governance, VCS, and rollback evidence all pass. Runtime arguments confirm intent; policy owns thresholds such as `minimum_burn_in_days`, `maximum_rejection_rate`, and `maximum_rollback_rate`.
 
 ## Harness And CI
 

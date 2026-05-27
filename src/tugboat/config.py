@@ -126,7 +126,10 @@ def load_policy(repo: Path) -> Policy:
         mode=str(raw.get("mode", "proposal_only")),
         instruction_files=entries or DEFAULT_INSTRUCTION_FILES,
         auto_apply_enabled=bool(auto_apply.get("enabled", False)),
-        auto_apply_max_changed_lines=int(auto_apply.get("max_changed_lines", 20)),
+        auto_apply_max_changed_lines=_as_non_negative_int(
+            auto_apply.get("max_changed_lines", Policy().auto_apply_max_changed_lines),
+            "auto_apply.max_changed_lines",
+        ),
         auto_apply_allowed_repositories=tuple(
             str(Path(item).expanduser().resolve())
             for item in auto_apply.get("allowed_repositories", [])

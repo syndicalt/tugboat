@@ -53,7 +53,7 @@ def _confirmed(**overrides: object) -> AutoApplyConfirmation:
 
 def _ready(**overrides: object) -> AutoApplyReadiness:
     values = {
-        "burn_in_days": 30,
+        "burn_in_days": 14,
         "policy": _enabled_policy(),
         "confirmation": _confirmed(),
     }
@@ -63,11 +63,14 @@ def _ready(**overrides: object) -> AutoApplyReadiness:
 
 def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     assert AutoApplyPolicy().enabled is False
+    assert AutoApplyPolicy().minimum_burn_in_days == 14
+    assert AutoApplyPolicy().maximum_rejection_rate == 0.10
+    assert AutoApplyPolicy().maximum_rollback_rate == 0.02
 
     without_policy = evaluate_auto_apply(
         candidate=_passing_candidate(),
         readiness=AutoApplyReadiness(
-            burn_in_days=30,
+            burn_in_days=14,
             policy=None,
             confirmation=_confirmed(),
         ),
@@ -75,7 +78,7 @@ def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     default_policy = evaluate_auto_apply(
         candidate=_passing_candidate(),
         readiness=AutoApplyReadiness(
-            burn_in_days=30,
+            burn_in_days=14,
             policy=AutoApplyPolicy(),
             confirmation=_confirmed(policy_version=1),
         ),
