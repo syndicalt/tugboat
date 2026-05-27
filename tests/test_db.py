@@ -47,6 +47,18 @@ def _seed_candidate(
     )
 
 
+def _seed_run(store: Store, tmp_path: Path, *, run_id: str = "run-1") -> None:
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(exist_ok=True)
+    store.insert_run(
+        run_id=run_id,
+        stage="test",
+        manifest_hash="abc",
+        status="running",
+        run_dir=run_dir,
+    )
+
+
 def test_store_initializes_core_tables(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         tables = store.table_names()
@@ -609,6 +621,7 @@ def test_record_llmff_run_persists_exit_code(tmp_path: Path):
     checkpoint.write_text('{"manifest_hash":"abc"}\n', encoding="utf-8")
 
     with Store.open(tmp_path / "db.sqlite") as store:
+        _seed_run(store, tmp_path)
         store.record_llmff_run(
             run_id="run-1",
             manifest_hash="abc",
@@ -641,6 +654,7 @@ def test_record_llmff_run_captures_failure_summary_without_events(tmp_path: Path
     checkpoint = tmp_path / "checkpoint.json"
 
     with Store.open(tmp_path / "db.sqlite") as store:
+        _seed_run(store, tmp_path)
         store.record_llmff_run(
             run_id="run-1",
             manifest_hash="abc",
@@ -669,6 +683,67 @@ def test_record_llmff_run_captures_failure_summary_without_events(tmp_path: Path
         "failure_kind": "timeout",
         "failure_message": "Timed out after 12000 ms",
     }
+
+
+def test_record_llmff_run_rejects_missing_run_parent_without_audit_event(
+    tmp_path: Path,
+):
+    manifest = tmp_path / "patch-eval.yaml"
+    manifest.write_text("name: patch-eval\n", encoding="utf-8")
+    events = tmp_path / "missing-events.jsonl"
+    trace = tmp_path / "llmff-trace.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(ValueError, match="llmff_job run_id does not reference runs"):
+            store.record_llmff_run(
+                run_id="missing-run",
+                manifest_hash="abc",
+                result=RunResult(
+                    manifest_path=manifest,
+                    exit_code=0,
+                    trace_path=trace,
+                    events_path=events,
+                    checkpoint_path=checkpoint,
+                    output_paths={},
+                ),
+            )
+
+        assert store.count("audit_events") == 0
+
+
+def test_run_scoped_artifacts_reject_missing_run_parent_without_audit_event(
+    tmp_path: Path,
+):
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(
+            ValueError,
+            match="instruction_snapshot run_id does not reference runs",
+        ):
+            store.record_instruction_snapshot(
+                run_id="missing-run",
+                path="CODEX.md",
+                artifact_path=artifact,
+            )
+        with pytest.raises(
+            ValueError,
+            match="instruction_graph run_id does not reference runs",
+        ):
+            store.record_instruction_graph(
+                run_id="missing-run",
+                artifact_path=artifact,
+            )
+        with pytest.raises(ValueError, match="reflection run_id does not reference runs"):
+            store.record_reflection(
+                run_id="missing-run",
+                source_ref="audit:1",
+                artifact_path=artifact,
+            )
+
+        assert store.count("audit_events") == 0
 
 
 def test_audit_events_are_hash_chained(tmp_path: Path):

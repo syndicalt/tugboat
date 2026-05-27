@@ -379,6 +379,14 @@ class Store:
         if row is None:
             raise ValueError(f"{context} audit_id does not reference audits")
 
+    def _require_run(self, run_id: str, *, context: str) -> None:
+        row = self.connection.execute(
+            "SELECT 1 FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{context} run_id does not reference runs")
+
     def _require_candidate(self, candidate_id: int, *, context: str) -> None:
         row = self.connection.execute(
             "SELECT 1 FROM candidates WHERE id = ?",
@@ -508,6 +516,7 @@ class Store:
         manifest_hash: str,
         result: RunResult,
     ) -> int:
+        self._require_run(run_id, context="llmff_job")
         status = "completed" if result.exit_code == 0 else "failed"
         job_payload: dict[str, Any] = {
             "run_id": run_id,
@@ -589,6 +598,7 @@ class Store:
         path: str,
         artifact_path: Path,
     ) -> int:
+        self._require_run(run_id, context="instruction_snapshot")
         content_hash = _file_hash(artifact_path)
         event = self.append_audit_event(
             "instruction_snapshot.recorded",
@@ -617,6 +627,7 @@ class Store:
         run_id: str,
         artifact_path: Path,
     ) -> int:
+        self._require_run(run_id, context="instruction_graph")
         graph_hash = _file_hash(artifact_path)
         event = self.append_audit_event(
             "instruction_graph.recorded",
@@ -1176,6 +1187,7 @@ class Store:
         source_ref: str,
         artifact_path: Path,
     ) -> int:
+        self._require_run(run_id, context="reflection")
         reflection_hash = _file_hash(artifact_path)
         event = self.append_audit_event(
             "reflection.recorded",

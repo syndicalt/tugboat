@@ -54,6 +54,14 @@ def run_audit_pipeline(
 ) -> AuditPipelineResult:
     policy = load_policy(repo)
     run_dir = new_run_dir(repo)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="audit",
+            manifest_hash="preflight",
+            status="running",
+            run_dir=run_dir,
+        )
     shutil.copyfile(trace, run_dir / "trace-input.jsonl")
     mark_private_file(run_dir / "trace-input.jsonl")
     _write_instruction_snapshot(repo, run_dir)
@@ -61,6 +69,14 @@ def run_audit_pipeline(
         scan_path(run_dir / "trace-input.jsonl")
         scan_path(run_dir / "instruction-snapshot")
     except SecretScanError as error:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash="preflight",
+                status="failed",
+                run_dir=run_dir,
+            )
         write_audit(
             run_dir,
             {

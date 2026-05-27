@@ -959,6 +959,14 @@ def test_run_daemon_cycle_executes_checkpoint_resume_when_manifest_and_outputs_a
     checkpoint.write_text(json.dumps({"manifest_hash": manifest_hash}) + "\n", encoding="utf-8")
     _write_inspect_artifact(run_dir, manifest)
     output = run_dir / "instruction-index.raw.json"
+    with Store.open(sidecar_dir(tmp_path) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="instruction_index",
+            manifest_hash=manifest_hash,
+            status="running",
+            run_dir=run_dir,
+        )
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(
             kind="llmff_resume",
@@ -1039,6 +1047,14 @@ def test_run_daemon_cycle_executes_checkpoint_resume_from_checkpoint_metadata_af
         + "\n",
         encoding="utf-8",
     )
+    with Store.open(sidecar_dir(tmp_path) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="instruction_index",
+            manifest_hash=manifest_hash,
+            status="running",
+            run_dir=run_dir,
+        )
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.enqueue(
             kind="llmff_resume",

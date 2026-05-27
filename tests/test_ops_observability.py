@@ -310,6 +310,13 @@ def test_sidecar_observability_deduplicates_llmff_job_failure_with_run_event(
     manifest = tmp_path / "patch-eval.yaml"
     manifest.write_text("name: patch-eval\n", encoding="utf-8")
     with Store.open(sidecar / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="eval",
+            manifest_hash="abc",
+            status="failed",
+            run_dir=run_dir,
+        )
         store.record_llmff_run(
             run_id="run-1",
             manifest_hash="abc",
