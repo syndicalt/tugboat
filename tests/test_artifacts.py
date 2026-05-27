@@ -1599,6 +1599,7 @@ def test_validate_ci_report_artifact_requires_check_results():
             "checks": {
                 "index": {"passed": True, "indexed_documents": 1},
                 "harness": {"passed": True, "findings": []},
+                "manifest_contracts": {"passed": True, "findings": []},
                 "semantic_policy_lint": {"passed": True, "findings": []},
                 "eval": {
                     "passed": True,

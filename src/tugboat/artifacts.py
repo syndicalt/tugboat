@@ -1483,7 +1483,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "checks": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["index", "harness", "semantic_policy_lint"],
+                "required": ["index", "harness", "manifest_contracts", "semantic_policy_lint"],
                 "properties": {
                     "index": {
                         "type": "object",
@@ -1495,6 +1495,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                         },
                     },
                     "harness": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["passed", "findings"],
+                        "properties": {
+                            "passed": {"type": "boolean"},
+                            "findings": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                    "manifest_contracts": {
                         "type": "object",
                         "additionalProperties": False,
                         "required": ["passed", "findings"],

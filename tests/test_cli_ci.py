@@ -88,6 +88,7 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
         "checks": {
             "harness": {"passed": True, "findings": []},
             "index": {"passed": True, "indexed_documents": 1},
+            "manifest_contracts": {"passed": True, "findings": []},
             "semantic_policy_lint": {"passed": True, "findings": []},
         },
     }
@@ -188,6 +189,48 @@ def test_ci_check_returns_nonzero_for_semantic_policy_lint_findings(tmp_path: Pa
     assert report["checks"]["semantic_policy_lint"] == {
         "passed": False,
         "findings": ["CODEX.md:5 weakens governance term 'test' with permissive language."],
+    }
+
+
+def test_ci_check_returns_nonzero_for_invalid_local_manifest_contract(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text("# Agent Map\n\nSee [runbook](docs/runbook.md).\n", encoding="utf-8")
+    manifest_dir = repo / ".sidecar" / "manifests"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "episode-audit.yaml").write_text(
+        """
+name: episode-audit
+inputs:
+  trace: trace.jsonl
+outputs:
+  audit_report: audit.raw.json
+output_artifacts:
+  audit_report: unknown.raw.json
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    output = capsys.readouterr().out
+    assert "ci: failed" in output
+    assert "manifest contract validation failed" in output
+    assert "episode-audit.yaml output_artifacts.audit_report references unknown JSON artifact schema unknown.raw.json" in output
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["manifest_contracts"] == {
+        "passed": False,
+        "findings": [
+            "episode-audit.yaml output_artifacts.audit_report references unknown JSON artifact schema unknown.raw.json"
+        ],
     }
 
 

@@ -58,7 +58,11 @@ from tugboat.harness.checks import (
     generate_harness_report,
 )
 from tugboat.llmff.runner import inspect_manifest, run_manifest
-from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
+from tugboat.manifests import (
+    manifests_are_allowed_by_policy,
+    materialize_manifests,
+    validate_manifest_contracts,
+)
 from tugboat.mcp import run_stdio_server
 from tugboat.ops.backup import build_sidecar_backup_bundle, build_sidecar_restore_bundle
 from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
@@ -491,6 +495,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("ci: failed")
         for finding in harness["findings"]:
             print(finding)
+        manifest_contracts = payload["checks"]["manifest_contracts"]
+        if not manifest_contracts["passed"]:
+            print("manifest contract validation failed")
+            for finding in manifest_contracts["findings"]:
+                print(finding)
         semantic_lint = payload["checks"]["semantic_policy_lint"]
         if not semantic_lint["passed"]:
             print("semantic policy lint failed")
@@ -1250,6 +1259,7 @@ def _write_ci_report(
 ) -> tuple[Path, dict[str, Any]]:
     policy = load_policy(repo)
     index = index_repo(repo, policy)
+    manifest_contracts = validate_manifest_contracts(materialize_manifests(repo))
     harness = check_harness_legibility(repo, max_instruction_lines)
     semantic_findings = _semantic_policy_lint(repo, index)
     payload: dict[str, Any] = {
@@ -1264,6 +1274,10 @@ def _write_ci_report(
             "harness": {
                 "passed": harness.passed,
                 "findings": list(harness.findings),
+            },
+            "manifest_contracts": {
+                "passed": manifest_contracts.passed,
+                "findings": list(manifest_contracts.findings),
             },
             "semantic_policy_lint": {
                 "passed": not semantic_findings,
@@ -1329,6 +1343,7 @@ def _ci_payload_passed(payload: dict[str, Any]) -> bool:
     return bool(
         checks["index"]["passed"]
         and checks["harness"]["passed"]
+        and checks["manifest_contracts"]["passed"]
         and checks["semantic_policy_lint"]["passed"]
         and ("eval" not in checks or checks["eval"]["passed"])
     )

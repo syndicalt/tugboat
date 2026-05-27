@@ -4,6 +4,8 @@
 
 CI should prove that Tugboat remains proposal-only, structurally healthy, and free of obvious governance regressions. CI must not auto-apply instruction edits or require provider credentials by default.
 
+`tugboat ci --repo .` also materializes the local `llmff` manifest registry and validates manifest contracts offline, including required manifest presence, name/file consistency, output artifact bindings, and known JSON artifact schema names.
+
 ## Required Checks
 
 Run these checks on every pull request:
