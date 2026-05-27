@@ -85,6 +85,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert report["governance_passed"] is True
     assert report["recommendation"] == "reject"
     assert report["metrics"]["held_out_improved"] == 0
+    assert report["metrics"]["incident_replay_passed"] == 1
     assert "trigger_score" not in report["metrics"]
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         eval_run = connection.execute(
