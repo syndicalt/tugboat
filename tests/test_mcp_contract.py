@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from stat import S_IMODE
 
 import pytest
 
@@ -38,6 +39,10 @@ from tugboat.mcp import (
 )
 from tugboat.paths import runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef
+
+
+def _mode(path: Path) -> int:
+    return S_IMODE(path.stat().st_mode)
 
 
 def _write_fake_audit_llmff(path: Path) -> Path:
@@ -1146,6 +1151,27 @@ def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path
     ]
 
 
+def test_record_episode_writes_private_episode_artifacts(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    previous_umask = os.umask(0o022)
+    try:
+        episode = tugboat_record_episode(
+            repo,
+            '{"type":"user_request","content":"Fix bug"}\n',
+        )
+    finally:
+        os.umask(previous_umask)
+
+    trace_path = repo / episode["artifact_ref"]
+    metadata_path = trace_path.with_suffix(".json")
+    assert _mode(sidecar_dir(repo)) == 0o700
+    assert _mode(sidecar_dir(repo) / "mcp") == 0o700
+    assert _mode(sidecar_dir(repo) / "mcp" / "episodes") == 0o700
+    assert _mode(trace_path) == 0o600
+    assert _mode(metadata_path) == 0o600
+
+
 def test_record_episode_normalizes_mcp_live_events_for_mcp_capture(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)
@@ -1526,6 +1552,23 @@ def test_write_intent_request_removes_artifact_when_daemon_enqueue_fails(
 
     request_dir = sidecar_dir(repo) / "mcp" / "requests"
     assert not request_dir.exists() or list(request_dir.glob("*.json")) == []
+
+
+def test_mcp_write_intent_request_writes_private_request_artifact(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    audit_id, _ = _seed_review_target(repo)
+    previous_umask = os.umask(0o022)
+    try:
+        request = tugboat_request_proposal(repo, str(audit_id))
+    finally:
+        os.umask(previous_umask)
+
+    request_path = repo / request["artifact_ref"]
+    assert _mode(sidecar_dir(repo)) == 0o700
+    assert _mode(sidecar_dir(repo) / "mcp") == 0o700
+    assert _mode(sidecar_dir(repo) / "mcp" / "requests") == 0o700
+    assert _mode(request_path) == 0o600
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,7 @@ from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
 from tugboat.ops.retention import apply_retention_policy
-from tugboat.paths import runs_dir, sidecar_dir
+from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.adapters import ingest_mcp_session_bundle
@@ -537,9 +537,14 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
 
     def write() -> dict[str, Any]:
         trace_id = f"mcp-trace-{_stamp()}"
-        path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        mcp_dir = sidecar_dir(repo_path) / "mcp"
+        episode_dir = mcp_dir / "episodes"
+        ensure_private_dir(sidecar_dir(repo_path))
+        ensure_private_dir(mcp_dir)
+        ensure_private_dir(episode_dir)
+        path = episode_dir / f"{trace_id}.jsonl"
         path.write_text(trace_jsonl, encoding="utf-8")
+        mark_private_file(path)
         try:
             scan_path(path)
         except SecretScanError as error:
@@ -569,6 +574,7 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
             + "\n",
             encoding="utf-8",
         )
+        mark_private_file(metadata_path)
         with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
             episode_id = store.record_trace_episode(repo=repo_path, bundle=bundle)
         return {
@@ -992,7 +998,9 @@ def _write_request_artifact(
         if preflight is not None:
             preflight()
         request_id = f"mcp-{kind}-{_stamp()}"
-        path = sidecar_dir(repo_path) / "mcp" / "requests" / f"{request_id}.json"
+        mcp_dir = sidecar_dir(repo_path) / "mcp"
+        request_dir = mcp_dir / "requests"
+        path = request_dir / f"{request_id}.json"
         repo_policy = _repo_policy_ref(repo_path)
         artifact = {
             "request_id": request_id,
@@ -1003,8 +1011,11 @@ def _write_request_artifact(
             **payload,
         }
         validate_json_artifact("mcp-request.json", artifact)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(sidecar_dir(repo_path))
+        ensure_private_dir(mcp_dir)
+        ensure_private_dir(request_dir)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        mark_private_file(path)
         artifact_ref = _relative_ref(repo_path, path)
         daemon_payload = {
             "request_id": request_id,
