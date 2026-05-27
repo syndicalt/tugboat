@@ -772,39 +772,9 @@ def test_apply_rejects_eval_report_without_validation_scores(tmp_path: Path):
 def test_rollback_writes_revert_plan_from_apply_decision(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
-    commit_sha = _git(repo, "rev-parse", "HEAD")
-    (run_dir / "apply-plan.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "mode": "commit",
-                "candidate_id": 7,
-                "run_id": "20260525T000000000000Z",
-                "branch_name": "tugboat/20260525t000000000000z/candidate-7/codex-md",
-                "commit_message": "Apply Tugboat candidate 7",
-                "target_files": ["CODEX.md"],
-                "pre_hashes": {"CODEX.md": _hash(repo / "CODEX.md")},
-                "post_hashes": {"CODEX.md": _hash(repo / "CODEX.md")},
-                "applied_commit": commit_sha,
-                "rollback_command": [
-                    ["git", "switch", "tugboat/20260525t000000000000z/candidate-7/codex-md"],
-                    ["git", "revert", "--no-edit", commit_sha],
-                ],
-                "provenance_bundle": ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json",
-                "pr_metadata": {},
-                "review_actor": "tugboat",
-                "auto_apply": False,
-                "explicit_human_review": False,
-                "review_required_reasons": [],
-                "decision_rationale": "manual test fixture",
-                "decision_id": "20260525T000000000000Z",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    commit_sha = apply_plan["applied_commit"]
 
     assert main(["rollback", "--repo", str(repo), "--decision", "latest"]) == 0
 
@@ -836,6 +806,56 @@ def test_rollback_rejects_malformed_apply_plan_before_writing_plan(tmp_path: Pat
     apply_plan.pop("schema_version")
     (run_dir / "apply-plan.json").write_text(
         json.dumps(apply_plan, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest"]) == 1
+
+    assert not (run_dir / "rollback-plan.json").exists()
+
+
+def test_rollback_rejects_apply_plan_that_no_longer_matches_provenance(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    apply_plan["review_actor"] = "tampered-reviewer"
+    (run_dir / "apply-plan.json").write_text(
+        json.dumps(apply_plan, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest"]) == 1
+
+    assert not (run_dir / "rollback-plan.json").exists()
+
+
+def test_rollback_rejects_missing_apply_plan_provenance_bundle(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    apply_plan["provenance_bundle"] = ".sidecar/runs/20260525T000000000000Z/missing.json"
+    (run_dir / "apply-plan.json").write_text(
+        json.dumps(apply_plan, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest"]) == 1
+
+    assert not (run_dir / "rollback-plan.json").exists()
+
+
+def test_rollback_rejects_provenance_with_wrong_apply_plan_ref(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    provenance_bundle = json.loads((run_dir / "provenance-bundle.json").read_text(encoding="utf-8"))
+    provenance_bundle["source_artifacts"]["apply_plan"]["path"] = (
+        ".sidecar/runs/20260525T000000000000Z/other-apply-plan.json"
+    )
+    (run_dir / "provenance-bundle.json").write_text(
+        json.dumps(provenance_bundle, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 

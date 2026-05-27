@@ -2784,6 +2784,7 @@ def _score_from_eval_report(eval_report: dict[str, object], field: str) -> float
 def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) -> Path:
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
     validate_json_artifact("apply-plan.json", apply_plan)
+    _assert_apply_plan_matches_provenance(repo, run_dir, apply_plan)
     commit_sha = str(apply_plan["applied_commit"])
     if not commit_sha:
         raise ValueError("apply plan has no applied commit")
@@ -2882,6 +2883,36 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                 },
             )
     return path
+
+
+def _assert_apply_plan_matches_provenance(
+    repo: Path,
+    run_dir: Path,
+    apply_plan: dict[str, object],
+) -> None:
+    provenance_bundle = apply_plan.get("provenance_bundle")
+    if not isinstance(provenance_bundle, str) or not provenance_bundle:
+        raise ValueError("apply plan is missing provenance bundle")
+    provenance_bundle_path = (repo / provenance_bundle).resolve()
+    if not provenance_bundle_path.is_relative_to(repo.resolve()):
+        raise ValueError("apply plan provenance bundle must resolve inside repo")
+    if not provenance_bundle_path.is_file():
+        raise ValueError("apply plan provenance bundle is missing")
+    payload = json.loads(provenance_bundle_path.read_text(encoding="utf-8"))
+    validate_json_artifact("provenance-bundle.json", payload)
+    source_artifacts = payload.get("source_artifacts", {})
+    if not isinstance(source_artifacts, dict):
+        raise ValueError("provenance bundle source_artifacts must be an object")
+    apply_plan_ref = source_artifacts.get("apply_plan")
+    if not isinstance(apply_plan_ref, dict):
+        raise ValueError("provenance bundle missing apply plan reference")
+    expected_path = _relative_repo_path(repo, run_dir / "apply-plan.json")
+    if apply_plan_ref.get("path") != expected_path:
+        raise ValueError("apply plan does not match provenance bundle")
+    if apply_plan_ref.get("sha256") != CandidatePatch.hash_file(run_dir / "apply-plan.json"):
+        raise ValueError("apply plan does not match provenance bundle")
+    if payload.get("run_id") != run_dir.name or payload.get("candidate_id") != apply_plan.get("candidate_id"):
+        raise ValueError("apply plan does not match provenance bundle")
 
 
 def _rollback_restored_pre_hashes(
