@@ -63,6 +63,25 @@ llmff:
     assert policy.auto_apply_max_changed_lines == 12
 
 
+def test_load_policy_yaml_reads_auto_apply_allowed_risk_classes(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+auto_apply:
+  enabled: true
+  allowed_risk_classes:
+    - A
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.auto_apply_allowed_risk_classes == ("A",)
+
+
 def test_load_policy_yaml_reads_allowed_manifest_hashes(tmp_path: Path):
     policy_dir = tmp_path / ".sidecar"
     policy_dir.mkdir()

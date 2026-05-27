@@ -129,6 +129,13 @@ def load_policy(repo: Path) -> Policy:
             str(Path(item).expanduser().resolve())
             for item in auto_apply.get("allowed_repositories", [])
         ),
+        auto_apply_allowed_risk_classes=_as_string_tuple(
+            auto_apply.get(
+                "allowed_risk_classes",
+                list(Policy().auto_apply_allowed_risk_classes),
+            ),
+            "auto_apply.allowed_risk_classes",
+        ),
         roadmap_learning_rate_max_files_touched=_as_non_negative_int(
             learning_rate_budget.get(
                 "max_files_touched",

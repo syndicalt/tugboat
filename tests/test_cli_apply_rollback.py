@@ -122,14 +122,24 @@ def _candidate_run(
     return run_dir
 
 
-def _write_auto_apply_policy(repo: Path, *, version: int = 9) -> None:
+def _write_auto_apply_policy(
+    repo: Path,
+    *,
+    version: int = 9,
+    allowed_risk_classes: tuple[str, ...] = ("A",),
+) -> None:
     policy_path = repo / ".sidecar" / "policy.yaml"
     policy_path.parent.mkdir(parents=True, exist_ok=True)
+    allowed_risk_classes_yaml = "\n".join(
+        f"    - {risk_class}" for risk_class in allowed_risk_classes
+    )
     policy_path.write_text(
         f"""
 version: {version}
 auto_apply:
   enabled: true
+  allowed_risk_classes:
+{allowed_risk_classes_yaml}
   allowed_repositories:
     - {repo}
   minimum_burn_in_days: 30
@@ -1319,6 +1329,51 @@ def test_auto_apply_rejects_class_a_candidate_touching_forbidden_policy_domain(
     event_payload = json.loads(event[0])
     assert event_payload["eligible"] is False
     assert "forbidden_category:provider_routing" in event_payload["reasons"]
+
+
+def test_auto_apply_respects_policy_allowed_risk_classes(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, allowed_risk_classes=("B",))
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.decided'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert event is not None
+    event_payload = json.loads(event[0])
+    assert event_payload["eligible"] is False
+    assert "change_class_not_allowed" in event_payload["reasons"]
 
 
 def test_auto_apply_confirmation_requires_matching_policy_version(tmp_path: Path):

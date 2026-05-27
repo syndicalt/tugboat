@@ -2192,6 +2192,7 @@ def _auto_apply_readiness(
             enabled=policy.auto_apply_enabled,
             version=policy.version,
             allowed_repositories=policy.auto_apply_allowed_repositories,
+            allowed_change_classes=policy.auto_apply_allowed_risk_classes,
             minimum_burn_in_days=policy.auto_apply_minimum_burn_in_days,
             maximum_rejection_rate=policy.auto_apply_maximum_rejection_rate,
             maximum_rollback_rate=policy.auto_apply_maximum_rollback_rate,
