@@ -2140,7 +2140,7 @@ def _write_apply_plan(
         if mode == "branch":
             adapter.create_branch(branch_name)
             branch_created = True
-            adapter.apply_diff(run_dir / "candidate.diff")
+            adapter.apply_diff(run_dir / "candidate.diff", allowed_paths=target_files)
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
             applied_worktree_change = True
             rollback_command = [
@@ -2151,7 +2151,7 @@ def _write_apply_plan(
         elif mode == "commit":
             adapter.create_branch(branch_name)
             branch_created = True
-            adapter.apply_diff(run_dir / "candidate.diff")
+            adapter.apply_diff(run_dir / "candidate.diff", allowed_paths=target_files)
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
             applied_worktree_change = True
             applied_commit = adapter.commit_files(target_files, commit_message)
@@ -2183,7 +2183,7 @@ def _write_apply_plan(
         elif mode == "pr":
             adapter.create_branch(branch_name)
             branch_created = True
-            adapter.apply_diff(run_dir / "candidate.diff")
+            adapter.apply_diff(run_dir / "candidate.diff", allowed_paths=target_files)
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
             applied_worktree_change = True
             applied_commit = adapter.commit_files(target_files, commit_message)

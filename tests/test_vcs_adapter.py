@@ -151,9 +151,45 @@ def test_apply_diff_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
     )
 
     with pytest.raises(VcsStateError, match="git apply failed"):
-        VcsAdapter(repo).apply_diff(diff_path)
+        VcsAdapter(repo).apply_diff(diff_path, allowed_paths=("CODEX.md",))
 
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == "# Codex\n\nKeep tests green.\n"
+
+
+def test_apply_diff_rejects_unallowlisted_target_before_mutating_repo(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    diff_path = tmp_path / "unexpected-target.diff"
+    diff_path.write_text(
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1 +1,2 @@\n"
+        " # Readme\n"
+        "+Unexpected instruction write.\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VcsStateError, match="diff targets are not allowed: README.md"):
+        VcsAdapter(repo).apply_diff(diff_path, allowed_paths=("CODEX.md",))
+
+    assert (repo / "README.md").read_text(encoding="utf-8") == "# Readme\n"
+
+
+def test_apply_diff_requires_explicit_target_allowlist(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    diff_path = tmp_path / "change.diff"
+    diff_path.write_text(
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -1,3 +1,4 @@\n"
+        " # Codex\n"
+        " \n"
+        " Keep tests green.\n"
+        "+Record rollback notes.\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VcsStateError, match="diff target allowlist is empty"):
+        VcsAdapter(repo).apply_diff(diff_path, allowed_paths=())
 
 
 def test_revert_commit_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
@@ -170,7 +206,7 @@ def test_revert_commit_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
         "+Record rollback notes.\n",
         encoding="utf-8",
     )
-    adapter.apply_diff(diff_path)
+    adapter.apply_diff(diff_path, allowed_paths=("CODEX.md",))
     applied = adapter.commit_files(("CODEX.md",), "apply tugboat candidate")
     (repo / "CODEX.md").write_text(
         "# Codex\n\nKeep tests green.\nRecord rollback notes and keep them.\n",

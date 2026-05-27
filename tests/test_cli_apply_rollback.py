@@ -636,7 +636,7 @@ def test_apply_restores_original_branch_when_vcs_apply_fails_after_branch_creati
     run_dir = _candidate_run(repo)
 
     class FailingApplyAdapter(VcsAdapter):
-        def apply_diff(self, diff_path: Path) -> None:
+        def apply_diff(self, diff_path: Path, *, allowed_paths: tuple[str, ...]) -> None:
             raise VcsStateError("git apply failed: simulated conflict")
 
     monkeypatch.setattr(cli_module, "VcsAdapter", FailingApplyAdapter)

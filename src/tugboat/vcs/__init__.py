@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from tugboat.security.protected_writes import DiffTargetGuard, ProtectedWriteError
+
 
 class VcsStateError(RuntimeError):
     pass
@@ -175,7 +177,11 @@ class VcsAdapter:
         self._git("reset", "--hard", "HEAD")
         self._git("clean", "-fd")
 
-    def apply_diff(self, diff_path: Path) -> None:
+    def apply_diff(self, diff_path: Path, *, allowed_paths: tuple[str, ...]) -> None:
+        try:
+            DiffTargetGuard(allowed_paths).validate(diff_path.read_text(encoding="utf-8"))
+        except ProtectedWriteError as error:
+            raise VcsStateError(str(error)) from error
         try:
             self._git("apply", str(diff_path))
         except subprocess.CalledProcessError as error:
