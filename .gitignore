@@ -1,0 +1,33 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Tugboat local/runtime state
+.sidecar/
+.eventloom/
+.codex/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.benchmarks/
+
+# Packaging/build outputs
+build/
+dist/
+*.egg-info/
+uv.lock
+
+# Local editor and OS files
+.DS_Store
+*.swp
+*.swo
