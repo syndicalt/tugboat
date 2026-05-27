@@ -24,6 +24,7 @@ from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.adapters import ingest_mcp_session_bundle
 from tugboat.traces.ingest import ingest_jsonl_trace
+from tugboat.traces.schema import TraceBundle, TraceEvent
 
 
 T = TypeVar("T")
@@ -598,10 +599,11 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
             raise ValueError("secret detected in episode payload") from error
         trace_format = _detect_episode_trace_format(path)
         try:
-            bundle = (
+            bundle = _bundle_with_active_context(
+                repo_path,
                 ingest_mcp_session_bundle(path)
                 if trace_format == "mcp"
-                else ingest_jsonl_trace(path)
+                else ingest_jsonl_trace(path),
             )
         except (json.JSONDecodeError, ValueError) as error:
             path.unlink(missing_ok=True)
@@ -636,6 +638,77 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
         {"trace_jsonl": "[artifact-payload]"},
         write,
     )
+
+
+def _bundle_with_active_context(repo: Path, bundle: TraceBundle) -> TraceBundle:
+    events = list(bundle.events)
+    next_line = max((event.line_number for event in events), default=0) + 1
+    for payload in _active_context_payloads(repo):
+        events.append(
+            TraceEvent(
+                evidence_id=_context_evidence_id(next_line, payload),
+                event_type="instruction_snapshot",
+                source_trust="artifact",
+                line_number=next_line,
+                payload=payload,
+            )
+        )
+        next_line += 1
+    return TraceBundle(trace_path=bundle.trace_path, events=tuple(events))
+
+
+def _context_evidence_id(line_number: int, payload: dict[str, object]) -> str:
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(f"{line_number}\n{canonical_payload}".encode("utf-8")).hexdigest()
+    return f"ev_{digest[:16]}"
+
+
+def _active_context_payloads(repo: Path) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    seen: set[Path] = set()
+    for path in _active_instruction_paths(repo):
+        if path in seen:
+            continue
+        seen.add(path)
+        scan_path(path)
+        payloads.append(
+            {
+                "kind": "active_instruction",
+                "sha256": _sha256(path),
+                "source": _relative_ref(repo, path),
+                "text": path.read_text(encoding="utf-8"),
+                "type": "instruction_snapshot",
+            }
+        )
+    policy_path = sidecar_dir(repo) / "policy.yaml"
+    if policy_path.is_file():
+        scan_path(policy_path)
+        payloads.append(
+            {
+                "kind": "policy_config",
+                "sha256": _sha256(policy_path),
+                "source": _relative_ref(repo, policy_path),
+                "text": policy_path.read_text(encoding="utf-8"),
+                "type": "instruction_snapshot",
+            }
+        )
+    return payloads
+
+
+def _active_instruction_paths(repo: Path) -> list[Path]:
+    repo_root = repo.resolve()
+    paths: list[Path] = []
+    for entry in load_policy(repo).instruction_files:
+        raw_path = entry.path
+        if any(char in raw_path for char in "*?[]"):
+            candidates = sorted(repo.glob(raw_path))
+        else:
+            candidates = [repo / raw_path]
+        for candidate in candidates:
+            path = candidate.resolve()
+            if path.is_file() and path.is_relative_to(repo_root):
+                paths.append(path)
+    return paths
 
 
 def _looks_like_mcp_live_event_jsonl(path: Path) -> bool:

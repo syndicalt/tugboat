@@ -1247,6 +1247,7 @@ def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path
                    a.event_type
             FROM trace_events t
             JOIN audit_events a ON a.sequence = t.audit_event_sequence
+            WHERE t.event_type != 'instruction_snapshot'
             ORDER BY t.line_number
             """
         ).fetchall()
@@ -1259,6 +1260,43 @@ def test_record_episode_persists_canonical_trace_events_for_mcp_capture(tmp_path
         ("tool_result", "tool", None, "trace_event.recorded"),
         ("final_answer", "agent", "I fixed it.", "trace_event.recorded"),
     ]
+
+
+def test_record_episode_enriches_capture_with_active_instruction_and_policy_context(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    (repo / "CODEX.md").write_text("# Rules\n\nUse regression tests.\n", encoding="utf-8")
+
+    tugboat_record_episode(repo, '{"type":"user_request","content":"Fix bug"}\n')
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rows = store.connection.execute(
+            """
+            SELECT event_type, source_trust, payload_json
+            FROM trace_events
+            WHERE event_type = 'instruction_snapshot'
+            ORDER BY line_number
+            """
+        ).fetchall()
+
+    payloads = [json.loads(row[2]) for row in rows]
+    assert [(row[0], row[1]) for row in rows] == [
+        ("instruction_snapshot", "artifact"),
+        ("instruction_snapshot", "artifact"),
+    ]
+    assert payloads[0] == {
+        "kind": "active_instruction",
+        "sha256": CandidatePatch.hash_file(repo / "CODEX.md"),
+        "source": "CODEX.md",
+        "text": "# Rules\n\nUse regression tests.\n",
+        "type": "instruction_snapshot",
+    }
+    assert payloads[1]["kind"] == "policy_config"
+    assert payloads[1]["source"] == ".sidecar/policy.yaml"
+    assert payloads[1]["type"] == "instruction_snapshot"
+    assert payloads[1]["sha256"] == CandidatePatch.hash_file(repo / ".sidecar" / "policy.yaml")
 
 
 def test_record_episode_writes_private_episode_artifacts(tmp_path: Path):
@@ -1299,6 +1337,7 @@ def test_record_episode_normalizes_mcp_live_events_for_mcp_capture(tmp_path: Pat
             """
             SELECT event_type, source_trust, payload_json
             FROM trace_events
+            WHERE event_type != 'instruction_snapshot'
             ORDER BY line_number
             """
         ).fetchall()
