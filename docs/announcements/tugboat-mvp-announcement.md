@@ -2,6 +2,8 @@
 
 I'm releasing the first MVP of Tugboat, a local-first sidecar for maintaining the instruction and config layer around coding agents.
 
+Repo: https://github.com/syndicalt/tugboat
+
 The inspiration is the same:
 
 - @OpenAI's harness engineering article by Ryan Lopopolo:
@@ -68,6 +70,8 @@ A release candidate for keeping agent instructions honest.
 ## Short X Post
 
 I'm releasing the Tugboat MVP: a local-first, proposal-only sidecar for coding-agent harness/config observability.
+
+Repo: https://github.com/syndicalt/tugboat
 
 Inspired by @OpenAI harness engineering and Microsoft Research SkillOpt.
 
