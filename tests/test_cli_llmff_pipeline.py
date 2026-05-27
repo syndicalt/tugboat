@@ -4319,6 +4319,92 @@ llmff:
     ]
 
 
+def test_optimize_minibatch_guidance_uses_prior_episode_history(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    prior_trace = tmp_path / "prior.jsonl"
+    prior_trace.write_text(
+        "\n".join(
+            [
+                '{"event":"request","text":"Added regression coverage"}',
+                '{"event":"outcome.label","label":"accepted"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    current_trace = tmp_path / "current.jsonl"
+    current_trace.write_text(
+        "\n".join(
+            [
+                '{"event":"request","text":"Fix bug"}',
+                '{"event":"user.correction","text":"You skipped regression tests"}',
+                '{"event":"outcome.label","label":"rejected"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(prior_trace),
+                "--trace-format",
+                "mcp",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(current_trace),
+                "--trace-format",
+                "mcp",
+                "--suite",
+                "held-out",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
+
+    assert batch == {
+        "schema_version": 1,
+        "held_out_suite": "held-out",
+        "success_episodes": ["1"],
+        "failure_episodes": ["2"],
+        "success_patterns": ["Added regression coverage"],
+        "failure_patterns": ["You skipped regression tests"],
+    }
+
+
 def test_optimize_rejects_candidate_when_held_out_does_not_beat_validation_baseline(
     tmp_path: Path,
 ):

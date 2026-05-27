@@ -2182,25 +2182,10 @@ def _record_validation_baseline_score(
 
 
 def _record_optimize_minibatch_guidance(repo: Path, run_dir: Path, *, suite_id: str) -> None:
-    canonical_episode_path = run_dir / "canonical-episode.json"
-    if not canonical_episode_path.exists():
+    outcomes = _episode_outcomes_for_minibatch(repo, current_run_dir=run_dir)
+    if not outcomes:
         return
-    episode = json.loads(canonical_episode_path.read_text(encoding="utf-8"))
-    if not isinstance(episode, dict):
-        raise ValueError("canonical-episode.json must be a JSON object")
-    outcome = _episode_outcome_from_labels(episode.get("outcome_labels", []))
-    if outcome is None:
-        return
-    pattern = _episode_pattern_from_canonical_episode(episode, outcome=outcome)
-    minibatch = build_success_failure_minibatch(
-        (
-            EpisodeOutcome(
-                episode_id=_episode_id_for_run(repo, run_dir),
-                outcome=outcome,
-                pattern=pattern,
-            ),
-        )
-    )
+    minibatch = build_success_failure_minibatch(tuple(outcomes))
     batch_payload = {
         "schema_version": SCHEMA_VERSION,
         "failure_episodes": list(minibatch.failure_episodes),
@@ -2227,6 +2212,37 @@ def _record_optimize_minibatch_guidance(repo: Path, run_dir: Path, *, suite_id: 
                 "note": guidance,
             },
         )
+
+
+def _episode_outcomes_for_minibatch(
+    repo: Path,
+    *,
+    current_run_dir: Path,
+) -> list[EpisodeOutcome]:
+    outcomes: list[EpisodeOutcome] = []
+    candidate_run_dirs = [
+        path
+        for path in sorted(runs_dir(repo).iterdir())
+        if path.is_dir() and path.name <= current_run_dir.name
+    ]
+    for run_dir in candidate_run_dirs:
+        canonical_episode_path = run_dir / "canonical-episode.json"
+        if not canonical_episode_path.exists():
+            continue
+        episode = json.loads(canonical_episode_path.read_text(encoding="utf-8"))
+        if not isinstance(episode, dict):
+            raise ValueError("canonical-episode.json must be a JSON object")
+        outcome = _episode_outcome_from_labels(episode.get("outcome_labels", []))
+        if outcome is None:
+            continue
+        outcomes.append(
+            EpisodeOutcome(
+                episode_id=_episode_id_for_run(repo, run_dir),
+                outcome=outcome,
+                pattern=_episode_pattern_from_canonical_episode(episode, outcome=outcome),
+            )
+        )
+    return outcomes
 
 
 def _episode_outcome_from_labels(labels: object) -> str | None:
