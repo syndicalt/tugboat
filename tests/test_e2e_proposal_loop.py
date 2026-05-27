@@ -332,9 +332,12 @@ llmff:
             "event_type": "user_correction",
             "evidence_id": evidence_id,
             "line_number": 2,
+            "payload_snippet": decision_trace["trace_events"][0]["payload_snippet"],
+            "payload_truncated": False,
             "source_trust": "user",
         }
     ]
+    assert "You skipped the regression test" in decision_trace["trace_events"][0]["payload_snippet"]
     assert decision_trace["evals"][0]["suite_id"] == "all"
     assert decision_trace["evals"][0]["passed"] is True
     assert [

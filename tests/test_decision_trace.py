@@ -42,7 +42,10 @@ def test_decision_trace_includes_audited_decision_inputs(tmp_path: Path):
                         event_type="user_request",
                         source_trust="user",
                         line_number=1,
-                        payload={"text": "Fix bug"},
+                        payload={
+                            "model_payload": "sk-thissecretkeyvalue1234567890",
+                            "text": "Fix bug. " + ("More detail. " * 80),
+                        },
                     ),
                 ),
             ),
@@ -160,6 +163,11 @@ def test_decision_trace_includes_audited_decision_inputs(tmp_path: Path):
     assert trace["run"]["event_hash"]
     assert trace["episode"]["episode_id"] == episode_id
     assert trace["episode"]["trace_path"] == "trace.jsonl"
+    assert trace["trace_events"][0]["payload_truncated"] is True
+    assert len(trace["trace_events"][0]["payload_snippet"]) == 512
+    assert "sk-thissecretkeyvalue1234567890" not in trace["trace_events"][0]["payload_snippet"]
+    assert "[REDACTED:openai_api_key]" in trace["trace_events"][0]["payload_snippet"]
+    assert '"text":"Fix bug.' in trace["trace_events"][0]["payload_snippet"]
     assert trace["instruction_snapshots"] == [
         {
             "snapshot_id": trace["instruction_snapshots"][0]["snapshot_id"],

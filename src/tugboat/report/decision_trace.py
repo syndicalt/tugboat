@@ -7,7 +7,10 @@ from typing import Any
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact, write_json_artifact
 from tugboat.db import Store
 from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
+from tugboat.security.redaction import redact_payload
 from tugboat.security.secrets import SecretScanError, scan_text
+
+PAYLOAD_SNIPPET_MAX_CHARS = 512
 
 
 def write_decision_trace(repo: Path, decision_ref: str) -> Path:
@@ -303,6 +306,7 @@ def _trace_events(
           te.event_type,
           te.source_trust,
           te.line_number,
+          te.payload_json,
           te.audit_event_sequence,
           ae.event_hash
         FROM trace_events te
@@ -318,8 +322,9 @@ def _trace_events(
             "event_type": str(row[1]),
             "source_trust": str(row[2]),
             "line_number": int(row[3]),
-            "audit_event_sequence": int(row[4]),
-            "event_hash": str(row[5]),
+            **_payload_snippet(_json_object(row[4])),
+            "audit_event_sequence": int(row[5]),
+            "event_hash": str(row[6]),
         }
         for row in rows
     ]
@@ -857,6 +862,14 @@ def _json_list(raw: str) -> list[str]:
 def _json_object(raw: str) -> dict[str, Any]:
     payload = json.loads(raw)
     return payload if isinstance(payload, dict) else {}
+
+
+def _payload_snippet(payload: dict[str, Any]) -> dict[str, Any]:
+    redacted = redact_payload(payload)
+    serialized = json.dumps(redacted, sort_keys=True, separators=(",", ":"))
+    truncated = len(serialized) > PAYLOAD_SNIPPET_MAX_CHARS
+    snippet = serialized[:PAYLOAD_SNIPPET_MAX_CHARS]
+    return {"payload_snippet": snippet, "payload_truncated": truncated}
 
 
 def _repo_local_run_dir(repo: Path, run_id: str) -> Path:

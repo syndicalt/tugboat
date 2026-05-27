@@ -1738,6 +1738,8 @@ def test_validate_decision_trace_artifact_accepts_provenance_payload():
                     "event_type": "user_correction",
                     "source_trust": "user",
                     "line_number": 2,
+                    "payload_snippet": "{\"content\":\"Fix bug\"}",
+                    "payload_truncated": False,
                     "audit_event_sequence": 39,
                     "event_hash": "5" * 64,
                 }
