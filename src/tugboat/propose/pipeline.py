@@ -685,9 +685,11 @@ def _source_ref_from_payload(source: object, *, index: int) -> SourceRef:
 def _bounded_edit_metadata_from_payload(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
     raw_metadata = payload.get("bounded_edit_metadata", payload.get("operator_metadata"))
     if raw_metadata is None:
-        return ()
+        raise ValueError("candidate.bounded_edit_metadata is required")
     if not isinstance(raw_metadata, list):
         raise ValueError("bounded_edit_metadata must be a JSON list")
+    if not raw_metadata:
+        raise ValueError("candidate.bounded_edit_metadata must not be empty")
     return tuple(
         _bounded_edit_metadata_item_from_payload(item, index=index)
         for index, item in enumerate(raw_metadata)

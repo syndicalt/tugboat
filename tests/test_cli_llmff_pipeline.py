@@ -321,6 +321,9 @@ if args[:1] == ["run"]:
             "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
         }
         candidate_patch.update(CANDIDATE_OVERRIDES)
+        for key, value in list(candidate_patch.items()):
+            if value == "__omit__":
+                del candidate_patch[key]
         outputs["candidate_patch"].write_text(json.dumps(candidate_patch) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
         suite_id = None
@@ -2764,6 +2767,49 @@ llmff:
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     assert "candidate.raw.json missing required field: bounded_edit_metadata[0].operator" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_count = store.connection.execute(
+            "SELECT COUNT(*) FROM candidates"
+        ).fetchone()[0]
+    assert candidate_count == 0
+
+
+def test_propose_rejects_llmff_candidate_missing_bounded_edit_metadata(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        candidate_overrides={"bounded_edit_metadata": "__omit__"},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "candidate.raw.json missing required field: bounded_edit_metadata" in output
+    assert (run_dir / "candidate.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

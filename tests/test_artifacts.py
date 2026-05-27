@@ -15,6 +15,17 @@ from tugboat.artifacts import (
 from tugboat.security.secrets import SecretScanError
 
 
+BOUNDED_EDIT_METADATA = [
+    {
+        "operator": "add",
+        "file": "CODEX.md",
+        "section": "Testing",
+        "changed_lines": 1,
+        "normative_changes": 0,
+    }
+]
+
+
 def test_write_json_artifact_creates_parent_and_sorts_keys(tmp_path: Path):
     path = write_json_artifact(tmp_path / "run" / "audit.json", {"z": 1, "a": 2})
 
@@ -87,6 +98,7 @@ def test_validate_candidate_artifact_rejects_wrong_schema_version():
                 "rationale": "because",
                 "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
             },
         )
 
@@ -386,6 +398,43 @@ def test_validate_candidate_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_candidate_raw_artifact_requires_bounded_edit_metadata():
+    with pytest.raises(ArtifactValidationError, match="bounded_edit_metadata"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": "CODEX.md",
+                "base_hash": "abc123",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+            },
+        )
+
+
+def test_validate_candidate_raw_artifact_rejects_empty_bounded_edit_metadata():
+    with pytest.raises(ArtifactValidationError, match="bounded_edit_metadata"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": "CODEX.md",
+                "base_hash": "abc123",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": [],
+            },
+        )
+
+
 def test_validate_candidate_set_raw_artifact_accepts_current_schema():
     validate_json_artifact(
         "candidate-set.raw.json",
@@ -445,6 +494,7 @@ def test_validate_candidate_raw_artifact_rejects_empty_sources():
                 "evals_required": ["governance-regression"],
                 "rollback_plan": ["revert generated diff"],
                 "sources": [],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
             },
         )
 
@@ -462,6 +512,7 @@ def test_validate_candidate_raw_artifact_requires_proposal_metadata():
                 "evals_required": ["governance-regression"],
                 "rollback_plan": ["revert generated diff"],
                 "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
             },
         )
 
@@ -480,6 +531,7 @@ def test_validate_candidate_raw_artifact_rejects_wrong_field_types():
                 "evals_required": ["governance-regression"],
                 "rollback_plan": ["revert generated diff"],
                 "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
             },
         )
 
@@ -585,6 +637,7 @@ def test_validate_candidate_raw_artifact_rejects_unknown_top_level_fields():
                 "evals_required": ["governance-regression"],
                 "rollback_plan": ["revert generated diff"],
                 "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
                 "raw_model_payload": "unbounded side channel",
             },
         )
@@ -1257,6 +1310,7 @@ def test_validate_candidate_artifact_rejects_malformed_sources():
                 "rationale": "because",
                 "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [{"source_id": 123, "trusted": "yes"}],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
             },
         )
 
@@ -1277,6 +1331,7 @@ def test_validate_candidate_artifact_rejects_empty_sources():
                 "rationale": "because",
                 "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
             },
         )
 
@@ -1294,6 +1349,47 @@ def test_validate_candidate_artifact_requires_proposal_metadata():
                 "risk_class": "instruction_clarification",
                 "rationale": "because",
                 "sources": [{"source_id": "ev_1", "trusted": True}],
+            },
+        )
+
+
+def test_validate_candidate_artifact_requires_bounded_edit_metadata():
+    with pytest.raises(ArtifactValidationError, match="bounded_edit_metadata"):
+        validate_json_artifact(
+            "candidate.json",
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "def",
+                "expected_behavior_change": "Agents preserve regression-test guidance.",
+                "evals_required": ["governance-regression"],
+                "risk_class": "instruction_clarification",
+                "rationale": "because",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_1", "trusted": True}],
+            },
+        )
+
+
+def test_validate_candidate_artifact_rejects_empty_bounded_edit_metadata():
+    with pytest.raises(ArtifactValidationError, match="bounded_edit_metadata"):
+        validate_json_artifact(
+            "candidate.json",
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "def",
+                "expected_behavior_change": "Agents preserve regression-test guidance.",
+                "evals_required": ["governance-regression"],
+                "risk_class": "instruction_clarification",
+                "rationale": "because",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_1", "trusted": True}],
+                "bounded_edit_metadata": [],
             },
         )
 

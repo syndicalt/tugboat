@@ -52,6 +52,15 @@ def _write_candidate_json(run_dir: Path) -> None:
                 "rationale": "Fixture candidate for offline eval.",
                 "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
                 "sources": [{"source_id": "ev_fixture", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "replace",
+                        "file": "CODEX.md",
+                        "section": "Policy",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
             }
         )
         + "\n",

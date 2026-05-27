@@ -235,6 +235,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "rationale",
             "rollback_plan",
             "sources",
+            "bounded_edit_metadata",
         ],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
@@ -267,6 +268,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             "bounded_edit_metadata": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -302,6 +304,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "evals_required",
             "rollback_plan",
             "sources",
+            "bounded_edit_metadata",
         ],
         "properties": {
             "base_file": {"type": "string"},
@@ -343,6 +346,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             "bounded_edit_metadata": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -455,6 +459,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                         },
                         "bounded_edit_metadata": {
                             "type": "array",
+                            "minItems": 1,
                             "items": {
                                 "type": "object",
                                 "additionalProperties": False,

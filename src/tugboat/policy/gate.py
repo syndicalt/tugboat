@@ -177,8 +177,7 @@ class CandidatePatch:
             payload["pending_audit_eval_definition_paths"] = list(
                 self.pending_audit_eval_definition_paths
             )
-        if self.bounded_edit_metadata:
-            payload["bounded_edit_metadata"] = list(self.bounded_edit_metadata)
+        payload["bounded_edit_metadata"] = list(self.bounded_edit_metadata)
         return payload
 
 

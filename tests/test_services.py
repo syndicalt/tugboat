@@ -12,6 +12,17 @@ from tugboat.report.service import write_report
 from tugboat.security.secrets import SecretScanError
 
 
+BOUNDED_EDIT_METADATA = (
+    {
+        "operator": "add",
+        "file": "CODEX.md",
+        "section": "Testing",
+        "changed_lines": 1,
+        "normative_changes": 0,
+    },
+)
+
+
 def _candidate(
     *,
     base_hash: str = "abc123",
@@ -25,6 +36,7 @@ def _candidate(
         risk_class="instruction_clarification",
         rationale="Clarify ambiguous guidance.",
         sources=(SourceRef("trace-1", trusted=True),),
+        bounded_edit_metadata=BOUNDED_EDIT_METADATA,
     )
 
 
@@ -53,6 +65,15 @@ def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Pat
         "risk_class": "instruction_clarification",
         "schema_version": 1,
         "sources": [{"source_id": "trace-1", "trusted": True}],
+        "bounded_edit_metadata": [
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ],
     }
 
 
@@ -114,6 +135,7 @@ def test_write_candidate_writes_candidate_preview_artifacts(tmp_path: Path):
         risk_class="instruction_clarification",
         rationale="Clarify ambiguous guidance.",
         sources=(SourceRef("trace-1", trusted=True),),
+        bounded_edit_metadata=BOUNDED_EDIT_METADATA,
     )
 
     artifacts = write_candidate(tmp_path, "run-1", candidate)
@@ -213,6 +235,7 @@ def test_write_candidate_rejects_secret_in_candidate_metadata(tmp_path: Path):
         risk_class="instruction_clarification",
         rationale="Candidate rationale leaked ghp_abcdefghijklmnopqrstuvwx",
         sources=(SourceRef("trace-1", trusted=True),),
+        bounded_edit_metadata=BOUNDED_EDIT_METADATA,
     )
     run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
 
