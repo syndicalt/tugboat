@@ -340,14 +340,28 @@ def run_audit_pipeline(
                 message="audit rejected: llmff audit_report instruction_refs is required",
             )
         audit_payload.update(raw_audit)
+    indexed_instructions = index_repo(repo, policy)
     evidence_refs = [str(ref) for ref in audit_payload.get("evidence_refs", [])]
     raw_instruction_refs = audit_payload.get("instruction_refs")
     if raw_instruction_refs is None:
-        instruction_refs = instruction_chunk_refs(index_repo(repo, policy))
+        instruction_refs = instruction_chunk_refs(indexed_instructions)
     elif isinstance(raw_instruction_refs, list):
         instruction_refs = [str(ref) for ref in raw_instruction_refs]
     else:
         raise ValueError("llmff audit_report instruction_refs must be a JSON array")
+    known_instruction_refs = set(instruction_chunk_refs(indexed_instructions))
+    unknown_instruction_refs = sorted(set(instruction_refs) - known_instruction_refs)
+    if unknown_instruction_refs:
+        return _failed_audit_result(
+            repo,
+            run_dir,
+            manifest_hash=inspect.manifest_hash,
+            episode_id=episode_id,
+            message=(
+                "audit rejected: audit instruction refs not present in instruction graph: "
+                f"{', '.join(unknown_instruction_refs)}"
+            ),
+        )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.insert_run(
             run_id=run_dir.name,

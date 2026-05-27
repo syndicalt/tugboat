@@ -504,6 +504,48 @@ llmff:
     assert not (run_dir / "audit.json").exists()
 
 
+def test_audit_rejects_llmff_audit_with_unknown_instruction_refs(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#does-not-exist"],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert (
+        "audit rejected: audit instruction refs not present in instruction graph: "
+        "CODEX.md#does-not-exist"
+    ) in output
+    assert (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
 def test_audit_rejects_malformed_llmff_raw_audit_output_without_normalizing(
     tmp_path: Path, capsys
 ):
@@ -3026,6 +3068,14 @@ def test_eval_preserves_pending_eval_definition_paths_when_regating_candidate(
         tmp_path / "fake-llmff",
         eval_passed=True,
         policy_decision={"allowed": True, "reasons": []},
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["tests/fixtures/evals/regression.json#bytes-0-24"],
+        },
         bounded_edit_metadata=[
             {
                 "operator": "replace",
