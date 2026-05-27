@@ -708,7 +708,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = generate_harness_report(repo)
         try:
             _persist_harness_report(repo, report)
-        except ArtifactValidationError as error:
+        except (ArtifactValidationError, SecretScanError) as error:
             print(f"harness report invalid: {error}")
             return 1
         print("# Tugboat Harness Report")
@@ -1238,7 +1238,8 @@ def _persist_harness_report(repo: Path, report) -> Path:
     }
     validate_json_artifact("harness-report.json", payload)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(report_path, "harness-report.json", payload)
+    mark_private_file(report_path)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         for finding in report.missing_docs:
             store.record_harness_finding(

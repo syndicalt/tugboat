@@ -449,10 +449,15 @@ def test_harness_report_persists_recurring_failures_without_docs(tmp_path: Path,
         encoding="utf-8",
     )
 
-    assert main(["harness", "report", "--repo", str(repo)]) == 0
+    previous_umask = os.umask(0o022)
+    try:
+        assert main(["harness", "report", "--repo", str(repo)]) == 0
+    finally:
+        os.umask(previous_umask)
 
     output = capsys.readouterr().out
     payload_path = repo / ".sidecar" / "harness-report.json"
+    assert payload_path.stat().st_mode & 0o777 == 0o600
     assert "## Recurring Failures Without Docs" in output
     assert "- approval-boundary: Approval boundary corrections repeated." in output
     assert json.loads(payload_path.read_text(encoding="utf-8"))[
@@ -469,6 +474,36 @@ def test_harness_report_persists_recurring_failures_without_docs(tmp_path: Path,
 
     assert row[0] == "recurring_failure_without_doc"
     assert row[1] is not None
+
+
+def test_harness_report_blocks_secret_bearing_payload_without_writing(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "recurring-failures.json").write_text(
+        """
+{
+  "schema_version": 1,
+  "failures": [
+    {
+      "failure_id": "approval-boundary",
+      "summary": "Leaked token sk-thissecretkeyvalue1234567890"
+    }
+  ]
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["harness", "report", "--repo", str(repo)]) == 1
+
+    output = capsys.readouterr().out
+    assert "harness report invalid: secret scan failed" in output
+    assert "sk-thissecret" not in output
+    assert not (repo / ".sidecar" / "harness-report.json").exists()
 
 
 def test_harness_report_persists_findings_and_doc_gardening_run(tmp_path: Path):
