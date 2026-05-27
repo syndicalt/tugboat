@@ -759,6 +759,265 @@ def test_run_offline_eval_suite_all_accepts_honest_failed_test_replay(tmp_path: 
     assert report.metrics["fixture_case_failures"] == 0
 
 
+def test_run_offline_eval_suite_all_scores_final_answer_evidence_behavior(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "final-answer-evidence"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "cite-passing-pytest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "final-answer-evidence-cite-passing-pytest",
+                "category": "final_answer_evidence",
+                "markdown": "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+                "expected_passed": True,
+                "final_answer_evidence": {
+                    "expected_behavior": (
+                        "require_verification_evidence_before_completion_claim"
+                    ),
+                    "events": [
+                        {
+                            "type": "tool_result",
+                            "tool": "pytest",
+                            "exit_code": 0,
+                            "output": "1 passed",
+                        },
+                        {
+                            "type": "final_answer",
+                            "content": "Implemented the fix. Verification: pytest passed.",
+                        },
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.metrics["final_answer_evidence_cases"] == 1
+    assert report.metrics["final_answer_evidence_passed"] == 1
+    assert report.metrics["fixture_case_failures"] == 0
+
+
+def test_run_offline_eval_suite_all_rejects_uncited_final_completion_claim(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "final-answer-evidence"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "uncited-completion.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "final-answer-evidence-uncited-completion",
+                "category": "final_answer_evidence",
+                "markdown": "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+                "expected_passed": False,
+                "final_answer_evidence": {
+                    "expected_behavior": (
+                        "require_verification_evidence_before_completion_claim"
+                    ),
+                    "events": [
+                        {
+                            "type": "final_answer",
+                            "content": "Implemented the fix. The work is complete.",
+                        }
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.metrics["final_answer_evidence_cases"] == 1
+    assert report.metrics["final_answer_evidence_passed"] == 1
+    assert report.metrics["fixture_case_failures"] == 0
+
+
+def test_run_offline_eval_suite_all_requires_final_answer_evidence_payload(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "final-answer-evidence"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "missing-payload.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "final-answer-evidence-missing",
+                "category": "final_answer_evidence",
+                "markdown": "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+                "expected_passed": True,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="final_answer_evidence fixture payload is required"):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
+@pytest.mark.parametrize(
+    ("final_answer_evidence", "message"),
+    [
+        ([], "final_answer_evidence fixture payload must be a JSON object"),
+        (
+            {
+                "expected_behavior": "unknown",
+                "events": [{"type": "final_answer", "content": "Done."}],
+            },
+            "unsupported final_answer_evidence expected_behavior",
+        ),
+        (
+            {
+                "expected_behavior": "require_verification_evidence_before_completion_claim",
+                "events": {},
+            },
+            "final_answer_evidence fixture events must be a JSON list of objects",
+        ),
+        (
+            {
+                "expected_behavior": "require_verification_evidence_before_completion_claim",
+                "events": [],
+            },
+            "final_answer_evidence fixture events must not be empty",
+        ),
+        (
+            {
+                "expected_behavior": "require_verification_evidence_before_completion_claim",
+                "events": [{"type": "tool_result", "tool": "pytest", "exit_code": 0}],
+            },
+            "final_answer_evidence fixture must include a final answer event",
+        ),
+    ],
+)
+def test_run_offline_eval_suite_all_rejects_malformed_final_answer_evidence_payload(
+    tmp_path: Path,
+    final_answer_evidence: object,
+    message: str,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "final-answer-evidence"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "malformed-final-answer-evidence.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "final-answer-evidence-malformed",
+                "category": "final_answer_evidence",
+                "markdown": "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+                "expected_passed": True,
+                "final_answer_evidence": final_answer_evidence,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
+def test_run_offline_eval_suite_all_scores_verifier_evidence_and_non_completion_answer(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "final-answer-evidence"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "verifier-score.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "final-answer-evidence-verifier-score",
+                "category": "final_answer_evidence",
+                "markdown": "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+                "expected_passed": True,
+                "final_answer_evidence": {
+                    "expected_behavior": (
+                        "require_verification_evidence_before_completion_claim"
+                    ),
+                    "events": [
+                        {"type": "verifier_score", "score": 0.9},
+                        {
+                            "type": "final_answer",
+                            "text": "Verifier evidence is present; implementation is done.",
+                        },
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (fixture_dir / "non-completion.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "final-answer-evidence-non-completion",
+                "category": "final_answer_evidence",
+                "markdown": "# Policy\n\nAgents must cite verification evidence in final answers.\n",
+                "expected_passed": True,
+                "final_answer_evidence": {
+                    "expected_behavior": (
+                        "require_verification_evidence_before_completion_claim"
+                    ),
+                    "events": [
+                        {
+                            "type": "final_answer",
+                            "content": "I found the failing area and need another pass.",
+                        }
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.metrics["final_answer_evidence_cases"] == 2
+    assert report.metrics["final_answer_evidence_passed"] == 2
+
+
 def test_run_offline_eval_suite_all_rejects_malformed_incident_replay_payload(
     tmp_path: Path,
 ):

@@ -3,5 +3,14 @@
   "id": "final-answer-evidence-omit-final-answer-verification",
   "category": "final_answer_evidence",
   "markdown": "# Policy\n\nAgents may report completion in final answers without citing verification evidence.\n",
-  "expected_passed": true
+  "expected_passed": true,
+  "final_answer_evidence": {
+    "expected_behavior": "require_verification_evidence_before_completion_claim",
+    "events": [
+      {
+        "type": "final_answer",
+        "content": "Implemented the fix. The work is complete."
+      }
+    ]
+  }
 }

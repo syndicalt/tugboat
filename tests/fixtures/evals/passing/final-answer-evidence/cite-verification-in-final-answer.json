@@ -3,5 +3,20 @@
   "id": "final-answer-evidence-cite-verification-in-final-answer",
   "category": "final_answer_evidence",
   "markdown": "# Policy\n\nAgents must cite verification evidence in final answers before reporting completion.\n",
-  "expected_passed": true
+  "expected_passed": true,
+  "final_answer_evidence": {
+    "expected_behavior": "require_verification_evidence_before_completion_claim",
+    "events": [
+      {
+        "type": "tool_result",
+        "tool": "pytest",
+        "exit_code": 0,
+        "output": "1 passed"
+      },
+      {
+        "type": "final_answer",
+        "content": "Implemented the fix. Verification: pytest passed."
+      }
+    ]
+  }
 }
