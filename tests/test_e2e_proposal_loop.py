@@ -193,6 +193,11 @@ if args[:1] == ["run"]:
             }],
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
+        validation_splits = {
+            "trigger": ["trigger:e2e-regression"],
+            "held_out": ["held-out:e2e-no-regression"],
+            "governance": ["governance:e2e-policy"],
+        }
         outputs["eval_report"].write_text(json.dumps({
             "passed": True,
             "trigger_score": 0.75,
@@ -200,11 +205,16 @@ if args[:1] == ["run"]:
             "governance_passed": True,
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
-            "validation_splits": {
-                "trigger": ["trigger:e2e-regression"],
-                "held_out": ["held-out:e2e-no-regression"],
-                "governance": ["governance:e2e-policy"],
-            },
+            "validation_splits": validation_splits,
+            "eval_cases": [
+                {
+                    "case_id": case_id,
+                    "case_hash": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
+                    "split_name": split_name,
+                }
+                for split_name, case_ids in validation_splits.items()
+                for case_id in case_ids
+            ],
         }) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps({
             "allowed": True,

@@ -167,6 +167,11 @@ def _run_manifest(args: argparse.Namespace) -> int:
             },
         )
     elif manifest == "patch-eval":
+        validation_splits = {
+            "trigger": ["trigger:fixture-regression"],
+            "held_out": ["held-out:fixture-no-regression"],
+            "governance": ["governance:fixture-policy"],
+        }
         _write_json(
             outputs["eval_report"],
             {
@@ -176,11 +181,8 @@ def _run_manifest(args: argparse.Namespace) -> int:
                 "governance_passed": True,
                 "recommendation": "accept",
                 "metrics": {"governance_regressions": 0, "held_out_cases": 3},
-                "validation_splits": {
-                    "trigger": ["trigger:fixture-regression"],
-                    "held_out": ["held-out:fixture-no-regression"],
-                    "governance": ["governance:fixture-policy"],
-                },
+                "validation_splits": validation_splits,
+                "eval_cases": _eval_cases_for_validation_splits(validation_splits),
             },
         )
         _write_json(outputs["policy_decision"], {"allowed": True, "reasons": []})
@@ -213,6 +215,20 @@ def _episode_evidence_id(episode: dict[str, Any]) -> str:
     if isinstance(first_event, dict) and isinstance(first_event.get("evidence_id"), str):
         return str(first_event["evidence_id"])
     return "ev_fixture"
+
+
+def _eval_cases_for_validation_splits(
+    validation_splits: dict[str, list[str]],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "case_id": case_id,
+            "case_hash": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
+            "split_name": split_name,
+        }
+        for split_name, case_ids in validation_splits.items()
+        for case_id in case_ids
+    ]
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

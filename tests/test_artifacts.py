@@ -633,6 +633,18 @@ def test_validate_eval_raw_artifact_accepts_validation_splits():
             "held_out": ["episode:held-out-1"],
             "custom": ["case:custom"],
         },
+        "eval_cases": [
+            {
+                "case_id": "episode:trigger-1",
+                "case_hash": "a" * 64,
+                "split_name": "trigger",
+            },
+            {
+                "case_id": "episode:held-out-1",
+                "case_hash": "b" * 64,
+                "split_name": "held_out",
+            },
+        ],
     }
 
     validate_json_artifact("eval-report.raw.json", payload)
@@ -668,6 +680,24 @@ def test_validate_eval_raw_artifact_rejects_malformed_validation_split_arrays():
                 "passed": True,
                 "metrics": {"governance_regressions": 0, "held_out_cases": 1},
                 "validation_splits": {"trigger": "episode:trigger-1"},
+            },
+        )
+
+
+def test_validate_eval_raw_artifact_rejects_malformed_eval_cases():
+    with pytest.raises(ArtifactValidationError, match=r"eval_cases\[0\]\.case_hash"):
+        validate_json_artifact(
+            "eval-report.raw.json",
+            {
+                "passed": True,
+                "metrics": {"governance_regressions": 0, "held_out_cases": 1},
+                "eval_cases": [
+                    {
+                        "case_id": "episode:trigger-1",
+                        "case_hash": "not-a-hash",
+                        "split_name": "trigger",
+                    }
+                ],
             },
         )
 

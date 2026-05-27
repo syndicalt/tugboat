@@ -10,7 +10,7 @@ from tugboat.artifacts import SCHEMA_VERSION, load_json_object_artifact, validat
 from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
-from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
+from tugboat.evals import EvalCaseRecord, run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.llmff.contracts import LlmffRunFailed
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import (
@@ -50,6 +50,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
     eval_failure_message: str | None = None
     policy_decision_payload: dict[str, object] | None = None
     validation_splits: dict[str, tuple[str, ...]] | None = None
+    eval_cases: tuple[EvalCaseRecord, ...] = ()
     offline_report = None
 
     if suite_id == "provider-smoke" and not (run_dir / "candidate.raw.json").exists():
@@ -122,6 +123,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 "accept" if passed and governance_passed else "reject",
             )
             validation_splits = _validation_splits_from_eval_payload(eval_payload)
+            eval_cases = _eval_cases_from_eval_payload(eval_payload)
             if not deterministic_decision.allowed:
                 passed = False
                 governance_passed = False
@@ -151,6 +153,12 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 governance_passed = False
                 recommendation = "reject"
                 eval_failure_message = f"eval rejected: {split_failure}"
+            registry_failure = _validation_case_registry_failure(validation_splits, eval_cases)
+            if passed and recommendation == "accept" and registry_failure is not None:
+                passed = False
+                governance_passed = False
+                recommendation = "reject"
+                eval_failure_message = f"eval rejected: {registry_failure}"
             if passed and recommendation == "accept" and held_out_score <= trigger_score:
                 passed = False
                 recommendation = "reject"
@@ -178,6 +186,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         live_provider_required=live_provider_required,
         longitudinal_metrics=longitudinal_metrics,
         validation_splits=validation_splits,
+        eval_cases=_eval_case_payloads(eval_cases) if eval_cases else None,
     )
     if policy_decision_payload is not None:
         _write_policy_gate(
@@ -213,6 +222,13 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                     suite_id=suite_id,
                     split_name=split_name,
                     case_ids=case_ids,
+                )
+        if eval_cases:
+            for case in eval_cases:
+                store.record_eval_case(
+                    suite_id=suite_id,
+                    case_id=case.case_id,
+                    case_hash=case.case_hash,
                 )
         if not passed or recommendation == "reject":
             _record_rejected_candidate_memory(store, repo=repo, run_dir=run_dir, reason=recommendation)
@@ -308,6 +324,45 @@ def _validation_splits_from_eval_payload(
     return splits
 
 
+def _eval_cases_from_eval_payload(payload: dict[str, object]) -> tuple[EvalCaseRecord, ...]:
+    raw_cases = payload.get("eval_cases")
+    if raw_cases is None:
+        return ()
+    if not isinstance(raw_cases, list):
+        raise ValueError("llmff eval_report.eval_cases must be a JSON list")
+    cases: list[EvalCaseRecord] = []
+    seen_case_ids: set[str] = set()
+    for index, raw_case in enumerate(raw_cases):
+        if not isinstance(raw_case, dict):
+            raise ValueError(f"llmff eval_report.eval_cases[{index}] must be a JSON object")
+        case_id = raw_case.get("case_id")
+        case_hash = raw_case.get("case_hash")
+        split_name = raw_case.get("split_name")
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise ValueError(f"llmff eval_report.eval_cases[{index}].case_id must be a string")
+        if case_id in seen_case_ids:
+            raise ValueError(f"llmff eval_report.eval_cases has duplicate case ID: {case_id}")
+        if not (
+            isinstance(case_hash, str)
+            and len(case_hash) == 64
+            and all(character in "0123456789abcdef" for character in case_hash)
+        ):
+            raise ValueError(
+                f"llmff eval_report.eval_cases[{index}].case_hash must be a SHA-256 digest"
+            )
+        if not isinstance(split_name, str) or not split_name.strip():
+            raise ValueError(f"llmff eval_report.eval_cases[{index}].split_name must be a string")
+        seen_case_ids.add(case_id)
+        cases.append(
+            EvalCaseRecord(
+                case_id=case_id,
+                case_hash=case_hash,
+                split_name=split_name,
+            )
+        )
+    return tuple(cases)
+
+
 def _validation_split_failure(splits: dict[str, tuple[str, ...]] | None) -> str | None:
     if splits is None:
         return "llmff eval_report cannot accept without validation split provenance"
@@ -324,6 +379,49 @@ def _validation_split_failure(splits: dict[str, tuple[str, ...]] | None) -> str 
             + ", ".join(overlap)
         )
     return None
+
+
+def _validation_case_registry_failure(
+    splits: dict[str, tuple[str, ...]] | None,
+    eval_cases: tuple[EvalCaseRecord, ...],
+) -> str | None:
+    if splits is None:
+        return None
+    if not eval_cases:
+        return "llmff eval_report cannot accept without declared eval_cases"
+    cases_by_id = {case.case_id: case for case in eval_cases}
+    split_case_ids = {
+        case_id
+        for split_name in ("trigger", "held_out", "governance")
+        for case_id in splits.get(split_name, ())
+    }
+    missing = sorted(case_id for case_id in split_case_ids if case_id not in cases_by_id)
+    if missing:
+        return "llmff eval_report validation case IDs are not declared by eval_cases: " + ", ".join(
+            missing
+        )
+    mismatches = sorted(
+        f"{case_id} declared as {cases_by_id[case_id].split_name}, used as {split_name}"
+        for split_name in ("trigger", "held_out", "governance")
+        for case_id in splits.get(split_name, ())
+        if cases_by_id[case_id].split_name != split_name
+    )
+    if mismatches:
+        return "llmff eval_report validation case IDs have split mismatches: " + ", ".join(
+            mismatches
+        )
+    return None
+
+
+def _eval_case_payloads(eval_cases: tuple[EvalCaseRecord, ...]) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            "case_id": case.case_id,
+            "case_hash": case.case_hash,
+            "split_name": case.split_name,
+        }
+        for case in eval_cases
+    )
 
 
 def _candidate_preview_root(repo: Path, run_dir: Path) -> Path:

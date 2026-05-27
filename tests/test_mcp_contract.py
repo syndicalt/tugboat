@@ -169,6 +169,23 @@ if args[:1] == ["run"]:
                 "held_out": ["held-out:mcp-no-regression"],
                 "governance": ["governance:mcp-policy"],
             },
+            "eval_cases": [
+                {
+                    "case_id": "trigger:mcp-regression",
+                    "case_hash": "a" * 64,
+                    "split_name": "trigger",
+                },
+                {
+                    "case_id": "held-out:mcp-no-regression",
+                    "case_hash": "b" * 64,
+                    "split_name": "held_out",
+                },
+                {
+                    "case_id": "governance:mcp-policy",
+                    "case_hash": "c" * 64,
+                    "split_name": "governance",
+                },
+            ],
         }) + "\\n", encoding="utf-8")
         outputs["policy_decision"].write_text(json.dumps({
             "allowed": True,

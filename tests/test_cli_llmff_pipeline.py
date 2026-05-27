@@ -8,7 +8,12 @@ import pytest
 from tugboat.artifacts import ArtifactValidationError
 from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
-from tugboat.eval.pipeline import run_eval_pipeline
+from tugboat.eval.pipeline import (
+    _eval_cases_from_eval_payload,
+    _validation_case_registry_failure,
+    run_eval_pipeline,
+)
+from tugboat.evals import EvalCaseRecord
 from tugboat.paths import sidecar_dir
 from tugboat.propose.pipeline import (
     _audit_evidence_refs,
@@ -16,6 +21,46 @@ from tugboat.propose.pipeline import (
     run_propose_pipeline,
 )
 from tugboat.security.secrets import SecretScanError
+
+
+def _eval_cases_for_validation_splits(
+    validation_splits: dict[str, list[str]],
+) -> list[dict[str, str]]:
+    cases: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for split_name, case_ids in validation_splits.items():
+        for case_id in case_ids:
+            if case_id in seen:
+                continue
+            seen.add(case_id)
+            cases.append(
+                {
+                    "case_id": case_id,
+                    "case_hash": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
+                    "split_name": split_name,
+                }
+            )
+    return cases
+
+
+def _with_eval_cases_from_validation_splits(report: object) -> object:
+    if not isinstance(report, dict) or "eval_cases" in report:
+        return report
+    raw_splits = report.get("validation_splits")
+    if not (
+        isinstance(raw_splits, dict)
+        and all(
+            isinstance(split_name, str)
+            and isinstance(case_ids, list)
+            and all(isinstance(case_id, str) for case_id in case_ids)
+            for split_name, case_ids in raw_splits.items()
+        )
+    ):
+        return report
+    return {
+        **report,
+        "eval_cases": _eval_cases_for_validation_splits(raw_splits),
+    }
 
 
 def _write_fake_llmff(
@@ -82,6 +127,12 @@ def _write_fake_llmff(
             if eval_passed
             else {"allowed": False, "reasons": ["held_out_regression"]}
         )
+    eval_report = _with_eval_cases_from_validation_splits(eval_report)
+    if eval_reports_by_suite is not None:
+        eval_reports_by_suite = {
+            suite: _with_eval_cases_from_validation_splits(report)
+            for suite, report in eval_reports_by_suite.items()
+        }
     if candidate_overrides is None:
         candidate_overrides = {}
     if audit_report is None:
@@ -418,6 +469,105 @@ raise SystemExit(64)
     )
     path.chmod(0o755)
     return path
+
+
+def test_eval_cases_from_eval_payload_rejects_duplicate_case_ids():
+    with pytest.raises(ValueError, match="duplicate case ID: case:one"):
+        _eval_cases_from_eval_payload(
+            {
+                "eval_cases": [
+                    {
+                        "case_id": "case:one",
+                        "case_hash": "a" * 64,
+                        "split_name": "trigger",
+                    },
+                    {
+                        "case_id": "case:one",
+                        "case_hash": "b" * 64,
+                        "split_name": "held_out",
+                    },
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"eval_cases": "case:one"}, "eval_cases must be a JSON list"),
+        ({"eval_cases": ["case:one"]}, r"eval_cases\[0\] must be a JSON object"),
+        (
+            {"eval_cases": [{"case_hash": "a" * 64, "split_name": "trigger"}]},
+            r"eval_cases\[0\]\.case_id must be a string",
+        ),
+        (
+            {
+                "eval_cases": [
+                    {
+                        "case_id": "case:one",
+                        "case_hash": "not-a-hash",
+                        "split_name": "trigger",
+                    }
+                ]
+            },
+            r"eval_cases\[0\]\.case_hash must be a SHA-256 digest",
+        ),
+        (
+            {"eval_cases": [{"case_id": "case:one", "case_hash": "a" * 64}]},
+            r"eval_cases\[0\]\.split_name must be a string",
+        ),
+    ],
+)
+def test_eval_cases_from_eval_payload_rejects_malformed_records(
+    payload: dict[str, object],
+    message: str,
+):
+    with pytest.raises(ValueError, match=message):
+        _eval_cases_from_eval_payload(payload)
+
+
+def test_validation_case_registry_rejects_missing_and_mismatched_eval_cases():
+    assert (
+        _validation_case_registry_failure(
+            {"trigger": ("case:trigger",), "held_out": ("case:held-out",)},
+            (),
+        )
+        == "llmff eval_report cannot accept without declared eval_cases"
+    )
+
+    missing_failure = _validation_case_registry_failure(
+        {"trigger": ("case:trigger",), "held_out": ("case:held-out",)},
+        (
+            EvalCaseRecord(
+                case_id="case:trigger",
+                case_hash="a" * 64,
+                split_name="trigger",
+            ),
+        ),
+    )
+    assert missing_failure == (
+        "llmff eval_report validation case IDs are not declared by eval_cases: case:held-out"
+    )
+
+    mismatch_failure = _validation_case_registry_failure(
+        {"trigger": ("case:trigger",), "held_out": ("case:held-out",)},
+        (
+            EvalCaseRecord(
+                case_id="case:trigger",
+                case_hash="a" * 64,
+                split_name="trigger",
+            ),
+            EvalCaseRecord(
+                case_id="case:held-out",
+                case_hash="b" * 64,
+                split_name="trigger",
+            ),
+        ),
+    )
+    assert mismatch_failure == (
+        "llmff eval_report validation case IDs have split mismatches: "
+        "case:held-out declared as trigger, used as held_out"
+    )
 
 
 def test_audit_consumes_real_llmff_file_backed_audit_output(tmp_path: Path):
@@ -5074,6 +5224,83 @@ llmff:
     assert "triggering validation cases overlap held-out validation cases" in output
     assert report["passed"] is False
     assert report["recommendation"] == "reject"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+
+
+def test_eval_rejects_accept_recommendation_with_unregistered_validation_case_ids(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.7,
+            "held_out_score": 0.9,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:invented"],
+                "governance": ["governance:policy"],
+            },
+            "eval_cases": [
+                {
+                    "case_id": "trigger:regression",
+                    "case_hash": "a" * 64,
+                    "split_name": "trigger",
+                },
+                {
+                    "case_id": "governance:policy",
+                    "case_hash": "b" * 64,
+                    "split_name": "governance",
+                },
+            ],
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert "validation case IDs are not declared by eval_cases: held-out:invented" in output
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert report["eval_cases"] == [
+        {
+            "case_id": "governance:policy",
+            "case_hash": "b" * 64,
+            "split_name": "governance",
+        },
+        {
+            "case_id": "trigger:regression",
+            "case_hash": "a" * 64,
+            "split_name": "trigger",
+        },
+    ]
     assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 

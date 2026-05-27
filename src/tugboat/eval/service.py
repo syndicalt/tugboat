@@ -24,6 +24,7 @@ def write_eval_report(
     live_provider_required: bool = False,
     longitudinal_metrics: dict[str, Any] | None = None,
     validation_splits: dict[str, tuple[str, ...]] | None = None,
+    eval_cases: tuple[dict[str, str], ...] | None = None,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
     ensure_private_dir(runs_dir(repo))
@@ -48,6 +49,8 @@ def write_eval_report(
             split_name: list(case_ids)
             for split_name, case_ids in sorted(validation_splits.items())
         }
+    if eval_cases is not None:
+        payload["eval_cases"] = sorted(eval_cases, key=lambda case: case["case_id"])
     validate_json_artifact("eval-report.json", payload)
     report_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     findings = scan_text(report_path.as_posix(), report_text)

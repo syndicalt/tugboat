@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -609,6 +610,19 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
                 "additionalProperties": {"type": "array", "items": {"type": "string"}},
             },
+            "eval_cases": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["case_id", "case_hash", "split_name"],
+                    "properties": {
+                        "case_id": {"type": "string", "minLength": 1},
+                        "case_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "split_name": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
             "live_provider_required": {"type": "boolean"},
         },
     },
@@ -632,6 +646,19 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "governance": {"type": "array", "items": {"type": "string"}},
                 },
                 "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            },
+            "eval_cases": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["case_id", "case_hash", "split_name"],
+                    "properties": {
+                        "case_id": {"type": "string", "minLength": 1},
+                        "case_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "split_name": {"type": "string", "minLength": 1},
+                    },
+                },
             },
             "live_provider_required": {"type": "boolean"},
         },
@@ -2310,6 +2337,14 @@ def _validate_schema_value(
             raise ArtifactValidationError(f"{artifact_name} schema enum must be an array")
         if value not in allowed_values:
             raise ArtifactValidationError(f"{artifact_name} field has unsupported value: {field_path}")
+    if "minLength" in schema and isinstance(value, str) and len(value) < int(schema["minLength"]):
+        raise ArtifactValidationError(f"{artifact_name} field is too short: {field_path}")
+    if "pattern" in schema and isinstance(value, str):
+        pattern = schema["pattern"]
+        if not isinstance(pattern, str):
+            raise ArtifactValidationError(f"{artifact_name} schema pattern must be a string")
+        if re.fullmatch(pattern, value) is None:
+            raise ArtifactValidationError(f"{artifact_name} field does not match pattern: {field_path}")
 
     if expected_type == "array":
         if "minItems" in schema and isinstance(value, list) and len(value) < int(schema["minItems"]):
