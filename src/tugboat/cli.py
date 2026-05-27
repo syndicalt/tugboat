@@ -1071,9 +1071,11 @@ def _write_retention_report(
     path = sidecar_dir(repo) / "ops" / "retention" / "retention-report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(temp_path, "retention-report.json", payload)
+    mark_private_file(temp_path)
     try:
         temp_path.replace(path)
+        mark_private_file(path)
     except OSError:
         temp_path.unlink(missing_ok=True)
         raise

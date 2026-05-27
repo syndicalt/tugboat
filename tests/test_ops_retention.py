@@ -10,6 +10,7 @@ import pytest
 from tugboat.models import Policy
 from tugboat.cli import _write_retention_report, main
 from tugboat.ops.retention import apply_retention_policy
+from tugboat.security.secrets import SecretScanError
 
 
 def _touch_old(path: Path, *, days_old: int) -> None:
@@ -371,6 +372,39 @@ def test_retention_report_writes_use_unique_temp_paths(
     assert len(temp_names) == 2
     assert len(set(temp_names)) == 2
     assert ".retention-report.json.tmp" not in temp_names
+
+
+def test_retention_report_is_secret_scanned_owner_only_and_removes_secret_temp(
+    tmp_path: Path,
+) -> None:
+    previous_umask = os.umask(0o022)
+    try:
+        report_path = _write_retention_report(
+            tmp_path,
+            mode="dry-run",
+            status="complete",
+            candidates=(),
+            deleted=(),
+            redaction_candidates=(),
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert report_path.stat().st_mode & 0o777 == 0o600
+
+    with pytest.raises(SecretScanError):
+        _write_retention_report(
+            tmp_path,
+            mode="dry-run",
+            status="complete",
+            candidates=(".sidecar/runs/run-1/sk-thissecretkeyvalue1234567890.jsonl",),
+            deleted=(),
+            redaction_candidates=(),
+        )
+
+    retention_dir = tmp_path / ".sidecar" / "ops" / "retention"
+    assert sorted(path.name for path in retention_dir.glob("*.tmp")) == []
+    assert "sk-thissecret" not in report_path.read_text(encoding="utf-8")
 
 
 def test_retention_cli_reports_redaction_candidates_without_mutating_file(
