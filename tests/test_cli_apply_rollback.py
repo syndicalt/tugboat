@@ -891,6 +891,39 @@ def test_apply_rejects_secret_in_final_apply_plan_before_writing_authority_artif
     assert not (run_dir / "provenance-bundle.json").exists()
 
 
+def test_apply_branch_mode_rejects_secret_metadata_before_vcs_mutation(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "branch",
+                "--review-actor",
+                f"reviewer-{SECRET_VALUE}",
+            ]
+        )
+        == 1
+    )
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+
+
 def test_rollback_rejects_secret_in_final_rollback_plan_before_writing_artifact(
     tmp_path: Path,
 ):
@@ -1012,6 +1045,31 @@ def test_rollback_execute_is_blocked_by_read_only_kill_switch_before_revert(
     assert _git(repo, "rev-parse", "HEAD") == applied_head
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == applied_text
     assert not (run_dir / "rollback-plan.json").exists()
+
+
+def test_rollback_execute_handles_git_revert_conflict_without_success_artifacts(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\nUse tests.\nRecord rollback notes and keep them.\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "CODEX.md")
+    _git(repo, "commit", "-m", "intervening rollback-note edit")
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 1
+
+    assert not (run_dir / "rollback-plan.json").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE event_type = 'rollback.applied'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_rollback_execute_rejects_dirty_worktree_before_revert(tmp_path: Path):

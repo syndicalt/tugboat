@@ -194,8 +194,21 @@ class VcsAdapter:
         return self._git("rev-parse", "HEAD")
 
     def revert_commit(self, *, branch_name: str, commit_sha: str) -> str:
-        self._git("switch", branch_name)
-        self._git("revert", "--no-edit", commit_sha)
+        try:
+            self._git("switch", branch_name)
+            self._git("revert", "--no-edit", commit_sha)
+        except subprocess.CalledProcessError as error:
+            subprocess.run(
+                ["git", "revert", "--abort"],
+                cwd=self.repo,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            message = (error.stderr or error.stdout or "").strip()
+            detail = f": {message}" if message else ""
+            raise VcsStateError(f"git revert failed{detail}") from error
         return self._git("rev-parse", "HEAD")
 
     def _dirty_paths(self) -> tuple[str, ...]:

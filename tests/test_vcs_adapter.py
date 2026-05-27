@@ -154,3 +154,37 @@ def test_apply_diff_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
         VcsAdapter(repo).apply_diff(diff_path)
 
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == "# Codex\n\nKeep tests green.\n"
+
+
+def test_revert_commit_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    adapter = VcsAdapter(repo)
+    diff_path = tmp_path / "change.diff"
+    diff_path.write_text(
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -1,3 +1,4 @@\n"
+        " # Codex\n"
+        " \n"
+        " Keep tests green.\n"
+        "+Record rollback notes.\n",
+        encoding="utf-8",
+    )
+    adapter.apply_diff(diff_path)
+    applied = adapter.commit_files(("CODEX.md",), "apply tugboat candidate")
+    (repo / "CODEX.md").write_text(
+        "# Codex\n\nKeep tests green.\nRecord rollback notes and keep them.\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "CODEX.md")
+    _git(repo, "commit", "-m", "intervening edit")
+
+    with pytest.raises(VcsStateError, match="git revert failed"):
+        adapter.revert_commit(branch_name=adapter.current_branch(), commit_sha=applied)
+
+    assert _git(repo, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert (
+        repo / "CODEX.md"
+    ).read_text(encoding="utf-8") == (
+        "# Codex\n\nKeep tests green.\nRecord rollback notes and keep them.\n"
+    )

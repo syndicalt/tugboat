@@ -1780,6 +1780,28 @@ def _write_apply_plan(
         base_file=candidate.base_file,
         rationale=candidate.rationale,
     )
+    planned_pr_metadata = (
+        adapter.pull_request_metadata(
+            candidate_id=candidate_id,
+            base_file=candidate.base_file,
+            branch_name=branch_name,
+            base_branch=base_branch,
+            rationale=candidate.rationale,
+        ).to_json_dict()
+        if mode == "pr"
+        else {}
+    )
+    _preflight_apply_metadata(
+        run_dir / "apply-plan.json",
+        {
+            "branch_name": branch_name,
+            "commit_message": commit_message,
+            "decision_rationale": "policy gate and eval report passed",
+            "pr_metadata": planned_pr_metadata,
+            "review_actor": review_actor,
+            "review_required_reasons": list(decision.review_required_reasons),
+        },
+    )
     pre_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
     post_hashes: dict[str, str] = {}
     applied_commit = ""
@@ -1861,13 +1883,7 @@ def _write_apply_plan(
                     reason=f"rollback candidate {candidate_id}",
                 ).commands
             ]
-            pr_metadata = adapter.pull_request_metadata(
-                candidate_id=candidate_id,
-                base_file=candidate.base_file,
-                branch_name=branch_name,
-                base_branch=base_branch,
-                rationale=candidate.rationale,
-            ).to_json_dict()
+            pr_metadata = planned_pr_metadata
     except VcsStateError:
         if branch_created and not applied_commit:
             adapter.discard_worktree_changes()
@@ -1982,6 +1998,13 @@ def _write_apply_plan(
                 reason=",".join(decision.review_required_reasons),
             )
     return path
+
+
+def _preflight_apply_metadata(path: Path, payload: dict[str, object]) -> None:
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
 
 
 def _write_provenance_bundle(
