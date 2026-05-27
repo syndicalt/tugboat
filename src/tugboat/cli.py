@@ -1007,7 +1007,8 @@ def _write_release_artifact_manifest(
     validate_json_artifact("release-artifact-manifest.json", payload)
     output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_secret_scanned_json_artifact(output_path, "release-artifact-manifest.json", payload)
+    mark_private_file(output_path)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
             "release.manifest_written",
