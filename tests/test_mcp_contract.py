@@ -2069,6 +2069,21 @@ def test_request_audit_rejects_trace_id_path_traversal_without_queueing(tmp_path
         assert queue_store.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
 
 
+def test_request_audit_validates_trace_id_before_reading_trace_path(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    escaped_trace = repo / ".sidecar" / "mcp" / "policy.jsonl"
+    (repo / ".sidecar" / "mcp" / "episodes").mkdir(parents=True)
+    escaped_trace.write_text("not-json\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid trace_id"):
+        tugboat_request_audit(repo, "../policy")
+
+    assert not (repo / ".sidecar" / "mcp" / "requests").exists()
+    assert not (repo / ".sidecar" / "daemon.sqlite").exists()
+
+
 def test_write_intent_episode_rejects_secret_payloads(tmp_path: Path):
     _allow_mcp_repo(tmp_path)
     with pytest.raises(ValueError, match="secret"):

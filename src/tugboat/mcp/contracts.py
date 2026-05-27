@@ -654,6 +654,7 @@ def _read_episode_trace_format(trace_path: Path) -> str:
 
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
+    _validate_mcp_artifact_id("trace_id", trace_id)
     trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
     trace_format = _read_episode_trace_format(trace_path)
     queue_payload = {
