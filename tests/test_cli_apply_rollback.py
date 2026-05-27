@@ -166,9 +166,9 @@ def _candidate_run(
                 "held_out_score": 0.90,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {"governance_regressions": 0},
+                "metrics": {"governance_regressions": 0, "incident_replay_cases": 1},
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },

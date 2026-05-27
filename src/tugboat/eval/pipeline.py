@@ -163,6 +163,17 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 passed = False
                 recommendation = "reject"
                 eval_failure_message = "eval rejected: held-out eval score did not improve"
+            if (
+                passed
+                and recommendation == "accept"
+                and not _has_incident_replay_validation_cases(metrics, validation_splits)
+            ):
+                passed = False
+                governance_passed = False
+                recommendation = "reject"
+                eval_failure_message = (
+                    "eval rejected: llmff eval_report cannot accept without incident replay cases"
+                )
         except ValueError as error:
             return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
         except LlmffRunFailed as error:
@@ -294,6 +305,22 @@ def _has_held_out_validation_cases(metrics: dict[str, object]) -> bool:
     return False
 
 
+def _has_incident_replay_validation_cases(
+    metrics: dict[str, object],
+    validation_splits: dict[str, tuple[str, ...]] | None,
+) -> bool:
+    raw = metrics.get("incident_replay_cases")
+    if not isinstance(raw, bool) and isinstance(raw, int | float) and raw > 0:
+        return True
+    if validation_splits is None:
+        return False
+    return any(
+        case_id.startswith("incident_replay:")
+        for case_ids in validation_splits.values()
+        for case_id in case_ids
+    )
+
+
 def _has_eval_field(
     payload: dict[str, object],
     metrics: dict[str, object],
@@ -392,7 +419,7 @@ def _validation_case_registry_failure(
     cases_by_id = {case.case_id: case for case in eval_cases}
     split_case_ids = {
         case_id
-        for split_name in ("trigger", "held_out", "governance")
+        for split_name in splits
         for case_id in splits.get(split_name, ())
     }
     missing = sorted(case_id for case_id in split_case_ids if case_id not in cases_by_id)
@@ -402,7 +429,7 @@ def _validation_case_registry_failure(
         )
     mismatches = sorted(
         f"{case_id} declared as {cases_by_id[case_id].split_name}, used as {split_name}"
-        for split_name in ("trigger", "held_out", "governance")
+        for split_name in splits
         for case_id in splits.get(split_name, ())
         if cases_by_id[case_id].split_name != split_name
     )

@@ -168,7 +168,7 @@ def _run_manifest(args: argparse.Namespace) -> int:
         )
     elif manifest == "patch-eval":
         validation_splits = {
-            "trigger": ["trigger:fixture-regression"],
+            "trigger": ["incident_replay:fixture-regression"],
             "held_out": ["held-out:fixture-no-regression"],
             "governance": ["governance:fixture-policy"],
         }
@@ -180,7 +180,11 @@ def _run_manifest(args: argparse.Namespace) -> int:
                 "held_out_score": 0.88,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+                "metrics": {
+                    "governance_regressions": 0,
+                    "held_out_cases": 3,
+                    "incident_replay_cases": 1,
+                },
                 "validation_splits": validation_splits,
                 "eval_cases": _eval_cases_for_validation_splits(validation_splits),
             },

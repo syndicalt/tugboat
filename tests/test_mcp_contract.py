@@ -168,15 +168,19 @@ if args[:1] == ["run"]:
             "held_out_score": 0.91,
             "governance_passed": True,
             "recommendation": "accept",
-            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "metrics": {
+                "governance_regressions": 0,
+                "held_out_cases": 3,
+                "incident_replay_cases": 1,
+            },
             "validation_splits": {
-                "trigger": ["trigger:mcp-regression"],
+                "trigger": ["incident_replay:mcp-regression"],
                 "held_out": ["held-out:mcp-no-regression"],
                 "governance": ["governance:mcp-policy"],
             },
             "eval_cases": [
                 {
-                    "case_id": "trigger:mcp-regression",
+                    "case_id": "incident_replay:mcp-regression",
                     "case_hash": "a" * 64,
                     "split_name": "trigger",
                 },

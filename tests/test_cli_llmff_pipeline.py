@@ -108,9 +108,13 @@ def _write_fake_llmff(
                 "held_out_score": 0.9,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+                "metrics": {
+                    "governance_regressions": 0,
+                    "held_out_cases": 3,
+                    "incident_replay_cases": 1,
+                },
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },
@@ -4333,7 +4337,7 @@ def test_eval_rejects_accept_recommendation_without_held_out_improvement(
             "recommendation": "accept",
             "metrics": {"governance_regressions": 0, "held_out_cases": 3},
             "validation_splits": {
-                "trigger": ["trigger:regression"],
+                "trigger": ["incident_replay:regression"],
                 "held_out": ["held-out:no-regression"],
                 "governance": ["governance:policy"],
             },
@@ -4836,13 +4840,13 @@ def test_optimization_summary_rejects_accepted_eval_without_bounded_edit_metadat
                 "candidate_id": 7,
                 "governance_passed": True,
                 "held_out_score": 0.9,
-                "metrics": {"governance_regressions": 0},
+                "metrics": {"governance_regressions": 0, "incident_replay_cases": 1},
                 "passed": True,
                 "recommendation": "accept",
                 "suite_id": "held-out",
                 "trigger_score": 0.7,
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },
@@ -4901,13 +4905,13 @@ def test_optimization_summary_requires_acceptance_summary_for_needs_review(tmp_p
                 "candidate_id": 7,
                 "governance_passed": True,
                 "held_out_score": 0.9,
-                "metrics": {"governance_regressions": 0},
+                "metrics": {"governance_regressions": 0, "incident_replay_cases": 1},
                 "passed": True,
                 "recommendation": "accept",
                 "suite_id": "held-out",
                 "trigger_score": 0.7,
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },
@@ -4972,13 +4976,13 @@ def test_optimization_summary_rejects_secret_bearing_acceptance_summary_before_s
                 "candidate_id": 7,
                 "governance_passed": True,
                 "held_out_score": 0.9,
-                "metrics": {"governance_regressions": 0},
+                "metrics": {"governance_regressions": 0, "incident_replay_cases": 1},
                 "passed": True,
                 "recommendation": "accept",
                 "suite_id": "held-out",
                 "trigger_score": 0.7,
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },
@@ -5276,7 +5280,7 @@ llmff:
     assert eval_report["validation_splits"] == {
         "governance": ["governance:policy"],
         "held_out": ["held-out:no-regression"],
-        "trigger": ["trigger:regression"],
+        "trigger": ["incident_replay:regression"],
     }
     assert summary["accepted_bounded_edit_metadata"] == [
         {
@@ -5300,7 +5304,7 @@ llmff:
     assert {row[0]: json.loads(row[1]) for row in validation_splits} == {
         "governance": ["governance:policy"],
         "held_out": ["held-out:no-regression"],
-        "trigger": ["trigger:regression"],
+        "trigger": ["incident_replay:regression"],
     }
 
 
@@ -5350,6 +5354,60 @@ llmff:
     assert report["passed"] is False
     assert report["recommendation"] == "reject"
     assert report["metrics"]["held_out_cases"] == 0
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+
+
+def test_eval_rejects_accept_recommendation_without_incident_replay_cases(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.7,
+            "held_out_score": 0.9,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+                "governance": ["governance:policy"],
+            },
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert "llmff eval_report cannot accept without incident replay cases" in output
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert report["metrics"].get("incident_replay_cases", 0) == 0
     assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 
@@ -5599,9 +5657,13 @@ def test_eval_rejects_file_backed_candidate_before_acceptance_summary_when_basel
             "held_out_score": 0.3,
             "governance_passed": True,
             "recommendation": "accept",
-            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "metrics": {
+                "governance_regressions": 0,
+                "held_out_cases": 3,
+                "incident_replay_cases": 1,
+            },
             "validation_splits": {
-                "trigger": ["trigger:regression"],
+                "trigger": ["incident_replay:regression"],
                 "held_out": ["held-out:no-regression"],
             },
         },
@@ -6159,9 +6221,13 @@ def test_optimize_runs_unseen_suites_before_accepting_candidate(tmp_path: Path):
                 "held_out_score": 0.95,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {"governance_regressions": 0, "held_out_cases": 5},
+                "metrics": {
+                    "governance_regressions": 0,
+                    "held_out_cases": 5,
+                    "incident_replay_cases": 1,
+                },
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },
@@ -6257,9 +6323,13 @@ def test_optimize_passes_unseen_eval_collection_to_acceptance_summary(tmp_path: 
                 "held_out_score": 0.95,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {"governance_regressions": 0, "held_out_cases": 5},
+                "metrics": {
+                    "governance_regressions": 0,
+                    "held_out_cases": 5,
+                    "incident_replay_cases": 1,
+                },
                 "validation_splits": {
-                    "trigger": ["trigger:regression"],
+                    "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
                     "governance": ["governance:policy"],
                 },
@@ -6501,9 +6571,13 @@ def test_optimize_rejects_candidate_when_held_out_does_not_beat_validation_basel
             "held_out_score": 0.3,
             "governance_passed": True,
             "recommendation": "accept",
-            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "metrics": {
+                "governance_regressions": 0,
+                "held_out_cases": 3,
+                "incident_replay_cases": 1,
+            },
             "validation_splits": {
-                "trigger": ["trigger:regression"],
+                "trigger": ["incident_replay:regression"],
                 "held_out": ["held-out:no-regression"],
             },
         },
@@ -6602,9 +6676,13 @@ def test_optimize_records_baseline_rejection_before_acceptance_summary_runs(
             "held_out_score": 0.3,
             "governance_passed": True,
             "recommendation": "accept",
-            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "metrics": {
+                "governance_regressions": 0,
+                "held_out_cases": 3,
+                "incident_replay_cases": 1,
+            },
             "validation_splits": {
-                "trigger": ["trigger:regression"],
+                "trigger": ["incident_replay:regression"],
                 "held_out": ["held-out:no-regression"],
             },
         },
@@ -6701,9 +6779,13 @@ def test_optimize_rejects_candidate_when_governance_gate_fails_despite_accept_re
             "held_out_score": 0.9,
             "governance_passed": False,
             "recommendation": "accept",
-            "metrics": {"governance_regressions": 1, "held_out_cases": 3},
+            "metrics": {
+                "governance_regressions": 1,
+                "held_out_cases": 3,
+                "incident_replay_cases": 1,
+            },
             "validation_splits": {
-                "trigger": ["trigger:regression"],
+                "trigger": ["incident_replay:regression"],
                 "held_out": ["held-out:no-regression"],
             },
         },
@@ -6772,11 +6854,12 @@ def test_optimize_rejects_candidate_when_regression_gate_fails(tmp_path: Path):
                 "baseline_regression_score": 0.05,
                 "governance_regressions": 0,
                 "held_out_cases": 3,
+                "incident_replay_cases": 1,
                 "regression_score": 0.20,
                 "regression_tolerance": 0.05,
             },
             "validation_splits": {
-                "trigger": ["trigger:regression"],
+                "trigger": ["incident_replay:regression"],
                 "held_out": ["held-out:no-regression"],
                 "governance": ["governance:policy"],
             },

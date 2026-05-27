@@ -2873,6 +2873,8 @@ def _assert_eval_acceptance(
         regression_tolerance = _score_from_eval_report(eval_report, "regression_tolerance") or 0.0
         if regression_score > baseline_regression_score + regression_tolerance:
             raise ValueError("regression score degraded beyond tolerance")
+    if not _eval_has_incident_replay_cases(eval_report):
+        raise ValueError("eval report cannot accept without incident replay cases")
 
 
 def _assert_apply_recorded_provenance(
@@ -2970,6 +2972,23 @@ def _eval_validation_split_failure(eval_report: dict[str, object]) -> str | None
             + ", ".join(overlap)
         )
     return None
+
+
+def _eval_has_incident_replay_cases(eval_report: dict[str, object]) -> bool:
+    metrics = eval_report.get("metrics", {})
+    if isinstance(metrics, dict):
+        raw = metrics.get("incident_replay_cases")
+        if not isinstance(raw, bool) and isinstance(raw, int | float) and raw > 0:
+            return True
+    raw_splits = eval_report.get("validation_splits")
+    if not isinstance(raw_splits, dict):
+        return False
+    return any(
+        isinstance(case_id, str) and case_id.startswith("incident_replay:")
+        for raw_case_ids in raw_splits.values()
+        if isinstance(raw_case_ids, list)
+        for case_id in raw_case_ids
+    )
 
 
 def _validation_baseline_key(suite_id: str) -> str:

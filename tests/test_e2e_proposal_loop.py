@@ -212,7 +212,7 @@ if args[:1] == ["run"]:
         }) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
         validation_splits = {
-            "trigger": ["trigger:e2e-regression"],
+            "trigger": ["incident_replay:e2e-regression"],
             "held_out": ["held-out:e2e-no-regression"],
             "governance": ["governance:e2e-policy"],
         }
@@ -222,7 +222,11 @@ if args[:1] == ["run"]:
             "held_out_score": 0.88,
             "governance_passed": True,
             "recommendation": "accept",
-            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "metrics": {
+                "governance_regressions": 0,
+                "held_out_cases": 3,
+                "incident_replay_cases": 1,
+            },
             "validation_splits": validation_splits,
             "eval_cases": [
                 {
