@@ -1909,6 +1909,41 @@ def test_validate_release_artifact_manifest_accepts_current_schema():
     )
 
 
+def test_validate_release_artifact_manifest_accepts_provider_backed_evidence():
+    validate_json_artifact(
+        "release-artifact-manifest.json",
+        {
+            "schema_version": 1,
+            "artifact_kind": "release_artifact_manifest",
+            "package": {"name": "tugboat", "version": "0.1.0"},
+            "commit": "abc1234",
+            "ci_url": "https://ci.example/runs/1",
+            "approver": "release-owner",
+            "security_review": {
+                "decision": "approved_provider_backed",
+                "critical_high_findings": 0,
+            },
+            "wheel": {
+                "path": "/repo/dist/tugboat-0.1.0-py3-none-any.whl",
+                "sha256": "a" * 64,
+                "size_bytes": 128,
+            },
+            "smoke_commands": ["tugboat doctor"],
+            "retained_evidence": [
+                {"path": "/repo/.sidecar/ci/pytest.log", "sha256": "b" * 64, "size_bytes": 12}
+            ],
+            "provider_backed_evidence": [
+                {
+                    "path": "/repo/.sidecar/ci/llmff-provider-inspect.json",
+                    "providers": ["openai"],
+                    "external_calls": [{"kind": "model_provider", "target": "openai"}],
+                    "network_required": True,
+                }
+            ],
+        },
+    )
+
+
 def test_validate_release_artifact_manifest_rejects_unapproved_security_decision():
     with pytest.raises(ArtifactValidationError, match="security_review.decision"):
         validate_json_artifact(

@@ -53,6 +53,8 @@ def test_missing_llmff_binary_returns_clear_adoption_error(tmp_path: Path, capsy
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
     trace = repo / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
     policy_dir = repo / ".sidecar"
@@ -88,11 +90,12 @@ from pathlib import Path
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
+    provider_backed = "provider" in Path(sys.argv[0]).name
     print(json.dumps({
         "manifest": Path(args[3]).stem,
-        "network_required": False,
-        "providers": [],
-        "external_calls": [],
+        "network_required": provider_backed,
+        "providers": ["openai"] if provider_backed else [],
+        "external_calls": [{"kind": "model_provider", "target": "openai"}] if provider_backed else [],
     }))
     raise SystemExit(0)
 
@@ -447,6 +450,95 @@ llmff:
     assert graph[2] is not None
     assert (run_dir / "instruction-graph.json").exists()
     assert codex.read_text(encoding="utf-8") == original
+
+
+def test_provider_backed_llmff_requires_explicit_network_policy(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "provider-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+  allowed_providers:
+    - openai
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    assert "instruction index blocked:" in output
+    assert "policy disallows network" in output
+
+
+def test_provider_backed_llmff_requires_provider_allowlist(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "provider-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    assert "instruction index blocked:" in output
+    assert "provider is not allowed by policy: openai" in output
+
+
+def test_provider_backed_llmff_opt_in_records_declared_provider_evidence(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "provider-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: true
+  allowed_providers:
+    - openai
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    inspect = json.loads(
+        (run_dir / "instruction-index" / "llmff-inspect.json").read_text(encoding="utf-8")
+    )
+    assert inspect["network_required"] is True
+    assert inspect["external_calls"] == [{"kind": "model_provider", "target": "openai"}]
+    assert inspect["inspect"]["providers"] == ["openai"]
 
 
 def test_mock_audit_records_chunk_granularity_instruction_refs(tmp_path: Path, monkeypatch):

@@ -1100,6 +1100,30 @@ def _write_release_artifact_manifest(
     missing_release_evidence = _missing_release_evidence(retained_evidence)
     if missing_release_evidence is not None:
         raise ValueError(f"{missing_release_evidence} evidence is required")
+    provider_backed_evidence: list[dict[str, object]] = []
+    if security_review_decision == "approved_provider_backed":
+        provider_backed_evidence = _provider_backed_release_evidence(retained_evidence)
+        if not provider_backed_evidence:
+            raise ValueError("provider-backed release evidence is required")
+        policy = load_policy(resolved_repo)
+        if not policy.llmff_allow_network:
+            raise ValueError(
+                "provider-backed release requires llmff.allow_network and allowed_providers"
+            )
+        allowed_providers = set(policy.llmff_allowed_providers)
+        if not allowed_providers:
+            raise ValueError(
+                "provider-backed release requires llmff.allow_network and allowed_providers"
+            )
+        for evidence in provider_backed_evidence:
+            evidence_providers = set(evidence["providers"])
+            if not allowed_providers.issuperset(evidence_providers):
+                provider = next(
+                    provider for provider in evidence_providers if provider not in allowed_providers
+                )
+                raise ValueError(
+                    f"provider-backed release evidence uses unallowed provider: {provider}"
+                )
     preflight_findings = scan_text(
         "release-artifact-manifest.json",
         json.dumps(
@@ -1142,6 +1166,8 @@ def _write_release_artifact_manifest(
         ],
         "retained_evidence": retained_evidence,
     }
+    if provider_backed_evidence:
+        payload["provider_backed_evidence"] = provider_backed_evidence
     validate_json_artifact("release-artifact-manifest.json", payload)
     output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1178,6 +1204,75 @@ def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) ->
         if not any(required_token in name for name in evidence_names):
             return label
     return None
+
+
+def _provider_backed_release_evidence(
+    retained_evidence: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    provider_evidence: list[dict[str, object]] = []
+    for entry in retained_evidence:
+        path = Path(str(entry["path"]))
+        payload = _read_json_file_if_object(path)
+        if payload is None:
+            continue
+        evidence = _provider_backed_evidence_from_payload(path, payload)
+        if evidence is not None:
+            provider_evidence.append(evidence)
+    return provider_evidence
+
+
+def _read_json_file_if_object(path: Path) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _provider_backed_evidence_from_payload(
+    path: Path, payload: dict[str, object]
+) -> dict[str, object] | None:
+    candidates = [payload]
+    inspect_payload = payload.get("inspect")
+    if isinstance(inspect_payload, dict):
+        candidates.append(inspect_payload)
+
+    for candidate in candidates:
+        if candidate.get("network_required") is not True:
+            continue
+        providers = _string_list(candidate.get("providers"))
+        external_calls = _provider_external_calls(candidate.get("external_calls"), providers)
+        if providers and external_calls:
+            return {
+                "path": str(path),
+                "providers": sorted(providers),
+                "external_calls": external_calls,
+                "network_required": True,
+            }
+    return None
+
+
+def _string_list(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, str) and item}
+
+
+def _provider_external_calls(value: object, providers: set[str]) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    calls: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        target = item.get("target")
+        if kind != "model_provider" or not isinstance(target, str) or target not in providers:
+            continue
+        calls.append({"kind": kind, "target": target})
+    return calls
 
 
 def _current_git_head(repo: Path) -> str:

@@ -43,6 +43,12 @@ Before tagging:
 - Confirm generated artifacts under `.sidecar/runs` contain no raw secrets.
 - Record the release version, git commit, CI run URL, and approver.
 
+## Provider-Backed Approval
+
+Use `--security-review-decision approved_provider_backed` only for releases that are allowed to run provider-backed `llmff` pipelines. The repo policy must explicitly set `llmff.allow_network: true` and list every approved provider in `llmff.allowed_providers`.
+
+Retain at least one provider-backed pipeline evidence artifact with `network_required: true`, declared `providers`, and `external_calls` entries for the model provider. Pass that artifact with the other `--evidence` files so `.sidecar/ops/release-artifact-manifest.json` records `provider_backed_evidence`.
+
 ## Publish
 
 After the checklist passes and the release owner approves publication:

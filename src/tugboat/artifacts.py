@@ -1121,6 +1121,37 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
+            "provider_backed_evidence": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "providers", "external_calls", "network_required"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "providers": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                        "external_calls": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["kind", "target"],
+                                "properties": {
+                                    "kind": {"type": "string", "const": "model_provider"},
+                                    "target": {"type": "string"},
+                                },
+                            },
+                        },
+                        "network_required": {"type": "boolean", "const": True},
+                    },
+                },
+            },
         },
     },
     "harness-cleanup-candidates.json": {
