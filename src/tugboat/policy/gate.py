@@ -199,7 +199,7 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("base_file_outside_repo")
     if not _is_allowed_base_file(candidate.base_file, policy):
         found_reasons.add("base_file_not_allowed")
-    if _is_pending_eval_definition_edit(candidate.base_file, candidate):
+    if _is_pending_eval_definition_edit(candidate.base_file, policy, candidate):
         found_reasons.add("pending_eval_definition_edit")
     if _is_sidecar_approval_policy(base_path, repo_root):
         found_reasons.add("approval_policy_self_apply")
@@ -597,9 +597,17 @@ def _is_protected_instruction_file(base_file: str, policy: Policy) -> bool:
     )
 
 
-def _is_pending_eval_definition_edit(base_file: str, candidate: CandidatePatch) -> bool:
+def _is_pending_eval_definition_edit(
+    base_file: str,
+    policy: Policy,
+    candidate: CandidatePatch,
+) -> bool:
     normalized_base = _repo_relative_posix(base_file)
     return any(
+        entry.kind == "eval_definition"
+        and fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(entry.path))
+        for entry in policy.instruction_files
+    ) or any(
         fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
         for pattern in candidate.pending_audit_eval_definition_paths
     )

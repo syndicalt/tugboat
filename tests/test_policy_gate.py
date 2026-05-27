@@ -1103,3 +1103,40 @@ def test_policy_gate_rejects_pending_candidate_eval_definition_edits(tmp_path: P
 
     assert decision.allowed is False
     assert decision.reasons == ("pending_eval_definition_edit",)
+
+
+def test_policy_gate_rejects_policy_eval_definition_edits_without_candidate_metadata(
+    tmp_path: Path,
+):
+    eval_file = tmp_path / "evals" / "suite.md"
+    eval_file.parent.mkdir()
+    eval_file.write_text("Suite checks the pending candidate.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_file="evals/suite.md",
+        base_hash=CandidatePatch.hash_file(eval_file),
+        diff=(
+            "--- a/evals/suite.md\n"
+            "+++ b/evals/suite.md\n"
+            "@@\n"
+            "-Suite checks the pending candidate.\n"
+            "+Suite checks the pending candidate thoroughly.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(
+                    path="evals/*.md",
+                    kind="eval_definition",
+                    precedence=100,
+                    protected=True,
+                ),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("pending_eval_definition_edit",)

@@ -1477,6 +1477,11 @@ def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_p
     assert _git(repo, "branch", "--show-current") == apply_plan["branch_name"]
     assert apply_plan["mode"] == "branch"
     assert apply_plan["applied_commit"] == ""
+    assert apply_plan["rollback_command"] == [
+        ["git", "restore", "--worktree", "--staged", "--", "CODEX.md"],
+        ["git", "switch", "main"],
+        ["git", "branch", "-D", apply_plan["branch_name"]],
+    ]
     assert "Record rollback notes." in (repo / "CODEX.md").read_text(encoding="utf-8")
 
 

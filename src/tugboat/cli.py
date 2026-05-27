@@ -1587,6 +1587,11 @@ def _write_apply_plan(
             branch_created = True
             adapter.apply_diff(run_dir / "candidate.diff")
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            rollback_command = [
+                ["git", "restore", "--worktree", "--staged", "--", *target_files],
+                ["git", "switch", base_branch],
+                ["git", "branch", "-D", branch_name],
+            ]
         elif mode == "commit":
             adapter.create_branch(branch_name)
             branch_created = True
