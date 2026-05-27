@@ -156,6 +156,7 @@ def run_audit_pipeline(
                     "policy": sidecar_dir(repo) / "policy.yaml",
                 },
                 output_paths={"instruction_index": run_dir / "instruction-index.raw.json"},
+                validate_output_artifacts=False,
             )
         except SecretScanError as error:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -287,6 +288,7 @@ def run_audit_pipeline(
                     "audit_report": run_dir / "audit.raw.json",
                     "evidence_ids": run_dir / "evidence-ids.raw.json",
                 },
+                validate_output_artifacts=False,
             )
         except SecretScanError as error:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

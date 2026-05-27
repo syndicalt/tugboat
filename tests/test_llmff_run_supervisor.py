@@ -14,6 +14,7 @@ from tugboat.llmff.runner import (
     CheckpointMismatchError,
     InputPathError,
     InspectPolicyError,
+    LifecycleArtifactError,
     MissingOutputError,
     OutputPathError,
     run_manifest,
@@ -61,8 +62,18 @@ def test_run_manifest_requires_matching_inspect_artifact_before_subprocess(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -89,6 +100,16 @@ def test_run_manifest_accepts_matching_inspect_artifact_before_subprocess(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
 
@@ -118,8 +139,18 @@ def test_run_manifest_rejects_stale_inspect_artifact_before_subprocess(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -147,8 +178,18 @@ def test_run_manifest_rejects_invalid_inspect_artifact_json_before_subprocess(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -178,8 +219,18 @@ def test_run_manifest_rejects_inspect_artifact_outside_policy_allowlist(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -289,8 +340,18 @@ def test_run_manifest_invokes_subprocess_with_file_backed_streams(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -339,8 +400,18 @@ def test_run_manifest_supports_space_separated_binary_command(
     calls = []
 
     def fake_run(*args, **kwargs):
+        command = args[0]
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -371,6 +442,16 @@ def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
 
     def fake_run(*args, **kwargs):
         calls.append((args, kwargs))
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
         output_path = Path(args[0][args[0].index("--output") + 2])
         output_path.write_text("{}\n", encoding="utf-8")
         return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
@@ -481,7 +562,7 @@ def test_run_manifest_marks_lifecycle_artifacts_private_under_permissive_umask(
             encoding="utf-8",
         )
         Path(command[command.index("--checkpoint") + 1]).write_text(
-            '{"manifest_hash":"fake"}\n',
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
             encoding="utf-8",
         )
         Path(command[command.index("--output") + 2]).write_text("{}\n", encoding="utf-8")
@@ -517,7 +598,17 @@ def test_run_manifest_marks_lifecycle_artifacts_private_under_permissive_umask(
 
 def test_successful_run_returns_exit_code_and_artifact_paths(monkeypatch, tmp_path: Path):
     def fake_run(*args, **kwargs):
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -539,6 +630,132 @@ def test_successful_run_returns_exit_code_and_artifact_paths(monkeypatch, tmp_pa
     assert result.checkpoint_path == run_dir / "episode-audit" / "checkpoint.json"
     assert result.failure_kind is None
     assert result.failure_message is None
+
+
+def test_successful_run_requires_lifecycle_artifacts(monkeypatch, tmp_path: Path):
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+
+    with pytest.raises(LifecycleArtifactError, match="llmff-events.jsonl"):
+        run_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(llmff_require_inspect=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+
+def test_successful_run_rejects_malformed_lifecycle_jsonl(monkeypatch, tmp_path: Path):
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text("{not-json\n", encoding="utf-8")
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+
+    with pytest.raises(LifecycleArtifactError, match="llmff-events.jsonl contains invalid JSONL"):
+        run_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(llmff_require_inspect=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+
+def test_successful_run_rejects_checkpoint_hash_mismatch(monkeypatch, tmp_path: Path):
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            '{"manifest_hash":"different"}\n',
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+
+    with pytest.raises(CheckpointMismatchError, match="manifest hash"):
+        run_manifest(
+            manifest,
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            policy=Policy(llmff_require_inspect=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+        )
+
+
+def test_successful_run_validates_manifest_bound_output_schema(monkeypatch, tmp_path: Path):
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        Path(command[command.index("--output") + 2]).write_text("{}\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "name: episode-audit",
+                "inputs:",
+                "  episode_trace: episode.jsonl",
+                "outputs:",
+                "  audit_report: audit.raw.json",
+                "output_artifacts:",
+                "  audit_report: audit.raw.json",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(ValueError, match="audit.raw.json missing required field"):
+        run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(llmff_require_inspect=False),
+            timeout_ms=12_000,
+            retry_attempts=2,
+            retry_backoff_ms=250,
+            output_paths={"audit_report": run_dir / "audit.raw.json"},
+        )
 
 
 def test_failed_run_returns_sanitized_last_run_failed_event(
@@ -767,9 +984,15 @@ def test_run_manifest_rejects_successful_run_missing_declared_output(
     monkeypatch, tmp_path: Path
 ):
     def fake_run(*args, **kwargs):
-        events_path = Path(args[0][args[0].index("--events") + 1])
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        events_path = Path(command[command.index("--events") + 1])
         events_path.write_text('{"event":"run_completed"}\n', encoding="utf-8")
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        Path(command[command.index("--checkpoint") + 1]).write_text(
+            json.dumps({"manifest_hash": _manifest_sha256(manifest)}) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"
@@ -790,12 +1013,18 @@ def test_run_manifest_rejects_successful_run_missing_declared_output(
 
 def test_run_manifest_rejects_secret_in_checkpoint(monkeypatch, tmp_path: Path):
     def fake_run(*args, **kwargs):
-        checkpoint_path = Path(args[0][args[0].index("--checkpoint") + 1])
+        command = args[0]
+        Path(command[command.index("--trace") + 1]).write_text('{"event":"step"}\n', encoding="utf-8")
+        Path(command[command.index("--events") + 1]).write_text(
+            '{"event":"run_completed"}\n',
+            encoding="utf-8",
+        )
+        checkpoint_path = Path(command[command.index("--checkpoint") + 1])
         checkpoint_path.write_text(
             json.dumps({"token": "ghp_abcdefghijklmnopqrstuvwx"}) + "\n",
             encoding="utf-8",
         )
-        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     manifest = tmp_path / "episode-audit.yaml"

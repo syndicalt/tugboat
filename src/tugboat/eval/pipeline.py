@@ -474,6 +474,7 @@ def _run_patch_eval(
             "eval_report": run_dir / "eval-report.raw.json",
             "policy_decision": run_dir / "policy-decision.raw.json",
         },
+        validate_output_artifacts=False,
     )
     if run.exit_code != 0:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

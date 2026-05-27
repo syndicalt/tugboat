@@ -192,6 +192,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         checkpoint_path=run_dir / "patch-propose" / "checkpoint.json",
         input_paths=input_paths,
         output_paths=output_paths,
+        validate_output_artifacts=False,
     )
     if run.exit_code != 0:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -680,6 +681,7 @@ def _run_drift_detect(
         checkpoint_path=run_dir / "drift-detect" / "checkpoint.json",
         input_paths=input_paths,
         output_paths=output_paths,
+        validate_output_artifacts=False,
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)

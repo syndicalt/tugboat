@@ -50,6 +50,7 @@ def _write_fake_audit_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3
 import json
+import hashlib
 import sys
 from pathlib import Path
 
@@ -90,7 +91,10 @@ if args[:1] == ["run"]:
             evidence_id = str(canonical["events"][0]["evidence_id"])
     trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
-    checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    checkpoint.write_text(
+        json.dumps({"manifest_hash": hashlib.sha256(Path(args[1]).read_bytes()).hexdigest()}) + "\\n",
+        encoding="utf-8",
+    )
     if manifest == "instruction-index":
         outputs["instruction_index"].write_text(json.dumps({
             "documents": [{

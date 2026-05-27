@@ -1910,6 +1910,7 @@ def _run_acceptance_summary(
             "risk_class": run_dir / "candidate.json",
         },
         output_paths={"acceptance_summary": run_dir / "acceptance-summary.raw.json"},
+        validate_output_artifacts=False,
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(

@@ -119,7 +119,10 @@ if args[:1] == ["run"]:
         index += 1
     trace.write_text('{"event":"step"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
-    checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
+    checkpoint.write_text(
+        json.dumps({"manifest_hash": hashlib.sha256(Path(args[1]).read_bytes()).hexdigest()}) + "\\n",
+        encoding="utf-8",
+    )
     if manifest == "instruction-index":
         outputs["instruction_index"].write_text(json.dumps({
             "documents": [{

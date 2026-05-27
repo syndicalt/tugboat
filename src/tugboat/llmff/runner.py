@@ -7,7 +7,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+import yaml
+
+from tugboat.artifacts import (
+    ArtifactValidationError,
+    SCHEMA_VERSION,
+    load_json_object_artifact,
+    validate_json_artifact,
+)
 from tugboat.llmff.contracts import InspectPolicyError, InspectResult, LlmffRunner, RunResult
 from tugboat.models import Policy
 from tugboat.paths import ensure_private_dir, mark_private_file
@@ -31,6 +38,10 @@ class CheckpointPathError(ValueError):
 
 
 class MissingOutputError(RuntimeError):
+    pass
+
+
+class LifecycleArtifactError(RuntimeError):
     pass
 
 
@@ -98,6 +109,7 @@ class LlmffRunSupervisor:
         checkpoint_path: Path | None = None,
         input_paths: dict[str, Path] | None = None,
         output_paths: dict[str, Path] | None = None,
+        validate_output_artifacts: bool = True,
     ) -> RunResult:
         lifecycle_dir = _manifest_lifecycle_dir(run_dir, manifest_path)
         trace_path = lifecycle_dir / "llmff-trace.jsonl"
@@ -154,12 +166,20 @@ class LlmffRunSupervisor:
                 stdout="",
                 stderr=f"Timed out after {timeout_ms} ms",
             )
-        if completed.returncode == 0:
-            _validate_declared_outputs_exist(outputs)
         for path in (trace_path, events_path, actual_checkpoint_path, *outputs.values()):
             if path.exists():
                 mark_private_file(path)
                 _scan_path_or_remove_secret_bearing_files(path)
+        if completed.returncode == 0:
+            _validate_successful_lifecycle_artifacts(
+                manifest_path,
+                trace_path=trace_path,
+                events_path=events_path,
+                checkpoint_path=actual_checkpoint_path,
+            )
+            _validate_declared_outputs_exist(outputs)
+            if validate_output_artifacts:
+                _validate_manifest_bound_outputs(manifest_path, outputs)
         failure_kind, failure_message = (None, None)
         if boundary_timeout:
             failure_kind, failure_message = ("timeout", f"Timed out after {timeout_ms} ms")
@@ -266,6 +286,76 @@ def _validate_declared_outputs_exist(output_paths: dict[str, Path]) -> None:
         raise MissingOutputError(f"llmff run succeeded without declared output: {missing[0]}")
 
 
+def _validate_successful_lifecycle_artifacts(
+    manifest_path: Path,
+    *,
+    trace_path: Path,
+    events_path: Path,
+    checkpoint_path: Path,
+) -> None:
+    for path in (trace_path, events_path, checkpoint_path):
+        if not path.exists():
+            raise LifecycleArtifactError(
+                f"llmff run succeeded without lifecycle artifact: {path.name}"
+            )
+    _validate_jsonl_artifact(trace_path)
+    _validate_jsonl_artifact(events_path)
+    _reject_checkpoint_mismatch(checkpoint_path, manifest_path)
+
+
+def _validate_jsonl_artifact(path: Path) -> None:
+    with path.open(encoding="utf-8") as lines:
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise LifecycleArtifactError(
+                    f"{path.name} contains invalid JSONL at line {line_number}"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise LifecycleArtifactError(
+                    f"{path.name} contains non-object JSONL at line {line_number}"
+                )
+
+
+def _validate_manifest_bound_outputs(
+    manifest_path: Path,
+    output_paths: dict[str, Path],
+) -> None:
+    output_artifacts = _manifest_output_artifacts(manifest_path)
+    for output_name, artifact_name in sorted(output_artifacts.items()):
+        output_path = output_paths.get(output_name)
+        if output_path is None:
+            continue
+        payload = load_json_object_artifact(output_path, artifact_name)
+        try:
+            validate_json_artifact(artifact_name, payload)
+        except ArtifactValidationError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+def _manifest_output_artifacts(manifest_path: Path) -> dict[str, str]:
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(manifest, dict):
+        return {}
+    raw = manifest.get("output_artifacts")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(output_name): str(artifact_name)
+        for output_name, artifact_name in raw.items()
+        if isinstance(output_name, str)
+        and output_name.strip()
+        and isinstance(artifact_name, str)
+        and artifact_name.strip()
+    }
+
+
 def run_manifest(
     manifest_path: Path,
     *,
@@ -277,6 +367,7 @@ def run_manifest(
     checkpoint_path: Path | None = None,
     input_paths: dict[str, Path] | None = None,
     output_paths: dict[str, Path] | None = None,
+    validate_output_artifacts: bool = True,
 ) -> RunResult:
     _require_matching_inspect_artifact(manifest_path, run_dir=run_dir, policy=policy)
     supervisor = LlmffRunSupervisor(policy.llmff_binary)
@@ -289,6 +380,7 @@ def run_manifest(
         checkpoint_path=checkpoint_path,
         input_paths=input_paths,
         output_paths=output_paths,
+        validate_output_artifacts=validate_output_artifacts,
     )
 
 
