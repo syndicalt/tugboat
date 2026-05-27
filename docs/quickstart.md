@@ -112,4 +112,4 @@ After allowlisting the repo in `.sidecar/policy.yaml`, attach MCP clients with t
 tugboat mcp stdio --repo . --read-only
 ```
 
-This profile exposes read tools such as status, instruction graph, latest runs, harness findings, and candidate reports. It does not advertise write-intent tools and rejects repo overrides.
+This profile exposes read tools such as status, instruction graph, latest runs, harness findings, candidate reports, and decision-trace artifact refs. It does not advertise write-intent tools and rejects repo overrides.

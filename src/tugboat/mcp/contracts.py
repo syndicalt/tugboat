@@ -19,6 +19,7 @@ from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
 from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir, sidecar_dir
+from tugboat.report.decision_trace import write_decision_trace
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.adapters import ingest_mcp_session_bundle
@@ -79,6 +80,10 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         ("repo", "candidate_id"),
     ),
     "tugboat_daemon_status": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_decision_trace": _object_schema(
+        {"repo": _REPO_SCHEMA, "decision": _STRING_ID_SCHEMA},
+        ("repo", "decision"),
+    ),
     "tugboat_harness_findings": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_index_summary": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_instruction_graph": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
@@ -525,6 +530,23 @@ def tugboat_candidate_report(repo: str | Path, candidate_id: int) -> dict[str, A
     )
 
 
+def tugboat_decision_trace(repo: str | Path, decision: str) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        path = write_decision_trace(repo_path, decision)
+        return {
+            "decision_ref": decision,
+            "artifact": {
+                "kind": "decision_trace",
+                "path": _relative_ref(repo_path, path),
+                "sha256": _sha256(path),
+            },
+        }
+
+    return _audit_call(repo_path, "tugboat_decision_trace", {"decision": decision}, read)
+
+
 def tugboat_daemon_status(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -813,6 +835,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_candidate": tugboat_candidate,
     "tugboat_candidate_report": tugboat_candidate_report,
     "tugboat_daemon_status": tugboat_daemon_status,
+    "tugboat_decision_trace": tugboat_decision_trace,
     "tugboat_harness_findings": tugboat_harness_findings,
     "tugboat_index_summary": tugboat_index_summary,
     "tugboat_instruction_graph": tugboat_instruction_graph,
@@ -1209,6 +1232,10 @@ def _repo_policy_ref(repo: Path) -> dict[str, Any]:
         "version": policy.version,
         "hash": hashlib.sha256(content).hexdigest(),
     }
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _resolve_local_repo(repo: str | Path) -> Path:

@@ -25,6 +25,7 @@ from tugboat.mcp import (
     tugboat_active_instructions,
     tugboat_candidate,
     tugboat_candidate_report,
+    tugboat_decision_trace,
     tugboat_harness_findings,
     tugboat_index_summary,
     tugboat_latest_audit,
@@ -208,6 +209,19 @@ def _seed_review_target(repo: Path) -> tuple[int, int]:
             state="needs_review",
         )
     return audit_id, candidate_id
+
+
+def _seed_decision_trace_target(repo: Path) -> tuple[int, int, int]:
+    audit_id, candidate_id = _seed_review_target(repo)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        decision_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="reviewer",
+            policy="proposal_only",
+            decision="needs_review",
+            reason="policy passed",
+        )
+    return audit_id, candidate_id, decision_id
 
 
 def _allow_mcp_repo(repo: Path) -> None:
@@ -1005,6 +1019,27 @@ def test_candidate_report_uses_latest_eval_and_decision_rows(tmp_path: Path):
         "decision": "needs_review",
         "reason_summary": "new decision",
     }
+
+
+def test_decision_trace_returns_artifact_ref_without_raw_payloads(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    _, _, decision_id = _seed_decision_trace_target(repo)
+
+    result = tugboat_decision_trace(repo, str(decision_id))
+
+    assert result["decision_ref"] == str(decision_id)
+    assert result["artifact"] == {
+        "kind": "decision_trace",
+        "path": ".sidecar/runs/seed-review-target/decision-trace.json",
+        "sha256": result["artifact"]["sha256"],
+    }
+    assert len(result["artifact"]["sha256"]) == 64
+    serialized = json.dumps(result, sort_keys=True)
+    assert "trace_events" not in serialized
+    assert "rationale" not in serialized
+    assert (repo / ".sidecar" / "runs" / "seed-review-target" / "decision-trace.json").exists()
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_decision_trace"
 
 
 def test_repo_must_be_local_path():
