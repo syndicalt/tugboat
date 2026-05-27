@@ -151,6 +151,10 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
                 "event_type": "user_correction",
             },
         )
+        document_event = store.append_audit_event(
+            "document.indexed",
+            {"repo": str(repo), "path": "CODEX.md", "kind": "agent_policy", "hash": "abc"},
+        )
     with closing(sqlite3.connect(sidecar / "db.sqlite")) as connection:
         connection.execute(
             """
@@ -163,10 +167,13 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
         )
         connection.execute(
             """
-            INSERT INTO documents(repo_path, path, kind, precedence, protected, hash, mtime, parser_version)
-            VALUES (?, 'CODEX.md', 'agent_policy', 70, 1, 'abc', 1, 'test')
+            INSERT INTO documents(
+              repo_path, path, kind, precedence, protected, hash, mtime,
+              parser_version, audit_event_sequence
+            )
+            VALUES (?, 'CODEX.md', 'agent_policy', 70, 1, 'abc', 1, 'test', ?)
             """,
-            (str(repo),),
+            (str(repo), document_event.sequence),
         )
         connection.commit()
     with DaemonQueue.open_sidecar(repo) as queue:

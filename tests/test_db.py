@@ -6,6 +6,7 @@ import pytest
 
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
+from tugboat.models import ChunkRecord, DocumentRecord, IndexResult
 from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
@@ -111,6 +112,130 @@ def test_runs_require_audit_event_sequence(tmp_path: Path):
             and row[4] == "sequence"
             for row in foreign_keys
         )
+
+
+def test_instruction_index_tables_require_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        for table in ("documents", "chunks"):
+            columns = {
+                row[1]: row
+                for row in store.connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            foreign_keys = store.connection.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+
+            assert columns["audit_event_sequence"][3] == 1, table
+            assert any(
+                row[2] == "audit_events"
+                and row[3] == "audit_event_sequence"
+                and row[4] == "sequence"
+                for row in foreign_keys
+            ), table
+
+
+def test_index_documents_links_each_document_and_chunk_to_audit_event(tmp_path: Path):
+    result = IndexResult(
+        documents=(
+            DocumentRecord(
+                path="CODEX.md",
+                kind="codex",
+                precedence=10,
+                protected=True,
+                hash="doc-hash",
+                mtime=123.0,
+                parser_version="markdown-v1",
+                chunks=(
+                    ChunkRecord(
+                        heading_path=("Rules",),
+                        anchor="rules",
+                        byte_start=0,
+                        byte_end=12,
+                        text_hash="chunk-hash",
+                        text="Use tests.",
+                    ),
+                ),
+            ),
+        )
+    )
+    with Store.open(tmp_path / "db.sqlite") as store:
+        store.index_documents(tmp_path, result)
+
+        document_row = store.connection.execute(
+            """
+            SELECT d.path, e.event_type
+            FROM documents d
+            JOIN audit_events e ON e.sequence = d.audit_event_sequence
+            """
+        ).fetchone()
+        chunk_row = store.connection.execute(
+            """
+            SELECT c.anchor, e.event_type
+            FROM chunks c
+            JOIN audit_events e ON e.sequence = c.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert document_row == ("CODEX.md", "document.indexed")
+    assert chunk_row == ("rules", "instruction_chunk.indexed")
+
+
+def test_store_migrates_legacy_instruction_index_rows_to_audit_events(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE documents (
+              id INTEGER PRIMARY KEY,
+              repo_path TEXT NOT NULL,
+              path TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              precedence INTEGER NOT NULL,
+              protected INTEGER NOT NULL,
+              hash TEXT NOT NULL,
+              mtime REAL NOT NULL,
+              parser_version TEXT NOT NULL
+            );
+            CREATE TABLE chunks (
+              id INTEGER PRIMARY KEY,
+              document_id INTEGER NOT NULL,
+              heading_path TEXT NOT NULL,
+              anchor TEXT NOT NULL,
+              byte_start INTEGER NOT NULL,
+              byte_end INTEGER NOT NULL,
+              text_hash TEXT NOT NULL
+            );
+            INSERT INTO documents(
+              id, repo_path, path, kind, precedence, protected, hash, mtime, parser_version
+            )
+            VALUES (1, '/repo', 'CODEX.md', 'codex', 10, 1, 'doc-hash', 123.0, 'markdown-v1');
+            INSERT INTO chunks(
+              id, document_id, heading_path, anchor, byte_start, byte_end, text_hash
+            )
+            VALUES (1, 1, '["Rules"]', 'rules', 0, 12, 'chunk-hash');
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with Store.open(db_path) as store:
+        document_row = store.connection.execute(
+            """
+            SELECT d.audit_event_sequence, e.event_type
+            FROM documents d
+            JOIN audit_events e ON e.sequence = d.audit_event_sequence
+            """
+        ).fetchone()
+        chunk_row = store.connection.execute(
+            """
+            SELECT c.audit_event_sequence, e.event_type
+            FROM chunks c
+            JOIN audit_events e ON e.sequence = c.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert document_row == (1, "document.indexed")
+    assert chunk_row == (2, "instruction_chunk.indexed")
 
 
 def test_store_initializes_roadmap_extension_tables(tmp_path: Path):

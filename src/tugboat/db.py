@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS documents (
   protected INTEGER NOT NULL,
   hash TEXT NOT NULL,
   mtime REAL NOT NULL,
-  parser_version TEXT NOT NULL
+  parser_version TEXT NOT NULL,
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY,
@@ -33,7 +34,8 @@ CREATE TABLE IF NOT EXISTS chunks (
   anchor TEXT NOT NULL,
   byte_start INTEGER NOT NULL,
   byte_end INTEGER NOT NULL,
-  text_hash TEXT NOT NULL
+  text_hash TEXT NOT NULL,
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS episodes (
   id INTEGER PRIMARY KEY,
@@ -301,6 +303,8 @@ ROADMAP_EXTENSION_TABLES: tuple[str, ...] = (
 
 
 AUDITED_PROVENANCE_TABLES: tuple[str, ...] = (
+    "documents",
+    "chunks",
     "runs",
     *CORE_DECISION_TABLES,
     *ROADMAP_EXTENSION_TABLES,
@@ -351,6 +355,7 @@ class Store:
             )
             for table in AUDITED_PROVENANCE_TABLES:
                 _ensure_column(connection, table, "audit_event_sequence", "INTEGER")
+            _backfill_instruction_index_audit_event_sequence(connection)
             _backfill_runs_audit_event_sequence(connection)
             connection.commit()
             _repair_audit_event_constraints(connection)
@@ -410,10 +415,22 @@ class Store:
         self.connection.execute("DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE repo_path = ?)", (repo_path,))
         self.connection.execute("DELETE FROM documents WHERE repo_path = ?", (repo_path,))
         for document in result.documents:
+            document_event = self.append_audit_event(
+                "document.indexed",
+                {
+                    "repo": repo_path,
+                    "path": document.path,
+                    "kind": document.kind,
+                    "hash": document.hash,
+                },
+            )
             cursor = self.connection.execute(
                 """
-                INSERT INTO documents(repo_path, path, kind, precedence, protected, hash, mtime, parser_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO documents(
+                  repo_path, path, kind, precedence, protected, hash, mtime,
+                  parser_version, audit_event_sequence
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     repo_path,
@@ -424,14 +441,28 @@ class Store:
                     document.hash,
                     document.mtime,
                     document.parser_version,
+                    document_event.sequence,
                 ),
             )
             document_id = int(cursor.lastrowid)
             for chunk in document.chunks:
+                chunk_event = self.append_audit_event(
+                    "instruction_chunk.indexed",
+                    {
+                        "repo": repo_path,
+                        "path": document.path,
+                        "document_id": document_id,
+                        "anchor": chunk.anchor,
+                        "text_hash": chunk.text_hash,
+                    },
+                )
                 self.connection.execute(
                     """
-                    INSERT INTO chunks(document_id, heading_path, anchor, byte_start, byte_end, text_hash)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO chunks(
+                      document_id, heading_path, anchor, byte_start, byte_end,
+                      text_hash, audit_event_sequence
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         document_id,
@@ -440,6 +471,7 @@ class Store:
                         chunk.byte_start,
                         chunk.byte_end,
                         chunk.text_hash,
+                        chunk_event.sequence,
                     ),
                 )
         self.connection.commit()
@@ -1463,6 +1495,71 @@ def _backfill_runs_audit_event_sequence(connection: sqlite3.Connection) -> None:
         )
 
 
+def _backfill_instruction_index_audit_event_sequence(connection: sqlite3.Connection) -> None:
+    document_columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+    }
+    chunk_columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(chunks)").fetchall()
+    }
+    if "audit_event_sequence" not in document_columns or "audit_event_sequence" not in chunk_columns:
+        return
+
+    document_rows = connection.execute(
+        """
+        SELECT id, repo_path, path, kind, hash
+        FROM documents
+        WHERE audit_event_sequence IS NULL
+        ORDER BY id
+        """
+    ).fetchall()
+    for row in document_rows:
+        event = _append_audit_event(
+            connection,
+            "document.indexed",
+            {
+                "repo": str(row[1]),
+                "path": str(row[2]),
+                "kind": str(row[3]),
+                "hash": str(row[4]),
+                "migration": True,
+            },
+        )
+        connection.execute(
+            "UPDATE documents SET audit_event_sequence = ? WHERE id = ?",
+            (event.sequence, int(row[0])),
+        )
+
+    chunk_rows = connection.execute(
+        """
+        SELECT c.id, c.document_id, c.anchor, c.text_hash, d.repo_path, d.path
+        FROM chunks c
+        LEFT JOIN documents d ON d.id = c.document_id
+        WHERE c.audit_event_sequence IS NULL
+        ORDER BY c.id
+        """
+    ).fetchall()
+    for row in chunk_rows:
+        event = _append_audit_event(
+            connection,
+            "instruction_chunk.indexed",
+            {
+                "repo": str(row[4] or ""),
+                "path": str(row[5] or ""),
+                "document_id": int(row[1]),
+                "anchor": str(row[2]),
+                "text_hash": str(row[3]),
+                "migration": True,
+            },
+        )
+        connection.execute(
+            "UPDATE chunks SET audit_event_sequence = ? WHERE id = ?",
+            (event.sequence, int(row[0])),
+        )
+
+
 def _validate_audit_event_reachability(connection: sqlite3.Connection, table: str) -> None:
     quoted = _quote_identifier(table)
     null_count = int(
@@ -1528,6 +1625,35 @@ def _column_definition(row: sqlite3.Row | tuple[Any, ...]) -> str:
 
 def _quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def _append_audit_event(
+    connection: sqlite3.Connection,
+    event_type: str,
+    payload: dict[str, Any],
+) -> AuditEvent:
+    previous = connection.execute(
+        "SELECT event_hash FROM audit_events ORDER BY sequence DESC LIMIT 1"
+    ).fetchone()
+    previous_hash = previous[0] if previous else ""
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    event_hash = hashlib.sha256(
+        f"{previous_hash}\n{event_type}\n{payload_json}".encode("utf-8")
+    ).hexdigest()
+    cursor = connection.execute(
+        """
+        INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+        VALUES (?, ?, ?, ?)
+        """,
+        (event_type, payload_json, previous_hash, event_hash),
+    )
+    return AuditEvent(
+        sequence=int(cursor.lastrowid),
+        event_type=event_type,
+        payload=payload,
+        previous_hash=previous_hash,
+        event_hash=event_hash,
+    )
 
 
 def _jsonl_payloads(path: Path) -> tuple[dict[str, Any], ...]:
