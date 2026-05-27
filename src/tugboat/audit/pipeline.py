@@ -293,6 +293,21 @@ def run_audit_pipeline(
                 "evidence-ids.raw.json",
             )
             validate_json_artifact("evidence-ids.raw.json", raw_evidence_ids)
+            unknown_declared_refs = _undeclared_evidence_refs(
+                raw_evidence_ids["evidence_ids"],
+                [event.evidence_id for event in bundle.events],
+            )
+            if unknown_declared_refs:
+                return _failed_audit_result(
+                    repo,
+                    run_dir,
+                    manifest_hash=inspect.manifest_hash,
+                    episode_id=episode_id,
+                    message=(
+                        "audit rejected: evidence_ids not present in canonical episode: "
+                        f"{', '.join(unknown_declared_refs)}"
+                    ),
+                )
             missing_evidence_refs = _undeclared_evidence_refs(
                 raw_audit["evidence_refs"],
                 raw_evidence_ids["evidence_ids"],

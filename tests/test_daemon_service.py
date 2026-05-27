@@ -48,13 +48,25 @@ if args[:1] == ["run"]:
     events = Path(args[args.index("--events") + 1])
     checkpoint = Path(args[args.index("--checkpoint") + 1])
     outputs = {}
+    inputs = {}
     index = 0
     while index < len(args):
+        if args[index] == "--input":
+            inputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
         if args[index] == "--output":
             outputs[args[index + 1]] = Path(args[index + 2])
             index += 3
             continue
         index += 1
+    output_dir = next(iter(outputs.values())).parent if outputs else Path(".")
+    canonical_episode = inputs.get("episode_trace", output_dir / "canonical-episode.json")
+    evidence_id = "ev_daemon"
+    if canonical_episode.exists():
+        canonical = json.loads(canonical_episode.read_text(encoding="utf-8"))
+        if canonical.get("events"):
+            evidence_id = str(canonical["events"][0]["evidence_id"])
     trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
@@ -68,10 +80,10 @@ if args[:1] == ["run"]:
             "failure_class": "instruction_conflict",
             "severity": "high",
             "confidence": 0.91,
-            "evidence_refs": ["ev_daemon"],
+            "evidence_refs": [evidence_id],
         }) + "\\n", encoding="utf-8")
         outputs["evidence_ids"].write_text(json.dumps({
-            "evidence_ids": ["ev_daemon"],
+            "evidence_ids": [evidence_id],
         }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
@@ -310,10 +322,11 @@ llmff:
     run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())
     assert len(run_dirs) == 1
     audit = json.loads((run_dirs[0] / "audit.json").read_text(encoding="utf-8"))
+    canonical = json.loads((run_dirs[0] / "canonical-episode.json").read_text(encoding="utf-8"))
     assert audit["failure_class"] == "instruction_conflict"
     assert audit["severity"] == "high"
     assert audit["confidence"] == 0.91
-    assert audit["evidence_refs"] == ["ev_daemon"]
+    assert audit["evidence_refs"] == [canonical["events"][0]["evidence_id"]]
     assert (run_dirs[0] / "audit.raw.json").exists()
     assert (run_dirs[0] / "instruction-index" / "llmff-trace.jsonl").exists()
     assert (run_dirs[0] / "episode-audit" / "llmff-trace.jsonl").exists()

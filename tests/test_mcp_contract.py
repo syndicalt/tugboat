@@ -63,13 +63,25 @@ if args[:1] == ["run"]:
     events = Path(args[args.index("--events") + 1])
     checkpoint = Path(args[args.index("--checkpoint") + 1])
     outputs = {}
+    inputs = {}
     index = 0
     while index < len(args):
+        if args[index] == "--input":
+            inputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
         if args[index] == "--output":
             outputs[args[index + 1]] = Path(args[index + 2])
             index += 3
             continue
         index += 1
+    output_dir = next(iter(outputs.values())).parent if outputs else Path(".")
+    canonical_episode = inputs.get("episode_trace", output_dir / "canonical-episode.json")
+    evidence_id = "ev_mcp_daemon"
+    if canonical_episode.exists():
+        canonical = json.loads(canonical_episode.read_text(encoding="utf-8"))
+        if canonical.get("events"):
+            evidence_id = str(canonical["events"][0]["evidence_id"])
     trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
@@ -83,21 +95,21 @@ if args[:1] == ["run"]:
             "failure_class": "instruction_conflict",
             "severity": "high",
             "confidence": 0.91,
-            "evidence_refs": ["ev_mcp_daemon"],
+            "evidence_refs": [evidence_id],
         }) + "\\n", encoding="utf-8")
         outputs["evidence_ids"].write_text(json.dumps({
-            "evidence_ids": ["ev_mcp_daemon"],
+            "evidence_ids": [evidence_id],
         }) + "\\n", encoding="utf-8")
     elif manifest == "drift-detect":
         outputs["drift_clusters"].write_text(json.dumps({
-            "clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_mcp_daemon"]}]
+            "clusters": [{"cluster_id": "drift-1", "evidence_refs": [evidence_id]}]
         }) + "\\n", encoding="utf-8")
         if "optimizer_notes" in outputs:
             outputs["optimizer_notes"].write_text(json.dumps({
                 "notes": [
                     {
                         "summary": "Use daemon audit drift evidence for the proposal.",
-                        "evidence_refs": ["ev_mcp_daemon"],
+                        "evidence_refs": [evidence_id],
                     }
                 ]
             }) + "\\n", encoding="utf-8")
@@ -108,7 +120,7 @@ if args[:1] == ["run"]:
         if "proposal_rationale" in outputs:
             outputs["proposal_rationale"].write_text(json.dumps({
                 "rationale": "Patch proposal is grounded in daemon audit evidence.",
-                "evidence_refs": ["ev_mcp_daemon"],
+                "evidence_refs": [evidence_id],
                 "style_constraints": ["Preserve concise instruction style."],
             }) + "\\n", encoding="utf-8")
         outputs["candidate_patch"].write_text(json.dumps({
@@ -120,7 +132,7 @@ if args[:1] == ["run"]:
             "expected_behavior_change": "Agents add daemon-reviewed guidance before closing fixes.",
             "evals_required": ["governance-regression"],
             "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
-            "sources": [{"source_id": "ev_mcp_daemon", "trusted": True}],
+            "sources": [{"source_id": evidence_id, "trusted": True}],
             "bounded_edit_metadata": [{
                 "operator": "add",
                 "file": "CODEX.md",
@@ -1294,8 +1306,9 @@ llmff:
     assert result["final_state"] == "waiting_review"
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
     assert audit["failure_class"] == "instruction_conflict"
-    assert audit["evidence_refs"] == ["ev_mcp_daemon"]
+    assert audit["evidence_refs"] == [canonical["events"][0]["evidence_id"]]
     assert (run_dir / "audit.raw.json").exists()
     with Store.open(repo / ".sidecar" / "daemon.sqlite") as queue_store:
         queued = queue_store.connection.execute(

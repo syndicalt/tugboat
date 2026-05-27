@@ -43,13 +43,25 @@ if args[:1] == ["run"]:
     events = Path(args[args.index("--events") + 1])
     checkpoint = Path(args[args.index("--checkpoint") + 1])
     outputs = {}
+    inputs = {}
     index = 0
     while index < len(args):
+        if args[index] == "--input":
+            inputs[args[index + 1]] = Path(args[index + 2])
+            index += 3
+            continue
         if args[index] == "--output":
             outputs[args[index + 1]] = Path(args[index + 2])
             index += 3
             continue
         index += 1
+    output_dir = next(iter(outputs.values())).parent if outputs else Path(".")
+    canonical_episode = inputs.get("episode_trace", output_dir / "canonical-episode.json")
+    evidence_id = "ev_cycle"
+    if canonical_episode.exists():
+        canonical = json.loads(canonical_episode.read_text(encoding="utf-8"))
+        if canonical.get("events"):
+            evidence_id = str(canonical["events"][0]["evidence_id"])
     trace.write_text('{"event":"step","name":"' + manifest + '"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
@@ -63,10 +75,10 @@ if args[:1] == ["run"]:
             "failure_class": "cycle_instruction_conflict",
             "severity": "high",
             "confidence": 0.92,
-            "evidence_refs": ["ev_cycle"],
+            "evidence_refs": [evidence_id],
         }) + "\\n", encoding="utf-8")
         outputs["evidence_ids"].write_text(json.dumps({
-            "evidence_ids": ["ev_cycle"],
+            "evidence_ids": [evidence_id],
         }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
 
@@ -421,8 +433,9 @@ llmff:
     assert ledger_job == ("1", "waiting_review")
     run_dir = sorted((tmp_path / ".sidecar" / "runs").iterdir())[-1]
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
     assert audit["failure_class"] == "cycle_instruction_conflict"
-    assert audit["evidence_refs"] == ["ev_cycle"]
+    assert audit["evidence_refs"] == [canonical["events"][0]["evidence_id"]]
     assert (run_dir / "audit.raw.json").exists()
     assert llmff_jobs == [
         ("instruction-index.yaml", "completed"),

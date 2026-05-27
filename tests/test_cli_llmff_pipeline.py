@@ -191,6 +191,32 @@ if args[:1] == ["run"]:
         }
         with output_dir.joinpath("llmff-run-args.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(runtime_args, sort_keys=True) + "\\n")
+        canonical_episode = inputs.get("episode_trace", output_dir / "canonical-episode.json")
+        if canonical_episode.exists():
+            canonical = json.loads(canonical_episode.read_text(encoding="utf-8"))
+            canonical_events = canonical.get("events", [])
+            if canonical_events:
+                evidence_id = str(canonical_events[0]["evidence_id"])
+
+                def bind_default_evidence_ids(value):
+                    if value == "ev_fake":
+                        return evidence_id
+                    if isinstance(value, list):
+                        return [bind_default_evidence_ids(item) for item in value]
+                    if isinstance(value, dict):
+                        return {
+                            key: bind_default_evidence_ids(item)
+                            for key, item in value.items()
+                        }
+                    return value
+
+                AUDIT_REPORT = bind_default_evidence_ids(AUDIT_REPORT)
+                EVIDENCE_IDS = bind_default_evidence_ids(EVIDENCE_IDS)
+                DRIFT_CLUSTERS = bind_default_evidence_ids(DRIFT_CLUSTERS)
+                OPTIMIZER_NOTES = bind_default_evidence_ids(OPTIMIZER_NOTES)
+                PROPOSAL_RATIONALE = bind_default_evidence_ids(PROPOSAL_RATIONALE)
+                REFLECTIONS = bind_default_evidence_ids(REFLECTIONS)
+                SOURCES = bind_default_evidence_ids(SOURCES)
     trace.write_text('{"event":"step","name":"episode-audit"}\\n', encoding="utf-8")
     events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
@@ -344,10 +370,11 @@ llmff:
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
     assert audit["failure_class"] == "instruction_conflict"
     assert audit["severity"] == "high"
     assert audit["confidence"] == 0.91
-    assert audit["evidence_refs"] == ["ev_fake"]
+    assert audit["evidence_refs"] == [canonical["events"][0]["evidence_id"]]
     assert (run_dir / "episode-audit" / "llmff-trace.jsonl").exists()
     assert (run_dir / "episode-audit" / "llmff-events.jsonl").exists()
     assert (run_dir / "episode-audit" / "checkpoint.json").exists()
@@ -597,7 +624,7 @@ def test_audit_rejects_evidence_refs_not_declared_by_evidence_ids(
             "confidence": 0.91,
             "evidence_refs": ["ev_hallucinated"],
         },
-        evidence_ids={"evidence_ids": ["ev_real"]},
+        evidence_ids={"evidence_ids": ["ev_fake"]},
     )
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
@@ -620,6 +647,49 @@ llmff:
         "audit rejected: audit evidence refs not declared by evidence_ids: "
         "ev_hallucinated"
     ) in output
+    assert (run_dir / "audit.raw.json").exists()
+    assert (run_dir / "evidence-ids.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
+def test_audit_rejects_evidence_ids_not_in_canonical_episode(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_hallucinated"],
+        },
+        evidence_ids={"evidence_ids": ["ev_hallucinated"]},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "audit rejected: evidence_ids not present in canonical episode: ev_hallucinated" in output
     assert (run_dir / "audit.raw.json").exists()
     assert (run_dir / "evidence-ids.raw.json").exists()
     assert not (run_dir / "audit.json").exists()
@@ -1117,7 +1187,8 @@ llmff:
             (candidate["candidate_id"],),
         ).fetchone()
 
-    assert reflection[0] == "ev_fake"
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    assert reflection[0] == canonical["events"][0]["evidence_id"]
     assert len(reflection[1]) == 64
     assert Path(reflection[2]).exists()
     assert reflection[3] is not None
@@ -2712,11 +2783,12 @@ llmff:
     assert rejected_memory is not None
     assert rejected_memory[0] == "rejected_edit"
     assert len(rejected_memory[1]) == 64
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
     assert json.loads(rejected_memory[2]) == {
         "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
         "rejection_reason": "reject",
         "semantic_fingerprint": rejected_memory[1],
-        "source_refs": ["ev_fake"],
+        "source_refs": [canonical["events"][0]["evidence_id"]],
     }
     assert rejected_memory[3] is not None
 
