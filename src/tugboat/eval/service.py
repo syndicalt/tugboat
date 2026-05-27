@@ -22,6 +22,7 @@ def write_eval_report(
     governance_passed: bool,
     recommendation: str,
     live_provider_required: bool = False,
+    longitudinal_metrics: dict[str, Any] | None = None,
     validation_splits: dict[str, tuple[str, ...]] | None = None,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
@@ -40,6 +41,8 @@ def write_eval_report(
         "trigger_score": trigger_score,
         "live_provider_required": live_provider_required,
     }
+    if longitudinal_metrics is not None:
+        payload["longitudinal_metrics"] = longitudinal_metrics
     if validation_splits is not None:
         payload["validation_splits"] = {
             split_name: list(case_ids)

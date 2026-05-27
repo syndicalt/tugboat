@@ -9,6 +9,7 @@ from pathlib import Path
 from shutil import copytree
 
 from tugboat.cli import main
+from tugboat.db import Store
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "evals"
@@ -74,6 +75,44 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     _write_candidate_json(run_dir)
     (repo / ".sidecar").mkdir(exist_ok=True)
     copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        store.insert_decision(
+            candidate_id=7,
+            actor="reviewer",
+            policy="apply_controller",
+            decision="applied",
+            reason="accepted",
+        )
+        store.insert_decision(
+            candidate_id=8,
+            actor="reviewer",
+            policy="apply_controller",
+            decision="rejected",
+            reason="too broad",
+        )
+        store.append_audit_event("apply.applied", {"candidate_id": 7, "changed_lines": 6})
+        store.append_audit_event("rollback.applied", {"candidate_id": 9})
+        store.insert_audit(
+            run_id="incident-1",
+            failure_class="missing_tests",
+            severity="medium",
+            confidence=0.9,
+            evidence_refs=["ev-1"],
+            instruction_refs=[],
+        )
+        store.insert_audit(
+            run_id="incident-2",
+            failure_class="missing_tests",
+            severity="medium",
+            confidence=0.8,
+            evidence_refs=["ev-2"],
+            instruction_refs=[],
+        )
+        store.record_harness_finding(
+            repo_path=repo,
+            finding="Duplicate instruction rule appears 2 times: run tests.",
+            severity="duplicate_rule",
+        )
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -84,6 +123,17 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
     assert report["held_out_score"] == 1.0
     assert report["governance_passed"] is True
     assert report["recommendation"] == "reject"
+    assert report["longitudinal_metrics"] == {
+        "acceptance_rate": 0.333333,
+        "corpus_growth": 0,
+        "duplicate_rule_count": 1,
+        "governance_regression_count": 0,
+        "mean_changed_lines": 6,
+        "recurring_incident_rate": 1,
+        "rejection_rate": 0.333333,
+        "rollback_rate": 0.333333,
+        "user_correction_recurrence": 0,
+    }
     assert report["metrics"]["held_out_improved"] == 0
     assert report["metrics"]["incident_replay_passed"] == 1
     assert "trigger_score" not in report["metrics"]

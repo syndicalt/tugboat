@@ -560,6 +560,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "governance_passed": {"type": "boolean"},
             "held_out_score": {"type": "number"},
             "metrics": {"type": "object"},
+            "longitudinal_metrics": {"type": "object"},
             "passed": {"type": "boolean"},
             "recommendation": {"type": "string"},
             "suite_id": {"type": "string"},

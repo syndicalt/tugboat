@@ -14,6 +14,7 @@ from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.optimization import REJECTED_EDIT_SUPPRESSION_SIGNAL
+from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.security.secrets import SecretScanError, scan_text
@@ -40,6 +41,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
     governance_passed = True
     recommendation = "accept"
     live_provider_required = False
+    longitudinal_metrics: dict[str, object] | None = None
     eval_failure_message: str | None = None
     policy_decision_payload: dict[str, object] | None = None
     validation_splits: dict[str, tuple[str, ...]] | None = None
@@ -80,6 +82,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         governance_passed = offline_report.governance_passed
         recommendation = offline_report.recommendation
         live_provider_required = offline_report.live_provider_required
+        longitudinal_metrics = _longitudinal_eval_metrics(repo)
     elif (run_dir / "candidate.raw.json").exists():
         try:
             eval_payload, raw_policy_decision_payload = _run_patch_eval(
@@ -162,6 +165,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         governance_passed=governance_passed,
         recommendation=recommendation,
         live_provider_required=live_provider_required,
+        longitudinal_metrics=longitudinal_metrics,
         validation_splits=validation_splits,
     )
     if policy_decision_payload is not None:
@@ -206,6 +210,32 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         run_dir,
         eval_failure_message or f"eval suite: {suite_id} {'passed' if passed else 'failed'}",
     )
+
+
+def _longitudinal_eval_metrics(repo: Path) -> dict[str, object]:
+    summary = summarize_sidecar_observability(repo)
+    edit_rates = _object_metric(summary, "edit_rates")
+    recurring_incidents = _object_metric(summary, "recurring_incident_rate")
+    corpus_growth = _object_metric(summary, "corpus_growth")
+    user_corrections = _object_metric(summary, "user_correction_recurrence")
+    return {
+        "acceptance_rate": edit_rates.get("acceptance_rate", 0),
+        "rejection_rate": edit_rates.get("rejection_rate", 0),
+        "rollback_rate": edit_rates.get("rollback_rate", 0),
+        "recurring_incident_rate": recurring_incidents.get("rate", 0),
+        "mean_changed_lines": summary.get("mean_changed_lines", 0),
+        "corpus_growth": corpus_growth.get("delta", 0),
+        "duplicate_rule_count": summary.get("duplicate_rule_count", 0),
+        "governance_regression_count": summary.get("governance_regression_count", 0),
+        "user_correction_recurrence": user_corrections.get("recurring_correction_count", 0),
+    }
+
+
+def _object_metric(summary: dict[str, object], field: str) -> dict[str, object]:
+    value = summary.get(field)
+    if isinstance(value, dict):
+        return value
+    return {}
 
 
 def _resolve_candidate_run_dir(repo: Path, candidate_ref: str) -> Path:

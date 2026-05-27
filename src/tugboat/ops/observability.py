@@ -8,9 +8,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
 
-from tugboat.daemon.service import daemon_status, default_kill_switch
-
-
 def summarize_observability(
     *,
     runs: Iterable[dict[str, Any]] = (),
@@ -71,6 +68,8 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
 
 
 def _daemon_queue_status(repo: Path) -> dict[str, Any]:
+    from tugboat.daemon.service import daemon_status, default_kill_switch
+
     status = daemon_status(repo, kill_switch=default_kill_switch(repo))
     return {
         "jobs_by_state": status["jobs_by_state"],

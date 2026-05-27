@@ -87,7 +87,31 @@ def _eval_summary_lines(eval_report_path: Path) -> list[str]:
         "recommendation",
         "live_provider_required",
     )
-    return [f"- {field}: {_report_scalar(payload[field])}" for field in fields if field in payload]
+    return [
+        f"- {field}: {_report_scalar(payload[field])}" for field in fields if field in payload
+    ] + _longitudinal_summary_lines(payload)
+
+
+def _longitudinal_summary_lines(payload: dict[str, Any]) -> list[str]:
+    metrics = payload.get("longitudinal_metrics")
+    if not isinstance(metrics, dict):
+        return []
+    fields = (
+        "acceptance_rate",
+        "rejection_rate",
+        "rollback_rate",
+        "recurring_incident_rate",
+        "mean_changed_lines",
+        "corpus_growth",
+        "duplicate_rule_count",
+        "governance_regression_count",
+        "user_correction_recurrence",
+    )
+    return [
+        f"- longitudinal_{field}: {_report_scalar(metrics[field])}"
+        for field in fields
+        if field in metrics
+    ]
 
 
 def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> list[str]:
