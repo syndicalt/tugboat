@@ -814,6 +814,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                                 "required": [
                                     "heading_path",
                                     "anchor",
+                                    "source_ref",
                                     "byte_start",
                                     "byte_end",
                                     "text_hash",
@@ -824,6 +825,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                                         "items": {"type": "string"},
                                     },
                                     "anchor": {"type": "string"},
+                                    "source_ref": {"type": "string"},
                                     "byte_start": {"type": "integer"},
                                     "byte_end": {"type": "integer"},
                                     "text_hash": {"type": "string"},

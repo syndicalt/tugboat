@@ -573,6 +573,7 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
                     {
                         "heading_path": list(chunk.heading_path),
                         "anchor": chunk.anchor,
+                        "source_ref": _instruction_source_ref(document, chunk),
                         "byte_start": chunk.byte_start,
                         "byte_end": chunk.byte_end,
                         "text_hash": chunk.text_hash,
@@ -597,6 +598,12 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
                 artifact_path=snapshot / document.path,
             )
         store.record_instruction_graph(run_id=run_dir.name, artifact_path=graph_path)
+
+
+def _instruction_source_ref(document, chunk) -> str:
+    if chunk.anchor:
+        return f"{document.path}#{chunk.anchor}"
+    return f"{document.path}#bytes-{chunk.byte_start}-{chunk.byte_end}"
 
 
 def _ingest_trace(trace: Path, trace_format: str):

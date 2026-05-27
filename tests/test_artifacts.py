@@ -224,6 +224,7 @@ def test_validate_instruction_graph_artifact_accepts_current_schema():
                         {
                             "heading_path": ["Rules"],
                             "anchor": "rules",
+                            "source_ref": "CODEX.md#rules",
                             "byte_start": 0,
                             "byte_end": 12,
                             "text_hash": "def456",

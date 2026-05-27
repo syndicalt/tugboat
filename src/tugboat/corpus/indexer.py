@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tugboat.corpus.markdown import parse_markdown
+from tugboat.corpus.precedence import resolve_precedence
 from tugboat.models import DocumentRecord, IndexResult, InstructionFilePolicy, Policy
 
 
@@ -27,7 +28,7 @@ def index_repo(repo: Path, policy: Policy) -> IndexResult:
             )
         )
 
-    return IndexResult(documents=tuple(documents))
+    return IndexResult(documents=resolve_precedence(documents).documents)
 
 
 def instruction_chunk_refs(index: IndexResult) -> list[str]:

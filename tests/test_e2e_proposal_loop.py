@@ -825,8 +825,14 @@ def test_mock_audit_records_chunk_granularity_instruction_refs(tmp_path: Path, m
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    graph = json.loads((run_dir / "instruction-graph.json").read_text(encoding="utf-8"))
     expected_refs = ["CODEX.md#rules", "CODEX.md#review"]
     assert audit["instruction_refs"] == expected_refs
+    assert [
+        chunk["source_ref"]
+        for document in graph["documents"]
+        for chunk in document["chunks"]
+    ] == expected_refs
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         stored_refs = json.loads(
             connection.execute("SELECT instruction_refs_json FROM audits").fetchone()[0]

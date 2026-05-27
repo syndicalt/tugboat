@@ -5,12 +5,11 @@ from tugboat.models import InstructionFilePolicy, Policy
 
 
 def test_index_repo_uses_policy_paths_and_globs_in_deterministic_order(tmp_path: Path):
+    (tmp_path / "AGENTS.md").write_text("# Agents\n\nTop priority.\n", encoding="utf-8")
     (tmp_path / "CODEX.md").write_text("# Codex\n\nAgent rules.\n", encoding="utf-8")
     skill_dir = tmp_path / ".codex" / "skills" / "python"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# Python\n\nUse pytest.\n", encoding="utf-8")
-    missing = tmp_path / "AGENTS.md"
-    assert not missing.exists()
     policy = Policy(
         instruction_files=(
             InstructionFilePolicy("AGENTS.md", "repo_policy", 80, True),
@@ -22,12 +21,17 @@ def test_index_repo_uses_policy_paths_and_globs_in_deterministic_order(tmp_path:
     result = index_repo(tmp_path, policy)
 
     assert [document.path for document in result.documents] == [
-        ".codex/skills/python/SKILL.md",
+        "AGENTS.md",
         "CODEX.md",
+        ".codex/skills/python/SKILL.md",
     ]
-    assert [document.kind for document in result.documents] == ["skill", "agent_policy"]
-    assert [document.precedence for document in result.documents] == [60, 70]
-    assert result.indexed_count == 2
+    assert [document.kind for document in result.documents] == [
+        "repo_policy",
+        "agent_policy",
+        "skill",
+    ]
+    assert [document.precedence for document in result.documents] == [80, 70, 60]
+    assert result.indexed_count == 3
 
 
 def test_index_repo_preserves_instruction_metadata(tmp_path: Path):
