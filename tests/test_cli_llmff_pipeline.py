@@ -27,7 +27,9 @@ def _write_fake_llmff(
     instruction_index: object | None = None,
     drift_clusters: object | None = None,
     eval_report: object | None = None,
+    eval_reports_by_suite: dict[str, object] | None = None,
     policy_decision: object | None = None,
+    policy_decisions_by_suite: dict[str, object] | None = None,
     acceptance_summary: object | None = None,
     reflections: object | None = None,
     secret_artifact: str | None = None,
@@ -142,7 +144,9 @@ DRIFT_CLUSTERS = __DRIFT_CLUSTERS__
 OPTIMIZER_NOTES = __OPTIMIZER_NOTES__
 PROPOSAL_RATIONALE = __PROPOSAL_RATIONALE__
 EVAL_REPORT = __EVAL_REPORT__
+EVAL_REPORTS_BY_SUITE = __EVAL_REPORTS_BY_SUITE__
 POLICY_DECISION = __POLICY_DECISION__
+POLICY_DECISIONS_BY_SUITE = __POLICY_DECISIONS_BY_SUITE__
 ACCEPTANCE_SUMMARY = __ACCEPTANCE_SUMMARY__
 REFLECTIONS = __REFLECTIONS__
 SECRET_ARTIFACT = __SECRET_ARTIFACT__
@@ -299,16 +303,22 @@ if args[:1] == ["run"]:
         candidate_patch.update(CANDIDATE_OVERRIDES)
         outputs["candidate_patch"].write_text(json.dumps(candidate_patch) + "\\n", encoding="utf-8")
     elif manifest == "patch-eval":
+        suite_id = None
+        eval_suite = inputs.get("eval_suite")
+        if eval_suite and eval_suite.exists():
+            suite_id = json.loads(eval_suite.read_text(encoding="utf-8")).get("suite_id")
+        eval_report = EVAL_REPORTS_BY_SUITE.get(suite_id, EVAL_REPORT)
+        policy_decision = POLICY_DECISIONS_BY_SUITE.get(suite_id, POLICY_DECISION)
         if SECRET_ARTIFACT == "eval_report":
             outputs["eval_report"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
         elif INVALID_JSON_OUTPUT == "eval_report":
             outputs["eval_report"].write_text("{not json\\n", encoding="utf-8")
         else:
-            outputs["eval_report"].write_text(json.dumps(EVAL_REPORT) + "\\n", encoding="utf-8")
+            outputs["eval_report"].write_text(json.dumps(eval_report) + "\\n", encoding="utf-8")
         if INVALID_JSON_OUTPUT == "policy_decision":
             outputs["policy_decision"].write_text("{not json\\n", encoding="utf-8")
         else:
-            outputs["policy_decision"].write_text(json.dumps(POLICY_DECISION) + "\\n", encoding="utf-8")
+            outputs["policy_decision"].write_text(json.dumps(policy_decision) + "\\n", encoding="utf-8")
     elif manifest == "acceptance-summary":
         if INVALID_JSON_OUTPUT == "acceptance_summary":
             outputs["acceptance_summary"].write_text("{not json\\n", encoding="utf-8")
@@ -338,7 +348,11 @@ raise SystemExit(64)
         ).replace(
             "__EVAL_REPORT__", repr(eval_report)
         ).replace(
+            "__EVAL_REPORTS_BY_SUITE__", repr(eval_reports_by_suite or {})
+        ).replace(
             "__POLICY_DECISION__", repr(policy_decision)
+        ).replace(
+            "__POLICY_DECISIONS_BY_SUITE__", repr(policy_decisions_by_suite or {})
         ).replace(
             "__ACCEPTANCE_SUMMARY__", repr(acceptance_summary)
         ).replace(
@@ -4501,6 +4515,193 @@ llmff:
         "success_patterns": ["Added regression coverage"],
         "failure_patterns": ["You skipped regression tests"],
     }
+
+
+def test_optimize_runs_unseen_suites_before_accepting_candidate(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        eval_reports_by_suite={
+            "governance": {
+                "passed": True,
+                "trigger_score": 0.8,
+                "held_out_score": 0.95,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": 0, "held_out_cases": 5},
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
+            }
+        },
+        policy_decisions_by_suite={"governance": {"allowed": True, "reasons": []}},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--suite",
+                "held-out",
+                "--unseen-suite",
+                "governance",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    unseen_reports = json.loads((run_dir / "unseen-eval-reports.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        eval_rows = store.connection.execute(
+            """
+            SELECT suite_id, passed
+            FROM evals
+            ORDER BY id
+            """
+        ).fetchall()
+
+    assert eval_report["suite_id"] == "held-out"
+    assert eval_report["held_out_score"] == 0.9
+    assert unseen_reports == {
+        "schema_version": 1,
+        "reports": [
+            {
+                "suite_id": "governance",
+                "passed": True,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "held_out_score": 0.95,
+                "trigger_score": 0.8,
+            }
+        ],
+    }
+    assert summary["decision"] == "needs_review"
+    assert summary["unseen_suite_results"] == [
+        {
+            "suite_id": "governance",
+            "passed": True,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "held_out_score": 0.95,
+            "trigger_score": 0.8,
+        }
+    ]
+    assert eval_rows == [("held-out", 1), ("governance", 1)]
+
+
+def test_optimize_rejects_candidate_when_unseen_suite_fails(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        eval_reports_by_suite={
+            "governance": {
+                "passed": False,
+                "trigger_score": 0.8,
+                "held_out_score": 0.2,
+                "governance_passed": False,
+                "recommendation": "reject",
+                "metrics": {"governance_regressions": 1, "held_out_cases": 5},
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
+            }
+        },
+        policy_decisions_by_suite={"governance": {"allowed": False, "reasons": ["governance_regression"]}},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--suite",
+                "held-out",
+                "--unseen-suite",
+                "governance",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    unseen_reports = json.loads((run_dir / "unseen-eval-reports.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_state = store.connection.execute("SELECT state FROM candidates").fetchone()[0]
+        gate_decision = store.connection.execute(
+            """
+            SELECT policy, decision, reason
+            FROM decisions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert "optimization rejected: unseen suite governance failed" in output
+    assert eval_report["suite_id"] == "held-out"
+    assert unseen_reports["reports"][0]["suite_id"] == "governance"
+    assert unseen_reports["reports"][0]["passed"] is False
+    assert summary["decision"] == "rejected"
+    assert summary["unseen_suite_results"] == unseen_reports["reports"]
+    assert decision["policy_reasons"] == ["unseen suite governance failed"]
+    assert candidate_state == "rejected"
+    assert gate_decision == (
+        "optimization_acceptance_gate",
+        "rejected",
+        "unseen suite governance failed",
+    )
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 
 def test_optimize_rejects_held_out_episode_overlap_with_training_batch(

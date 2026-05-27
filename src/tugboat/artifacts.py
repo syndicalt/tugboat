@@ -779,6 +779,61 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             "reviewer_checklist": {"type": "array", "items": {"type": "string"}},
             "rollback_command": {"type": "array", "items": {"type": "string"}},
+            "unseen_suite_results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "suite_id",
+                        "passed",
+                        "governance_passed",
+                        "recommendation",
+                        "held_out_score",
+                        "trigger_score",
+                    ],
+                    "properties": {
+                        "suite_id": {"type": "string"},
+                        "passed": {"type": "boolean"},
+                        "governance_passed": {"type": "boolean"},
+                        "recommendation": {"type": "string"},
+                        "held_out_score": {"type": "number"},
+                        "trigger_score": {"type": "number"},
+                    },
+                },
+            },
+        },
+    },
+    "unseen-eval-reports.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "reports"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "reports": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "suite_id",
+                        "passed",
+                        "governance_passed",
+                        "recommendation",
+                        "held_out_score",
+                        "trigger_score",
+                    ],
+                    "properties": {
+                        "suite_id": {"type": "string"},
+                        "passed": {"type": "boolean"},
+                        "governance_passed": {"type": "boolean"},
+                        "recommendation": {"type": "string"},
+                        "held_out_score": {"type": "number"},
+                        "trigger_score": {"type": "number"},
+                    },
+                },
+            },
         },
     },
     "observability-summary.json": {

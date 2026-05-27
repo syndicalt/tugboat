@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -531,6 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_dir,
             suite_id=args.suite,
             eval_exit_code=eval_result.exit_code,
+            unseen_suites=tuple(args.unseen_suite),
         )
 
     if args.command == "apply":
@@ -1371,12 +1373,14 @@ def _finalize_governed_candidate_evaluation(
     *,
     suite_id: str,
     eval_exit_code: int,
+    unseen_suites: tuple[str, ...] = (),
 ) -> int:
     if not (run_dir / "candidate.raw.json").exists():
         return eval_exit_code
     if not (run_dir / "eval-report.json").exists():
         return eval_exit_code
     if eval_exit_code == 0:
+        unseen_suite_results: list[dict[str, object]] | None = None
         try:
             eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
             policy_gate = _read_optional_json_object(run_dir / "policy-gate.json")
@@ -1391,12 +1395,115 @@ def _finalize_governed_candidate_evaluation(
         except ValueError:
             pass
         else:
+            if unseen_suites:
+                unseen_suite_results, unseen_failure = _run_unseen_suite_gates(
+                    repo,
+                    run_dir,
+                    unseen_suites=unseen_suites,
+                )
+                if unseen_failure is not None:
+                    print(f"optimization rejected: {unseen_failure}")
+                    return _write_optimization_summary(
+                        repo,
+                        run_dir,
+                        suite_id=suite_id,
+                        forced_rejection_reason=unseen_failure,
+                        unseen_suite_results=unseen_suite_results,
+                    )
             try:
                 _run_acceptance_summary(repo, run_dir, load_policy(repo))
             except (RuntimeError, ValueError) as error:
                 print(str(error))
                 return 1
+            return _write_optimization_summary(
+                repo,
+                run_dir,
+                suite_id=suite_id,
+                unseen_suite_results=unseen_suite_results,
+            )
     return _write_optimization_summary(repo, run_dir, suite_id=suite_id)
+
+
+def _run_unseen_suite_gates(
+    repo: Path,
+    run_dir: Path,
+    *,
+    unseen_suites: tuple[str, ...],
+) -> tuple[list[dict[str, object]], str | None]:
+    canonical_paths = (
+        run_dir / "eval-suite.json",
+        run_dir / "eval-report.raw.json",
+        run_dir / "policy-decision.raw.json",
+        run_dir / "policy-gate.json",
+        run_dir / "eval-report.json",
+        run_dir / "patch-eval" / "checkpoint.json",
+    )
+    primary_artifacts = {
+        path: path.read_bytes() for path in canonical_paths if path.exists()
+    }
+    results: list[dict[str, object]] = []
+    failure_reason: str | None = None
+    try:
+        for suite_id in unseen_suites:
+            checkpoint_path = run_dir / "patch-eval" / "checkpoint.json"
+            if checkpoint_path.exists():
+                checkpoint_path.unlink()
+            eval_result = run_eval_pipeline(repo, run_dir.name, suite_id)
+            print(eval_result.message)
+            report_path = run_dir / "eval-report.json"
+            if not report_path.exists():
+                failure_reason = f"unseen suite {suite_id} failed"
+                continue
+            eval_report = json.loads(report_path.read_text(encoding="utf-8"))
+            validate_json_artifact("eval-report.json", eval_report)
+            suite_dir = run_dir / "unseen-evals" / _artifact_safe_suite_id(suite_id)
+            suite_dir.mkdir(parents=True, exist_ok=True)
+            for path in canonical_paths:
+                if path.exists():
+                    shutil.copy2(path, suite_dir / path.name)
+                    mark_private_file(suite_dir / path.name)
+            result = _unseen_suite_result(eval_report)
+            results.append(result)
+            if eval_result.exit_code != 0:
+                failure_reason = f"unseen suite {suite_id} failed"
+                continue
+            try:
+                _assert_eval_acceptance(
+                    eval_report,
+                    _read_optional_json_object(run_dir / "policy-gate.json"),
+                )
+            except ValueError:
+                failure_reason = f"unseen suite {suite_id} failed"
+    finally:
+        for path in canonical_paths:
+            if path in primary_artifacts:
+                path.write_bytes(primary_artifacts[path])
+                mark_private_file(path)
+            elif path.exists():
+                path.unlink()
+    _write_secret_scanned_json_artifact(
+        run_dir / "unseen-eval-reports.json",
+        "unseen-eval-reports.json",
+        {"schema_version": SCHEMA_VERSION, "reports": results},
+    )
+    mark_private_file(run_dir / "unseen-eval-reports.json")
+    return results, failure_reason
+
+
+def _artifact_safe_suite_id(suite_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", suite_id).strip(".-")
+    return safe or "suite"
+
+
+def _unseen_suite_result(eval_report: dict[str, object]) -> dict[str, object]:
+    return {
+        "suite_id": str(eval_report["suite_id"]),
+        "passed": bool(eval_report["passed"]),
+        "governance_passed": bool(eval_report["governance_passed"]),
+        "recommendation": str(eval_report["recommendation"]),
+        "held_out_score": float(eval_report["held_out_score"]),
+        "trigger_score": float(eval_report["trigger_score"]),
+    }
 
 
 def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, object]:
@@ -2389,7 +2496,14 @@ def _bounded_edit_fingerprint(operator: str, target_file: str, section: str) -> 
     return hashlib.sha256(f"{operator}\n{target_file}\n{section}".encode("utf-8")).hexdigest()
 
 
-def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> int:
+def _write_optimization_summary(
+    repo: Path,
+    run_dir: Path,
+    *,
+    suite_id: str,
+    forced_rejection_reason: str | None = None,
+    unseen_suite_results: list[dict[str, object]] | None = None,
+) -> int:
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     candidate_id = int(candidate["candidate_id"])
     eval_report_path = run_dir / "eval-report.json"
@@ -2426,6 +2540,9 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
                 reason = "held_out_improved"
             else:
                 reason = "accepted candidate missing bounded edit metadata"
+    if forced_rejection_reason is not None:
+        decision = "rejected"
+        reason = forced_rejection_reason
 
     acceptance_summary: dict[str, object] | None = None
     acceptance_summary_path = run_dir / "acceptance-summary.raw.json"
@@ -2450,6 +2567,8 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         "trigger_score": trigger_score,
         "validation_baseline_score": validation_baseline_score,
     }
+    if unseen_suite_results is not None:
+        summary["unseen_suite_results"] = unseen_suite_results
     if decision == "needs_review":
         summary["accepted_bounded_edit_metadata"] = accepted_bounded_edit_metadata
         if acceptance_summary is None:
