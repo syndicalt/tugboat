@@ -114,6 +114,23 @@ def test_runs_require_audit_event_sequence(tmp_path: Path):
         )
 
 
+def test_episodes_require_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        columns = {
+            row[1]: row
+            for row in store.connection.execute("PRAGMA table_info(episodes)").fetchall()
+        }
+        foreign_keys = store.connection.execute("PRAGMA foreign_key_list(episodes)").fetchall()
+
+        assert columns["audit_event_sequence"][3] == 1
+        assert any(
+            row[2] == "audit_events"
+            and row[3] == "audit_event_sequence"
+            and row[4] == "sequence"
+            for row in foreign_keys
+        )
+
+
 def test_instruction_index_tables_require_audit_event_sequence(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         for table in ("documents", "chunks"):
@@ -236,6 +253,45 @@ def test_store_migrates_legacy_instruction_index_rows_to_audit_events(tmp_path: 
 
     assert document_row == (1, "document.indexed")
     assert chunk_row == (2, "instruction_chunk.indexed")
+
+
+def test_store_migrates_legacy_episode_rows_to_audit_events(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE episodes (
+              id INTEGER PRIMARY KEY,
+              repo_path TEXT NOT NULL,
+              trace_path TEXT NOT NULL,
+              started_at TEXT NOT NULL,
+              outcome TEXT NOT NULL,
+              summary_hash TEXT NOT NULL
+            );
+            INSERT INTO episodes(
+              id, repo_path, trace_path, started_at, outcome, summary_hash
+            )
+            VALUES (1, '/repo', '/repo/trace.jsonl', '2026-05-25T00:00:00Z', 'captured', 'abc');
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with Store.open(db_path) as store:
+        row = store.connection.execute(
+            """
+            SELECT episode.audit_event_sequence, audit.event_type, audit.payload_json
+            FROM episodes episode
+            JOIN audit_events audit ON audit.sequence = episode.audit_event_sequence
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == 1
+    assert row[1] == "episode.recorded"
+    assert json.loads(row[2])["migration"] is True
 
 
 def test_store_initializes_roadmap_extension_tables(tmp_path: Path):

@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS episodes (
   trace_path TEXT NOT NULL,
   started_at TEXT NOT NULL,
   outcome TEXT NOT NULL,
-  summary_hash TEXT NOT NULL
+  summary_hash TEXT NOT NULL,
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
@@ -305,6 +306,7 @@ ROADMAP_EXTENSION_TABLES: tuple[str, ...] = (
 AUDITED_PROVENANCE_TABLES: tuple[str, ...] = (
     "documents",
     "chunks",
+    "episodes",
     "runs",
     *CORE_DECISION_TABLES,
     *ROADMAP_EXTENSION_TABLES,
@@ -356,6 +358,7 @@ class Store:
             for table in AUDITED_PROVENANCE_TABLES:
                 _ensure_column(connection, table, "audit_event_sequence", "INTEGER")
             _backfill_instruction_index_audit_event_sequence(connection)
+            _backfill_episodes_audit_event_sequence(connection)
             _backfill_runs_audit_event_sequence(connection)
             connection.commit()
             _repair_audit_event_constraints(connection)
@@ -682,6 +685,7 @@ class Store:
         return int(cursor.lastrowid)
 
     def record_trace_episode(self, *, repo: Path, bundle: TraceBundle) -> int:
+        episode_id = _next_integer_id(self.connection, "episodes")
         summary_hash = hashlib.sha256(
             json.dumps(
                 [event.evidence_id for event in bundle.events],
@@ -689,16 +693,7 @@ class Store:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
-        cursor = self.connection.execute(
-            """
-            INSERT INTO episodes(repo_path, trace_path, started_at, outcome, summary_hash)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (str(repo), str(bundle.trace_path), _now(), "captured", summary_hash),
-        )
-        episode_id = int(cursor.lastrowid)
-        self.connection.commit()
-        self.append_audit_event(
+        episode_event = self.append_audit_event(
             "episode.recorded",
             {
                 "episode_id": episode_id,
@@ -707,6 +702,25 @@ class Store:
                 "events": len(bundle.events),
             },
         )
+        cursor = self.connection.execute(
+            """
+            INSERT INTO episodes(
+              id, repo_path, trace_path, started_at, outcome, summary_hash,
+              audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                episode_id,
+                str(repo),
+                str(bundle.trace_path),
+                _now(),
+                "captured",
+                summary_hash,
+                episode_event.sequence,
+            ),
+        )
+        episode_id = int(cursor.lastrowid)
         for event in bundle.events:
             audit_event = self.append_audit_event(
                 "trace_event.recorded",
@@ -1557,6 +1571,56 @@ def _backfill_instruction_index_audit_event_sequence(connection: sqlite3.Connect
         connection.execute(
             "UPDATE chunks SET audit_event_sequence = ? WHERE id = ?",
             (event.sequence, int(row[0])),
+        )
+
+
+def _backfill_episodes_audit_event_sequence(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(episodes)").fetchall()
+    }
+    if "audit_event_sequence" not in columns:
+        return
+
+    rows = connection.execute(
+        """
+        SELECT id, repo_path, trace_path, outcome, summary_hash
+        FROM episodes
+        WHERE audit_event_sequence IS NULL
+        ORDER BY id
+        """
+    ).fetchall()
+    for row in rows:
+        event = connection.execute(
+            """
+            SELECT sequence
+            FROM audit_events
+            WHERE event_type = 'episode.recorded'
+              AND json_extract(payload_json, '$.episode_id') = ?
+            ORDER BY sequence DESC
+            LIMIT 1
+            """,
+            (int(row[0]),),
+        ).fetchone()
+        if event is None:
+            audit_event = _append_audit_event(
+                connection,
+                "episode.recorded",
+                {
+                    "episode_id": int(row[0]),
+                    "repo": str(row[1]),
+                    "trace_path": str(row[2]),
+                    "outcome": str(row[3]),
+                    "summary_hash": str(row[4]),
+                    "migration": True,
+                },
+            )
+            sequence = audit_event.sequence
+        else:
+            sequence = int(event[0])
+        connection.execute(
+            "UPDATE episodes SET audit_event_sequence = ? WHERE id = ?",
+            (sequence, int(row[0])),
         )
 
 

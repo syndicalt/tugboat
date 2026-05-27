@@ -245,9 +245,20 @@ def test_store_records_canonical_episode_and_trace_events_with_audit_reachabilit
             ORDER BY t.line_number
             """
         ).fetchall()
+        episode_row = store.connection.execute(
+            """
+            SELECT e.id, audit.event_type, audit.payload_json
+            FROM episodes e
+            JOIN audit_events audit ON audit.sequence = e.audit_event_sequence
+            """
+        ).fetchone()
 
     assert episode_id == 1
     assert episode_count == 1
+    assert episode_row is not None
+    assert episode_row[0] == episode_id
+    assert episode_row[1] == "episode.recorded"
+    assert json.loads(episode_row[2])["episode_id"] == episode_id
     assert [row[0] for row in trace_event_rows] == [event.evidence_id for event in bundle.events]
     assert [row[1] for row in trace_event_rows] == [
         "user_request",
