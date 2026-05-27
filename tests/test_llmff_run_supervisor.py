@@ -332,6 +332,38 @@ def test_run_manifest_invokes_subprocess_with_file_backed_streams(
     ]
 
 
+def test_run_manifest_supports_space_separated_binary_command(
+    monkeypatch,
+    tmp_path: Path,
+):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manifest = tmp_path / "episode-audit.yaml"
+    manifest.write_text("name: episode-audit\n", encoding="utf-8")
+
+    run_manifest(
+        manifest,
+        run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+        policy=Policy(llmff_binary="python -m tugboat.llmff.fixture_backend", llmff_require_inspect=False),
+        timeout_ms=12_000,
+        retry_attempts=0,
+        retry_backoff_ms=0,
+    )
+
+    assert calls[0][0][0][:5] == [
+        "python",
+        "-m",
+        "tugboat.llmff.fixture_backend",
+        "run",
+        str(manifest),
+    ]
+
+
 def test_run_manifest_invokes_subprocess_with_explicit_inputs_and_outputs(
     monkeypatch, tmp_path: Path
 ):

@@ -36,6 +36,8 @@ tugboat init --repo .
 tugboat index --repo .
 ```
 
+The generated policy uses Tugboat's shipped local fixture backend for `llmff`, with `allow_network: false` and no `allowed_providers`, so the proposal loop works without provider credentials.
+
 For CI or dry-run adoption, use:
 
 ```bash
@@ -69,7 +71,7 @@ tugboat eval --repo . --candidate latest --suite all
 tugboat report --repo . --run latest
 ```
 
-This is designed to work under 15 minutes for an existing repo and does not require provider credentials in proposal-only mode when `llmff` is configured for local or fixture-backed manifests. `--mock-llmff-inspect` is audit-only smoke-test mode and cannot feed `propose`.
+This is designed to work under 15 minutes for an existing repo and does not require provider credentials in proposal-only mode after `tugboat init`; the default local fixture backend emits the same file-backed manifest outputs used by the proposal loop. `--mock-llmff-inspect` is audit-only smoke-test mode and cannot feed `propose`.
 
 Live provider smoke checks are opt-in. Without opt-in, the suite records a skipped live-provider report instead of making a provider call:
 

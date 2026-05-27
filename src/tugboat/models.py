@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
+
+
+DEFAULT_FIXTURE_LLMFF_BINARY = f"{sys.executable} -m tugboat.llmff.fixture_backend"
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,7 @@ class Policy:
         "must",
         "never",
     )
-    llmff_binary: str = "llmff"
+    llmff_binary: str = DEFAULT_FIXTURE_LLMFF_BINARY
     llmff_require_inspect: bool = True
     llmff_allow_network: bool = False
     llmff_timeout_ms: int = 60_000

@@ -8,6 +8,76 @@ from stat import S_IMODE
 from tugboat.cli import main
 
 
+def test_fresh_repo_runs_credential_free_proposal_loop_with_shipped_fixture_backend(
+    tmp_path: Path,
+):
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    original = "# Rules\n\nUse tests.\n"
+    codex.write_text(original, encoding="utf-8")
+    trace = repo / "traces" / "episode.jsonl"
+    trace.parent.mkdir()
+    trace.write_text(
+        '{"type":"user_request","text":"Fix bug"}\n'
+        '{"type":"user_correction","text":"You skipped the regression test"}\n',
+        encoding="utf-8",
+    )
+
+    assert main(["init", "--repo", str(repo)]) == 0
+    assert main(["index", "--repo", str(repo)]) == 0
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+    assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
+
+    assert codex.read_text(encoding="utf-8") == original
+    policy = (repo / ".sidecar" / "policy.yaml").read_text(encoding="utf-8")
+    assert "allow_network: false" in policy
+    assert "allowed_providers" not in policy
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert (run_dir / "audit.json").exists()
+    assert (run_dir / "candidate.json").exists()
+    assert (run_dir / "candidate.diff").exists()
+    assert (run_dir / "eval-report.json").exists()
+    assert (run_dir / "report.md").exists()
+    inspect = json.loads(
+        (run_dir / "patch-propose" / "llmff-inspect.json").read_text(encoding="utf-8")
+    )
+    assert inspect["network_required"] is False
+    assert inspect["external_calls"] == []
+    assert inspect["inspect"]["fixture_backend"] == "tugboat"
+
+
+def test_missing_llmff_binary_returns_clear_adoption_error(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+llmff:
+  binary: definitely-missing-tugboat-llmff
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    assert "instruction index blocked: llmff inspect failed: binary not found" in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "llmff_inspect_failed"
+    assert audit["llmff_failure_kind"] == "inspect_failed"
+
+
 def _write_fake_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3

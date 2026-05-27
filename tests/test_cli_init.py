@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from tugboat.cli import main
+from tugboat.models import DEFAULT_FIXTURE_LLMFF_BINARY
 from tugboat.mcp import run_stdio_server
 
 
@@ -38,7 +39,11 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
             },
         ],
         "auto_apply": {"enabled": False},
-        "llmff": {"binary": "llmff", "require_inspect": True, "allow_network": False},
+        "llmff": {
+            "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
+            "require_inspect": True,
+            "allow_network": False,
+        },
         "mcp": {"allowed_repositories": [str(tmp_path.resolve())]},
     }
     assert (tmp_path / ".sidecar" / ".gitignore").read_text(encoding="utf-8") == (

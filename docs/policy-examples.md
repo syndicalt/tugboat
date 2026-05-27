@@ -22,7 +22,13 @@ instruction_files:
     protected: true
 auto_apply:
   enabled: false
+llmff:
+  binary: python -m tugboat.llmff.fixture_backend
+  require_inspect: true
+  allow_network: false
 ```
+
+This fixture backend is local, credential-free, and intended for proposal-only adoption. Replace `llmff.binary` with a reviewed production runner only when enabling provider-backed pipelines.
 
 ## Provider Backed
 

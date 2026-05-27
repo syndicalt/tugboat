@@ -34,6 +34,7 @@ from tugboat.auto_apply import (
     evaluate_auto_apply,
 )
 from tugboat.config import DEFAULT_INSTRUCTION_FILES, load_policy
+from tugboat.models import DEFAULT_FIXTURE_LLMFF_BINARY
 from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.runner import (
     DaemonLoopConfig,
@@ -130,7 +131,7 @@ def _initialize_repo_policy(repo: Path) -> Path:
         ],
         "auto_apply": {"enabled": False},
         "llmff": {
-            "binary": "llmff",
+            "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,
             "allow_network": False,
         },

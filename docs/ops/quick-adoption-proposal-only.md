@@ -34,11 +34,11 @@ mkdir -p traces
 printf '{"event":"user_correction","message":"The runbook missed the rollback command."}\n' > traces/example.jsonl
 ```
 
-Run the proposal loop without credentials, using a local or fixture-backed `llmff` configuration:
+Run the proposal loop without credentials. `tugboat init` writes this local fixture-backed `llmff` configuration by default:
 
 ```yaml
 llmff:
-  binary: llmff
+  binary: python -m tugboat.llmff.fixture_backend
   require_inspect: true
   allow_network: false
 ```

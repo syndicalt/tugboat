@@ -16,6 +16,7 @@ from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
 from tugboat.db import Store
+from tugboat.llmff.contracts import InspectPolicyError
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
 from tugboat.manifests import (
     ManifestContractError,
@@ -103,6 +104,17 @@ def run_audit_pipeline(
         )
         try:
             index_inspect = inspect_manifest(index_manifest, run_dir=run_dir, policy=policy)
+        except InspectPolicyError as error:
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.insert_run(
+                    run_id=run_dir.name,
+                    stage="instruction_index",
+                    manifest_hash=_file_sha256(index_manifest),
+                    status="failed",
+                    run_dir=run_dir,
+                )
+            write_audit(run_dir, _llmff_inspect_failure_audit_payload(str(error)))
+            return AuditPipelineResult(1, run_dir, f"instruction index blocked: {error}")
         except SecretScanError as error:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
                 store.insert_run(
@@ -205,6 +217,24 @@ def run_audit_pipeline(
     audit_payload = _scored_audit_payload(bundle)
     try:
         inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy, runner=runner)
+    except InspectPolicyError as error:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash=_file_sha256(manifest),
+                status="failed",
+                run_dir=run_dir,
+                episode_id=episode_id,
+            )
+        write_audit(
+            run_dir,
+            _llmff_inspect_failure_audit_payload(
+                str(error),
+                evidence_refs=[str(ref) for ref in audit_payload.get("evidence_refs", [])],
+            ),
+        )
+        return AuditPipelineResult(1, run_dir, f"audit blocked: {error}")
     except SecretScanError as error:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.insert_run(
@@ -458,6 +488,23 @@ def _secret_scan_audit_payload(
             }
             for finding in error.findings
         ],
+    }
+
+
+def _llmff_inspect_failure_audit_payload(
+    message: str,
+    *,
+    evidence_refs: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "audit_id": 0,
+        "edit_warranted": False,
+        "evidence_refs": list(evidence_refs or []),
+        "failure_class": "llmff_inspect_failed",
+        "severity": "high",
+        "confidence": 1.0,
+        "llmff_failure_kind": "inspect_failed",
+        "llmff_failure_message": message,
     }
 
 

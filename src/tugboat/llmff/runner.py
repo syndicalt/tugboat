@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -49,14 +50,34 @@ class SubprocessLlmffRunner:
         self.timeout_seconds = timeout_seconds
 
     def inspect(self, manifest_path: Path) -> dict[str, Any]:
-        completed = subprocess.run(
-            [self.binary, "inspect", "--format", "json", str(manifest_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout_seconds,
-        )
-        payload = json.loads(completed.stdout)
+        try:
+            completed = subprocess.run(
+                [
+                    *_command_prefix(self.binary),
+                    "inspect",
+                    "--format",
+                    "json",
+                    str(manifest_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+            payload = json.loads(completed.stdout)
+        except FileNotFoundError as exc:
+            raise InspectPolicyError(
+                "llmff inspect failed: binary not found; run `tugboat init` "
+                "or configure llmff.binary in .sidecar/policy.yaml"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise InspectPolicyError("llmff inspect failed: timed out") from exc
+        except subprocess.CalledProcessError as exc:
+            raise InspectPolicyError(
+                f"llmff inspect failed: exit code {exc.returncode}"
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise InspectPolicyError("llmff inspect failed: output was not valid JSON") from exc
         if not isinstance(payload, dict):
             raise ValueError("llmff inspect output must be a JSON object")
         return payload
@@ -95,7 +116,7 @@ class LlmffRunSupervisor:
             ensure_private_dir(path.parent)
 
         command = [
-            self.binary,
+            *_command_prefix(self.binary),
             "run",
             str(manifest_path),
             "--trace",
@@ -269,6 +290,13 @@ def run_manifest(
         input_paths=input_paths,
         output_paths=output_paths,
     )
+
+
+def _command_prefix(binary: str) -> list[str]:
+    prefix = shlex.split(binary)
+    if not prefix:
+        raise ValueError("llmff binary command must not be empty")
+    return prefix
 
 
 def _require_matching_inspect_artifact(manifest_path: Path, *, run_dir: Path, policy: Policy) -> None:
