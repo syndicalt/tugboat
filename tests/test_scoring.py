@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from tugboat.scoring import score_episode
+from tugboat.scoring import ScoreOutcome, default_score_plugins, score_episode
 from tugboat.traces.ingest import ingest_jsonl_trace_as_episode
 
 
@@ -22,6 +22,17 @@ def test_failed_test_result_event_produces_failed_tests_outcome():
     assert outcomes[0].label == "failed-tests"
     assert outcomes[0].metrics == {"failed_tests": 1}
     assert outcomes[0].evidence == ("evt-test-1",)
+
+
+def test_default_score_plugins_are_named_roadmap_plugins():
+    assert tuple(plugin.name for plugin in default_score_plugins()) == (
+        "tests",
+        "human",
+        "verifier",
+        "agent-review",
+        "policy",
+        "user-correction",
+    )
 
 
 @dataclass(frozen=True)
@@ -210,3 +221,30 @@ def test_canonical_user_correction_content_events_count_recurrence(tmp_path):
         ("user-correction", "recurring-user-correction", {"recurrence_count": 2})
     ]
     assert all(outcome.evidence[0].startswith("ev_") for outcome in outcomes)
+
+
+def test_score_episode_accepts_explicit_plugins_without_running_defaults():
+    def custom_plugin(events):
+        assert len(events) == 1
+        return (
+            ScoreOutcome(
+                plugin="custom",
+                label="custom-outcome",
+                metrics={"events": len(events)},
+                evidence=("evt-custom",),
+            ),
+        )
+
+    outcomes = score_episode(
+        {"events": [{"id": "evt-test", "type": "test_result", "passed": False}]},
+        plugins=(custom_plugin,),
+    )
+
+    assert outcomes == (
+        ScoreOutcome(
+            plugin="custom",
+            label="custom-outcome",
+            metrics={"events": 1},
+            evidence=("evt-custom",),
+        ),
+    )

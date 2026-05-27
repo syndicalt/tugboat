@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 @dataclass(frozen=True)
@@ -12,8 +12,48 @@ class ScoreOutcome:
     evidence: tuple[str, ...] = ()
 
 
-def score_episode(episode: Any) -> tuple[ScoreOutcome, ...]:
+@dataclass(frozen=True)
+class ScorePlugin:
+    name: str
+    score: Callable[[list[dict[str, Any]]], Iterable[ScoreOutcome]]
+
+    def __call__(self, events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
+        return tuple(self.score(events))
+
+
+ScorePluginLike = ScorePlugin | Callable[[list[dict[str, Any]]], Iterable[ScoreOutcome]]
+
+
+def default_score_plugins() -> tuple[ScorePlugin, ...]:
+    return (
+        ScorePlugin("tests", _score_test_results),
+        ScorePlugin("human", _score_human_labels),
+        ScorePlugin("verifier", _score_verifier_scores),
+        ScorePlugin("agent-review", _score_agent_reviews),
+        ScorePlugin("policy", _score_policy_events),
+        ScorePlugin("user-correction", _score_user_correction_recurrence),
+    )
+
+
+def score_episode(
+    episode: Any,
+    *,
+    plugins: Iterable[ScorePluginLike] | None = None,
+) -> tuple[ScoreOutcome, ...]:
     events = list(_episode_events(episode))
+    outcomes: list[ScoreOutcome] = []
+    for plugin in plugins or default_score_plugins():
+        outcomes.extend(_run_plugin(plugin, events))
+    return tuple(outcomes)
+
+
+def _run_plugin(plugin: ScorePluginLike, events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
+    if isinstance(plugin, ScorePlugin):
+        return plugin(events)
+    return tuple(plugin(events))
+
+
+def _score_test_results(events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
     outcomes: list[ScoreOutcome] = []
 
     for event in events:
@@ -29,64 +69,89 @@ def score_episode(episode: Any) -> tuple[ScoreOutcome, ...]:
                     evidence=evidence,
                 )
             )
-        elif event_type in {"human_decision", "human_label", "human_review", "outcome_label"}:
-            if event_type == "outcome_label" and not _is_authoritative_outcome_event(event):
-                continue
-            human_label = str(_field(event, "label") or _field(event, "status")).lower()
-            if human_label in {"accepted", "accept", "approved", "approve"}:
-                outcomes.append(
-                    ScoreOutcome(
-                        plugin="human",
-                        label="human-accepted",
-                        metrics={"accepted": 1},
-                        evidence=evidence,
-                    )
+    return tuple(outcomes)
+
+
+def _score_human_labels(events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
+    outcomes: list[ScoreOutcome] = []
+    for event in events:
+        event_type = _event_type(event)
+        if event_type not in {"human_decision", "human_label", "human_review", "outcome_label"}:
+            continue
+        if event_type == "outcome_label" and not _is_authoritative_outcome_event(event):
+            continue
+        evidence = (_evidence_id(event),)
+        human_label = str(_field(event, "label") or _field(event, "status")).lower()
+        if human_label in {"accepted", "accept", "approved", "approve"}:
+            outcomes.append(
+                ScoreOutcome(
+                    plugin="human",
+                    label="human-accepted",
+                    metrics={"accepted": 1},
+                    evidence=evidence,
                 )
-            elif human_label in {"rejected", "reject", "denied", "deny"}:
-                outcomes.append(
-                    ScoreOutcome(
-                        plugin="human",
-                        label="human-rejected",
-                        metrics={"rejected": 1},
-                        evidence=evidence,
-                    )
+            )
+        elif human_label in {"rejected", "reject", "denied", "deny"}:
+            outcomes.append(
+                ScoreOutcome(
+                    plugin="human",
+                    label="human-rejected",
+                    metrics={"rejected": 1},
+                    evidence=evidence,
                 )
-        elif event_type == "verifier_score":
-            if not _is_authoritative_outcome_event(event):
-                continue
-            score = _verifier_score(event)
-            if score < 0.5:
-                outcomes.append(
-                    ScoreOutcome(
-                        plugin="verifier",
-                        label="verifier-failed",
-                        metrics={"score_percent": int(score * 100)},
-                        evidence=evidence,
-                    )
+            )
+    return tuple(outcomes)
+
+
+def _score_verifier_scores(events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
+    outcomes: list[ScoreOutcome] = []
+    for event in events:
+        if _event_type(event) != "verifier_score" or not _is_authoritative_outcome_event(event):
+            continue
+        score = _verifier_score(event)
+        if score < 0.5:
+            outcomes.append(
+                ScoreOutcome(
+                    plugin="verifier",
+                    label="verifier-failed",
+                    metrics={"score_percent": int(score * 100)},
+                    evidence=(_evidence_id(event),),
                 )
-        elif event_type in {"agent_review", "review_finding", "agent_review_finding"}:
-            severity = _review_severity(event)
-            severity_score = _severity_score(severity)
-            if severity_score >= 3:
-                outcomes.append(
-                    ScoreOutcome(
-                        plugin="agent-review",
-                        label="agent-review-severe",
-                        metrics={"severity_score": severity_score},
-                        evidence=evidence,
-                    )
+            )
+    return tuple(outcomes)
+
+
+def _score_agent_reviews(events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
+    outcomes: list[ScoreOutcome] = []
+    for event in events:
+        if _event_type(event) not in {"agent_review", "review_finding", "agent_review_finding"}:
+            continue
+        severity = _review_severity(event)
+        severity_score = _severity_score(severity)
+        if severity_score >= 3:
+            outcomes.append(
+                ScoreOutcome(
+                    plugin="agent-review",
+                    label="agent-review-severe",
+                    metrics={"severity_score": severity_score},
+                    evidence=(_evidence_id(event),),
                 )
-        elif event_type in {"policy_violation", "policy_denial", "policy_failure"}:
+            )
+    return tuple(outcomes)
+
+
+def _score_policy_events(events: list[dict[str, Any]]) -> tuple[ScoreOutcome, ...]:
+    outcomes: list[ScoreOutcome] = []
+    for event in events:
+        if _event_type(event) in {"policy_violation", "policy_denial", "policy_failure"}:
             outcomes.append(
                 ScoreOutcome(
                     plugin="policy",
                     label="policy-violation",
                     metrics={"violations": 1},
-                    evidence=evidence,
+                    evidence=(_evidence_id(event),),
                 )
             )
-
-    outcomes.extend(_score_user_correction_recurrence(events))
     return tuple(outcomes)
 
 
