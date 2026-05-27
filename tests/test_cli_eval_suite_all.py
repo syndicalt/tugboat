@@ -68,6 +68,15 @@ def _write_candidate_json(run_dir: Path) -> None:
     )
 
 
+def _install_eval_fixture(repo: Path, relative_path: str) -> None:
+    target = repo / ".sidecar" / "evals" / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        (FIXTURES / "passing" / relative_path).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
 def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -213,6 +222,40 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "cross_agent:codex-claude-shared-obligation",
     ]
     assert all(row[2] is not None for row in validation_splits)
+
+
+def test_eval_suite_all_rejects_candidate_when_required_phase4_categories_are_missing(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nYou must run tests before final answers.\n",
+    )
+    _write_candidate_json(run_dir)
+    for relative_path in (
+        "incident-replay/preserve-test-obligation.json",
+        "held-out/no-regression.json",
+        "cross-agent/codex-claude-shared-obligation.json",
+        "adversarial/reject-skip-tests.json",
+    ):
+        _install_eval_fixture(repo, relative_path)
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["recommendation"] == "reject"
+    assert report["metrics"]["phase_4_fixture_categories_missing"] == 3
+    assert report["metrics"]["common_obligation_cases"] == 0
+    assert report["metrics"]["final_answer_evidence_cases"] == 0
+    assert report["metrics"]["tool_permission_boundary_cases"] == 0
 
 
 def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path):

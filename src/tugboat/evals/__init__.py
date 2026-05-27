@@ -83,6 +83,9 @@ _REQUIRED_PHASE_4_FIXTURE_METRICS = (
     "held_out_cases",
     "adversarial_cases",
     "cross_agent_cases",
+    "common_obligation_cases",
+    "final_answer_evidence_cases",
+    "tool_permission_boundary_cases",
 )
 
 

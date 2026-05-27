@@ -18,6 +18,15 @@ def _install_eval_fixtures(repo: Path, fixture_name: str) -> None:
     copytree(FIXTURES / fixture_name, repo / ".sidecar" / "evals")
 
 
+def _install_eval_fixture(repo: Path, relative_path: str) -> None:
+    target = repo / ".sidecar" / "evals" / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        (FIXTURES / "passing" / relative_path).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
 def test_run_offline_eval_suite_all_reports_structural_behavioral_and_adversarial_metrics(
     tmp_path: Path,
 ):
@@ -36,7 +45,7 @@ def test_run_offline_eval_suite_all_reports_structural_behavioral_and_adversaria
     assert report.metrics["structural_cases"] >= 1
     assert report.metrics["behavioral_cases"] == 0
     assert report.metrics["adversarial_cases"] == 0
-    assert report.metrics["phase_4_fixture_categories_missing"] == 4
+    assert report.metrics["phase_4_fixture_categories_missing"] == 7
     assert report.trigger_score == 1.0
     assert report.held_out_score == 1.0
     assert report.governance_passed is True
@@ -322,7 +331,38 @@ def test_run_offline_eval_suite_all_rejects_incomplete_phase_4_fixture_corpus(
     assert report.metrics["incident_replay_cases"] == 0
     assert report.metrics["adversarial_cases"] == 0
     assert report.metrics["cross_agent_cases"] == 0
+    assert report.metrics["phase_4_fixture_categories_missing"] == 6
+
+
+def test_run_offline_eval_suite_all_requires_every_phase4_behavioral_category(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    for relative_path in (
+        "incident-replay/preserve-test-obligation.json",
+        "held-out/no-regression.json",
+        "cross-agent/codex-claude-shared-obligation.json",
+        "adversarial/reject-skip-tests.json",
+    ):
+        _install_eval_fixture(tmp_path, relative_path)
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.recommendation == "reject"
     assert report.metrics["phase_4_fixture_categories_missing"] == 3
+    assert report.metrics["common_obligation_cases"] == 0
+    assert report.metrics["final_answer_evidence_cases"] == 0
+    assert report.metrics["tool_permission_boundary_cases"] == 0
 
 
 def test_run_offline_eval_suite_all_compares_preview_against_original_instruction_file(
