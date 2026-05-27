@@ -27,7 +27,7 @@ from tugboat.optimization import (
     OptimizationMemory,
     budget_reasons_for_bounded_edit_metadata,
 )
-from tugboat.patches import apply_unified_diff
+from tugboat.patches import apply_unified_diff, bounded_edit_metadata_mismatch_fields
 from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
@@ -68,7 +68,7 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
     memory_reasons = _rejected_memory_policy_reasons(repo, candidate)
     budget_reasons = _learning_rate_budget_policy_reasons(policy, candidate)
     decision_allowed = decision.allowed and not memory_reasons and not budget_reasons
-    decision_reasons = [*decision.reasons, *memory_reasons, *budget_reasons]
+    decision_reasons = list(dict.fromkeys([*decision.reasons, *memory_reasons, *budget_reasons]))
     try:
         artifacts = write_candidate(repo, run_dir.name, candidate)
     except ValueError as error:
@@ -235,6 +235,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
     _validate_payload_batch_training_evidence_refs(run_dir, payload)
     candidate = _candidate_from_payload(payload, audit_id=audit_id)
+    _validate_bounded_edit_metadata_matches_diff(repo, candidate)
     _validate_candidate_sources_declared_by_audit(
         audit_evidence_refs,
         candidate,
@@ -340,7 +341,9 @@ def _rank_and_merge_candidate_payloads(
     rejected: list[dict[str, object]] = []
     for candidate in candidates:
         candidate_id = str(candidate.get("candidate_id", f"candidate-{len(selected) + len(rejected) + 1}"))
-        candidate_reasons = _candidate_set_memory_rejection_reasons(memory, candidate)
+        candidate_reasons = _candidate_set_diff_rejection_reasons(repo, candidate)
+        if not candidate_reasons:
+            candidate_reasons = _candidate_set_memory_rejection_reasons(memory, candidate)
         if not candidate_reasons:
             candidate_reasons = _candidate_set_budget_rejection_reasons(policy, candidate)
         if not candidate_reasons:
@@ -377,6 +380,30 @@ def _candidate_set_budget_rejection_reasons(policy, candidate: dict[str, object]
     if not metadata:
         return ["bounded_edit_metadata_required"]
     return _learning_rate_budget_reasons_for_metadata(policy, metadata)
+
+
+def _candidate_set_diff_rejection_reasons(repo: Path, candidate: dict[str, object]) -> list[str]:
+    raw_metadata = candidate.get("bounded_edit_metadata", [])
+    if not isinstance(raw_metadata, list):
+        return []
+    metadata = tuple(item for item in raw_metadata if isinstance(item, dict))
+    if not metadata:
+        return []
+    base_file = str(candidate.get("base_file", ""))
+    if Path(base_file).suffix.lower() not in {".md", ".markdown"}:
+        return []
+    diff = str(candidate.get("diff", ""))
+    base_path = (repo / base_file).resolve()
+    repo_root = repo.resolve()
+    if not _is_relative_to(base_path, repo_root) or not base_path.exists():
+        return []
+    mismatches = bounded_edit_metadata_mismatch_fields(
+        base_path.read_text(encoding="utf-8"),
+        diff,
+        metadata,
+        expected_path=base_file,
+    )
+    return ["bounded_edit_diff_mismatch"] if mismatches else []
 
 
 def _candidate_set_memory_rejection_reasons(
@@ -848,6 +875,36 @@ def _bounded_edit_metadata_item_from_payload(item: object, *, index: int) -> dic
         "changed_lines": _required_non_negative_int(item, "changed_lines", prefix),
         "normative_changes": _required_non_negative_int(item, "normative_changes", prefix),
     }
+
+
+def _validate_bounded_edit_metadata_matches_diff(repo: Path, candidate: CandidatePatch) -> None:
+    if Path(candidate.base_file).suffix.lower() not in {".md", ".markdown"}:
+        return
+    base_path = (repo / candidate.base_file).resolve()
+    repo_root = repo.resolve()
+    if not _is_relative_to(base_path, repo_root) or not base_path.exists():
+        return
+    mismatches = bounded_edit_metadata_mismatch_fields(
+        base_path.read_text(encoding="utf-8"),
+        candidate.diff,
+        candidate.bounded_edit_metadata,
+        expected_path=candidate.base_file,
+    )
+    if mismatches:
+        if mismatches == ("diff",):
+            raise ValueError("candidate diff cannot be applied to base file")
+        raise ValueError(
+            "bounded_edit_diff_mismatch: "
+            + ", ".join(mismatches)
+        )
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _required_non_empty_string(item: dict[str, object], field: str, prefix: str) -> str:

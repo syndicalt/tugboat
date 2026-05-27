@@ -95,7 +95,7 @@ def _write_fake_llmff(
             {
                 "operator": "add",
                 "file": "CODEX.md",
-                "section": "Testing",
+                "section": "Rules",
                 "changed_lines": 1,
                 "normative_changes": 0,
             }
@@ -1726,7 +1726,7 @@ llmff:
         {
             "operator": "add",
             "file": "CODEX.md",
-            "section": "Testing",
+            "section": "Rules",
             "changed_lines": 1,
             "normative_changes": 0,
         }
@@ -1770,7 +1770,7 @@ llmff:
         "file": "CODEX.md",
         "normative_changes": 0,
         "operator": "add",
-        "section": "Testing",
+        "section": "Rules",
     }
     assert edit[4] is not None
     assert candidate_edit == (
@@ -1786,7 +1786,10 @@ llmff:
 def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\nUse tests.\n\n# Review\n\nKeep review.\n",
+        encoding="utf-8",
+    )
     base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
     trace = tmp_path / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
@@ -1796,7 +1799,7 @@ def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: P
                 "candidate_id": "testing",
                 "base_file": "CODEX.md",
                 "base_hash": base_hash,
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add regression test guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,1 @@\n+Add regression test guidance.\n",
                 "risk_class": "instruction_clarification",
                 "rationale": "Testing guidance is missing.",
                 "expected_behavior_change": "Agents add regression tests.",
@@ -1807,7 +1810,7 @@ def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: P
                     {
                         "operator": "add",
                         "file": "CODEX.md",
-                        "section": "Testing",
+                        "section": "Rules",
                         "changed_lines": 1,
                         "normative_changes": 0,
                     }
@@ -1817,7 +1820,7 @@ def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: P
                 "candidate_id": "review",
                 "base_file": "CODEX.md",
                 "base_hash": base_hash,
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add review checklist guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -6,0 +7,1 @@\n+Add review checklist guidance.\n",
                 "risk_class": "instruction_clarification",
                 "rationale": "Review guidance is missing.",
                 "expected_behavior_change": "Agents preserve review checklists.",
@@ -1864,7 +1867,7 @@ llmff:
         {
             "operator": "add",
             "file": "CODEX.md",
-            "section": "Testing",
+            "section": "Rules",
             "changed_lines": 1,
             "normative_changes": 0,
         },
@@ -1913,13 +1916,13 @@ def test_propose_candidate_set_rejects_incompatible_bounded_edit(tmp_path: Path)
             {
                 **base_candidate,
                 "candidate_id": "testing-a",
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add regression test guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,1 @@\n+Add regression test guidance.\n",
                 "rationale": "Testing guidance is missing.",
                 "bounded_edit_metadata": [
                     {
                         "operator": "add",
                         "file": "CODEX.md",
-                        "section": "Testing",
+                        "section": "Rules",
                         "changed_lines": 1,
                         "normative_changes": 0,
                     }
@@ -1928,13 +1931,13 @@ def test_propose_candidate_set_rejects_incompatible_bounded_edit(tmp_path: Path)
             {
                 **base_candidate,
                 "candidate_id": "testing-b",
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add duplicate testing guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,1 @@\n+Add duplicate testing guidance.\n",
                 "rationale": "Testing guidance should be duplicated.",
                 "bounded_edit_metadata": [
                     {
-                        "operator": "annotate",
+                        "operator": "add",
                         "file": "CODEX.md",
-                        "section": "Testing",
+                        "section": "Rules",
                         "changed_lines": 1,
                         "normative_changes": 0,
                     }
@@ -3004,6 +3007,247 @@ llmff:
     assert candidate_count == 0
 
 
+def test_propose_rejects_bounded_metadata_operator_that_does_not_match_diff(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Testing\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#testing"],
+        },
+        instruction_index={
+            "documents": [
+                {
+                    "path": "CODEX.md",
+                    "obligations": ["Use tests."],
+                    "chunks": [
+                        {
+                            "ref": "CODEX.md#testing",
+                            "anchor": "testing",
+                            "heading_path": ["Testing"],
+                        }
+                    ],
+                }
+            ]
+        },
+        bounded_edit_metadata=[
+            {
+                "operator": "delete",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ],
+        candidate_overrides={
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -2,0 +3,1 @@\n"
+                "+Add regression test guidance.\n"
+            )
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "bounded_edit_diff_mismatch" in output
+    assert "operator" in output
+    assert not (run_dir / "candidate.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_count = store.connection.execute(
+            "SELECT COUNT(*) FROM candidates"
+        ).fetchone()[0]
+    assert candidate_count == 0
+
+
+def test_propose_rejects_bounded_metadata_section_that_does_not_match_diff(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Approval\n\nKeep review.\n\n# Testing\n\nUse tests.\n",
+        encoding="utf-8",
+    )
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#testing"],
+        },
+        instruction_index={
+            "documents": [
+                {
+                    "path": "CODEX.md",
+                    "obligations": ["Use tests."],
+                    "chunks": [
+                        {
+                            "ref": "CODEX.md#testing",
+                            "anchor": "testing",
+                            "heading_path": ["Testing"],
+                        }
+                    ],
+                }
+            ]
+        },
+        bounded_edit_metadata=[
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Approval",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ],
+        candidate_overrides={
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -6,0 +7,1 @@\n"
+                "+Add regression test guidance.\n"
+            )
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "bounded_edit_diff_mismatch" in output
+    assert "section" in output
+    assert not (run_dir / "candidate.json").exists()
+
+
+def test_propose_rejects_underreported_bounded_metadata_changed_lines(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Testing\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#testing"],
+        },
+        instruction_index={
+            "documents": [
+                {
+                    "path": "CODEX.md",
+                    "obligations": ["Use tests."],
+                    "chunks": [
+                        {
+                            "ref": "CODEX.md#testing",
+                            "anchor": "testing",
+                            "heading_path": ["Testing"],
+                        }
+                    ],
+                }
+            ]
+        },
+        bounded_edit_metadata=[
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 1,
+            }
+        ],
+        candidate_overrides={
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -2,0 +3,5 @@\n"
+                "+Agents must add regression tests.\n"
+                "+Agents must run governance checks.\n"
+                "+Agents must record evidence.\n"
+                "+Agents must keep rollback steps.\n"
+                "+Agents must cite eval results.\n"
+            )
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "bounded_edit_diff_mismatch" in output
+    assert "changed_lines" in output
+    assert "normative_changes" in output
+    assert not (run_dir / "candidate.json").exists()
+
+
 def test_propose_rejects_malformed_llmff_candidate_sources(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -3352,7 +3596,7 @@ llmff:
     )
 
     assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
-    fingerprint = hashlib.sha256(b"add\nCODEX.md\nTesting").hexdigest()
+    fingerprint = hashlib.sha256(b"add\nCODEX.md\nRules").hexdigest()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_optimizer_memory(
             repo_path=str(repo),
@@ -3382,7 +3626,7 @@ llmff:
             (candidate["candidate_id"],),
         ).fetchone()
 
-    assert candidate["bounded_edit_metadata"][0]["section"] == "Testing"
+    assert candidate["bounded_edit_metadata"][0]["section"] == "Rules"
     assert policy_gate == {
         "schema_version": 1,
         "allowed": False,
@@ -3419,8 +3663,10 @@ def test_propose_candidate_set_skips_suppressed_edit_and_selects_viable_alternat
                 "diff": (
                     "--- a/CODEX.md\n"
                     "+++ b/CODEX.md\n"
-                    "@@ -1,0 +1,1 @@\n"
-                    "+Remove approval guidance.\n"
+                    "@@ -1,3 +1,2 @@\n"
+                    " # Approval\n"
+                    " \n"
+                    "-Keep human review.\n"
                 ),
                 "risk_class": "instruction_clarification",
                 "rationale": "Approval guidance was rejected before.",
@@ -3433,18 +3679,18 @@ def test_propose_candidate_set_skips_suppressed_edit_and_selects_viable_alternat
                         "operator": "delete",
                         "file": "CODEX.md",
                         "section": "Approval",
-                        "changed_lines": 2,
-                        "normative_changes": 1,
+                        "changed_lines": 1,
+                        "normative_changes": 0,
                     }
                 ],
             },
             {
-                "candidate_id": "viable-testing-add",
+                "candidate_id": "viable-rules-add",
                 "base_file": "CODEX.md",
                 "base_hash": base_hash,
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add regression test guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -6,0 +7,1 @@\n+Add regression test guidance.\n",
                 "risk_class": "instruction_clarification",
-                "rationale": "Testing guidance is missing.",
+                "rationale": "Rules guidance is missing.",
                 "expected_behavior_change": "Agents add regression tests.",
                 "evals_required": ["governance-regression"],
                 "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
@@ -3453,7 +3699,7 @@ def test_propose_candidate_set_skips_suppressed_edit_and_selects_viable_alternat
                     {
                         "operator": "add",
                         "file": "CODEX.md",
-                        "section": "Testing",
+                        "section": "Rules",
                         "changed_lines": 1,
                         "normative_changes": 0,
                     }
@@ -3501,14 +3747,14 @@ llmff:
         {
             "operator": "add",
             "file": "CODEX.md",
-            "section": "Testing",
+            "section": "Rules",
             "changed_lines": 1,
             "normative_changes": 0,
         }
     ]
     assert ranking == {
         "schema_version": 1,
-        "selected_candidate_ids": ["viable-testing-add"],
+        "selected_candidate_ids": ["viable-rules-add"],
         "merged": False,
         "rejected_candidates": [
             {
@@ -3530,17 +3776,21 @@ def test_propose_rejects_candidate_over_learning_rate_budget(tmp_path: Path):
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     trace = tmp_path / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    oversized_diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,21 @@\n" + "".join(
+        f"+Add oversized regression test guidance {index}.\n" for index in range(21)
+    )
     fake_llmff = _write_fake_llmff(
         tmp_path / "fake-llmff",
         bounded_edit_metadata=[
             {
                 "operator": "add",
                 "file": "CODEX.md",
-                "section": "Testing",
+                "section": "Rules",
                 "changed_lines": 21,
                 "normative_changes": 0,
             }
         ],
+        candidate_overrides={"diff": oversized_diff},
     )
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
@@ -3582,10 +3832,16 @@ def test_propose_candidate_set_skips_over_budget_edit_and_selects_viable_alterna
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\nUse tests.\n\n# Review\n\nKeep review.\n",
+        encoding="utf-8",
+    )
     base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
     trace = tmp_path / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    oversized_diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,21 @@\n" + "".join(
+        f"+Add oversized regression test guidance {index}.\n" for index in range(21)
+    )
     base_candidate = {
         "base_file": "CODEX.md",
         "base_hash": base_hash,
@@ -3600,13 +3856,13 @@ def test_propose_candidate_set_skips_over_budget_edit_and_selects_viable_alterna
             {
                 **base_candidate,
                 "candidate_id": "oversized-testing-add",
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add oversized regression test guidance.\n",
+                "diff": oversized_diff,
                 "rationale": "Testing guidance is missing but too broad.",
                 "bounded_edit_metadata": [
                     {
                         "operator": "add",
                         "file": "CODEX.md",
-                        "section": "Testing",
+                        "section": "Rules",
                         "changed_lines": 21,
                         "normative_changes": 0,
                     }
@@ -3615,7 +3871,7 @@ def test_propose_candidate_set_skips_over_budget_edit_and_selects_viable_alterna
             {
                 **base_candidate,
                 "candidate_id": "viable-review-add",
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add review checklist guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -6,0 +7,1 @@\n+Add review checklist guidance.\n",
                 "rationale": "Review guidance is missing.",
                 "expected_behavior_change": "Agents preserve review checklists.",
                 "bounded_edit_metadata": [
@@ -3689,13 +3945,16 @@ def test_propose_candidate_set_fails_when_all_candidates_exceed_budget(
     base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
     trace = tmp_path / "trace.jsonl"
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    oversized_diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,21 @@\n" + "".join(
+        f"+Add oversized regression test guidance {index}.\n" for index in range(21)
+    )
     candidate_set = {
         "candidates": [
             {
                 "candidate_id": "oversized-testing-add",
                 "base_file": "CODEX.md",
                 "base_hash": base_hash,
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add oversized regression test guidance.\n",
+                "diff": oversized_diff,
                 "rationale": "Testing guidance is missing but too broad.",
                 "risk_class": "instruction_clarification",
                 "expected_behavior_change": "Agents add regression tests.",
@@ -3706,7 +3965,7 @@ def test_propose_candidate_set_fails_when_all_candidates_exceed_budget(
                     {
                         "operator": "add",
                         "file": "CODEX.md",
-                        "section": "Testing",
+                        "section": "Rules",
                         "changed_lines": 21,
                         "normative_changes": 0,
                     }
@@ -4504,7 +4763,7 @@ llmff:
                 "file": "CODEX.md",
                 "normative_changes": 0,
                 "operator": "add",
-                "section": "Testing",
+                "section": "Rules",
             }
         ],
         "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
@@ -5005,7 +5264,7 @@ llmff:
             "file": "CODEX.md",
             "normative_changes": 0,
             "operator": "add",
-            "section": "Testing",
+            "section": "Rules",
         }
     ]
     assert json.loads(baseline_payload) == {
@@ -6261,7 +6520,7 @@ llmff:
         "held-out eval score did not improve over baseline",
     )
     assert json.loads(baseline_payload)["held_out_score"] == 0.4
-    fingerprint = hashlib.sha256(b"add\nCODEX.md\nTesting").hexdigest()
+    fingerprint = hashlib.sha256(b"add\nCODEX.md\nRules").hexdigest()
     assert [(row[0], json.loads(row[1])) for row in rejected_edit_rows] == [
         (
             fingerprint,

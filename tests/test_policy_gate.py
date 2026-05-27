@@ -421,7 +421,7 @@ def test_policy_gate_escalates_underclassified_network_section_to_class_c_review
 
 def test_policy_gate_escalates_normative_deletion_to_class_c_review(tmp_path: Path):
     base_file = tmp_path / "CODEX.md"
-    base_file.write_text("# Notes\n\nKeep local wording.\n", encoding="utf-8")
+    base_file.write_text("# Notes\n\nAgents may not remove local wording.\n", encoding="utf-8")
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
         risk_class="A",
@@ -431,7 +431,7 @@ def test_policy_gate_escalates_normative_deletion_to_class_c_review(tmp_path: Pa
             "@@ -1,3 +1,2 @@\n"
             " # Notes\n"
             " \n"
-            "-Keep local wording.\n"
+                "-Agents may not remove local wording.\n"
         ),
         bounded_edit_metadata=(
             {
@@ -467,12 +467,12 @@ def test_policy_gate_keeps_class_a_typo_candidate_auto_apply_eligible(tmp_path: 
             "+Use local fixtures.\n"
         ),
         bounded_edit_metadata=(
-            {
-                "operator": "replace",
-                "file": "CODEX.md",
-                "section": "Typo Fix",
-                "changed_lines": 1,
-                "normative_changes": 0,
+                {
+                    "operator": "replace",
+                    "file": "CODEX.md",
+                    "section": "Notes",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
             },
         ),
     )
@@ -502,16 +502,16 @@ def test_policy_gate_rejects_candidate_matching_prior_rejected_edit_fingerprint(
             "+Add a rejected direction again.\n"
         ),
         bounded_edit_metadata=(
-            {
-                "operator": "add",
-                "file": "CODEX.md",
-                "section": "Repeated Direction",
-                "changed_lines": 1,
-                "normative_changes": 0,
+                {
+                    "operator": "add",
+                    "file": "CODEX.md",
+                    "section": "Notes",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
             },
         ),
     )
-    rejected_fingerprint = CandidatePatch.hash_text("add\nCODEX.md\nRepeated Direction")
+    rejected_fingerprint = CandidatePatch.hash_text("add\nCODEX.md\nNotes")
 
     decision = evaluate_candidate(
         tmp_path,

@@ -68,15 +68,35 @@ def _candidate_run(
     run_dir = repo / ".sidecar" / "runs" / "20260525T000000000000Z"
     run_dir.mkdir(parents=True)
     if diff is None:
-        diff = (
-            "--- a/CODEX.md\n"
-            "+++ b/CODEX.md\n"
-            "@@ -1,3 +1,4 @@\n"
-            " # Rules\n"
-            " \n"
-            " Use tests.\n"
-            "+Record rollback notes.\n"
-        )
+        if base_file == "CODEX.md" and bounded_section not in {None, "Rules"}:
+            section_text = (
+                "# Rules\n\n"
+                "Use tests.\n\n"
+                f"# {bounded_section}\n\n"
+                f"Keep {bounded_section.lower()} guidance.\n"
+            )
+            (repo / "CODEX.md").write_text(section_text, encoding="utf-8")
+            _git(repo, "add", "CODEX.md")
+            _git(repo, "commit", "-m", "fixture section")
+            diff = (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -5,3 +5,4 @@\n"
+                f" # {bounded_section}\n"
+                " \n"
+                f" Keep {bounded_section.lower()} guidance.\n"
+                "+Record rollback notes.\n"
+            )
+        else:
+            diff = (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -1,3 +1,4 @@\n"
+                " # Rules\n"
+                " \n"
+                " Use tests.\n"
+                "+Record rollback notes.\n"
+            )
     candidate = {
         "schema_version": 1,
         "audit_id": 1,
@@ -416,8 +436,8 @@ def test_auto_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
     capsys,
 ):
     repo = _init_repo(tmp_path)
-    original = (repo / "CODEX.md").read_text(encoding="utf-8")
     run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
     (repo / ".sidecar" / "read-only.kill").write_text("enabled\n", encoding="utf-8")
@@ -1631,20 +1651,8 @@ def test_auto_apply_blocks_underclassified_class_a_candidate_touching_policy_dom
     capsys,
 ):
     repo = _init_repo(tmp_path)
-    run_dir = _candidate_run(repo, risk_class="A")
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Provider Routing")
     original = (repo / "CODEX.md").read_text(encoding="utf-8")
-    candidate_path = run_dir / "candidate.json"
-    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
-    candidate["bounded_edit_metadata"] = [
-        {
-            "operator": "add",
-            "file": "CODEX.md",
-            "section": "Provider Routing",
-            "changed_lines": 1,
-            "normative_changes": 0,
-        }
-    ]
-    candidate_path.write_text(json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
 

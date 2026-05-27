@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.patches import apply_unified_diff
+from tugboat.patches import apply_unified_diff, bounded_edit_metadata_mismatch_fields
 
 from tugboat.models import Policy
 from tugboat.security.secrets import scan_text
@@ -17,6 +17,7 @@ DENIAL_REASON_ORDER = (
     "base_file_outside_repo",
     "base_file_not_allowed",
     "bounded_edit_target_mismatch",
+    "bounded_edit_diff_mismatch",
     "pending_eval_definition_edit",
     "approval_policy_self_apply",
     "audit_history_edit",
@@ -236,8 +237,11 @@ def evaluate_candidate(
     touched_paths = _diff_touched_paths(candidate.diff)
     if touched_paths and touched_paths != {candidate.base_file}:
         found_reasons.add("diff_target_mismatch")
-    if _has_bounded_edit_target_mismatch(candidate):
+    bounded_edit_target_mismatch = _has_bounded_edit_target_mismatch(candidate)
+    if bounded_edit_target_mismatch:
         found_reasons.add("bounded_edit_target_mismatch")
+    if not bounded_edit_target_mismatch and _has_bounded_edit_diff_mismatch(repo, candidate):
+        found_reasons.add("bounded_edit_diff_mismatch")
     if not base_path.exists() or CandidatePatch.hash_file(base_path) != candidate.base_hash:
         found_reasons.add("base_hash_mismatch")
     changed_line_count = _changed_line_count(candidate.diff)
@@ -407,6 +411,23 @@ def _has_bounded_edit_target_mismatch(candidate: CandidatePatch) -> bool:
     return any(
         _repo_relative_posix(str(metadata.get("file", ""))) != normalized_base
         for metadata in candidate.bounded_edit_metadata
+    )
+
+
+def _has_bounded_edit_diff_mismatch(repo: Path, candidate: CandidatePatch) -> bool:
+    if not candidate.bounded_edit_metadata or not _is_markdown_file(candidate.base_file):
+        return False
+    base_path = (repo / candidate.base_file).resolve()
+    repo_root = repo.resolve()
+    if not _is_relative_to(base_path, repo_root) or not base_path.exists():
+        return False
+    return bool(
+        bounded_edit_metadata_mismatch_fields(
+            base_path.read_text(encoding="utf-8"),
+            candidate.diff,
+            candidate.bounded_edit_metadata,
+            expected_path=candidate.base_file,
+        )
     )
 
 
