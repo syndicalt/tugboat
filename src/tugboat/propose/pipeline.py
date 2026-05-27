@@ -155,6 +155,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
     manifest = next(record.path for record in manifests if record.name == "patch-propose.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     optimizer_memory_path = _write_optimizer_memory_artifact(repo, run_dir)
+    optional_inputs = _optional_patch_propose_inputs(run_dir)
     input_paths = _filter_declared_manifest_inputs(
         manifest,
         {
@@ -163,6 +164,7 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             "drift_clusters": drift_clusters_path,
             "optimizer_notes": optimizer_notes_path,
             "optimizer_memory": optimizer_memory_path,
+            **optional_inputs,
             "policy": sidecar_dir(repo) / "policy.yaml",
         },
         required_inputs={
@@ -222,10 +224,16 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             audit_evidence_refs,
             rationale_payload,
         )
+        _validate_no_batch_training_evidence_refs(
+            run_dir,
+            "proposal_rationale",
+            _unique_json_strings(rationale_payload.get("evidence_refs", [])),
+        )
     payload = _select_candidate_payload(repo, run_dir, payload)
     validate_json_artifact("candidate.raw.json", payload)
     _validate_reflections_from_payload(payload)
     _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
+    _validate_payload_batch_training_evidence_refs(run_dir, payload)
     candidate = _candidate_from_payload(payload, audit_id=audit_id)
     _validate_candidate_sources_declared_by_audit(
         audit_evidence_refs,
@@ -233,6 +241,71 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         canonical_evidence_trusts=_canonical_evidence_trusts(run_dir),
     )
     return candidate
+
+
+def _optional_patch_propose_inputs(run_dir: Path) -> dict[str, Path]:
+    inputs: dict[str, Path] = {}
+    optimization_batch = run_dir / "optimization-batch.json"
+    if optimization_batch.exists():
+        validate_json_artifact(
+            "optimization-batch.json",
+            load_json_object_artifact(optimization_batch, "optimization-batch.json"),
+        )
+        inputs["optimization_batch"] = optimization_batch
+    return inputs
+
+
+def _validate_payload_batch_training_evidence_refs(
+    run_dir: Path,
+    payload: dict[str, object],
+) -> None:
+    _validate_no_batch_training_evidence_refs(
+        run_dir,
+        "candidate sources",
+        [
+            str(source.get("source_id", ""))
+            for source in payload.get("sources", [])
+            if isinstance(source, dict)
+        ],
+    )
+    _validate_no_batch_training_evidence_refs(
+        run_dir,
+        "candidate reflections",
+        [
+            str(reflection.get("source_ref", ""))
+            for reflection in payload.get("reflections", [])
+            if isinstance(reflection, dict)
+        ],
+    )
+
+
+def _validate_no_batch_training_evidence_refs(
+    run_dir: Path,
+    label: str,
+    refs: Sequence[str],
+) -> None:
+    protected_refs = _batch_non_training_refs(run_dir)
+    if not protected_refs:
+        return
+    cited = sorted({ref for ref in refs if ref in protected_refs})
+    if cited:
+        raise ValueError(
+            f"{label} cannot cite held-out or unseen batch refs as training evidence: "
+            + ", ".join(cited)
+        )
+
+
+def _batch_non_training_refs(run_dir: Path) -> set[str]:
+    batch_path = run_dir / "optimization-batch.json"
+    if not batch_path.exists():
+        return set()
+    batch = load_json_object_artifact(batch_path, "optimization-batch.json")
+    validate_json_artifact("optimization-batch.json", batch)
+    protected = set(_unique_json_strings(batch.get("held_out_episodes", [])))
+    unseen_suites = _unique_json_strings(batch.get("unseen_suites", []))
+    protected.update(unseen_suites)
+    protected.update(f"suite:{suite}" for suite in unseen_suites)
+    return protected
 
 
 def _select_candidate_payload(repo: Path, run_dir: Path, payload: dict[str, object]) -> dict[str, object]:

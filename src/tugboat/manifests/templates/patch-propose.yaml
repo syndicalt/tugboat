@@ -6,6 +6,7 @@ inputs:
   - drift_clusters
   - optimizer_notes
   - optimizer_memory
+  - optimization_batch
   - policy
 outputs:
   - candidate_patch

@@ -10,7 +10,7 @@ from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
 from tugboat.eval.pipeline import run_eval_pipeline
 from tugboat.paths import sidecar_dir
-from tugboat.propose.pipeline import run_propose_pipeline
+from tugboat.propose.pipeline import _validate_no_batch_training_evidence_refs, run_propose_pipeline
 from tugboat.security.secrets import SecretScanError
 
 
@@ -4911,6 +4911,7 @@ llmff:
         item["inputs"] for item in inputs_by_manifest if item["manifest"] == "patch-propose"
     )
     optimizer_memory = json.loads(Path(patch_propose_inputs["optimizer_memory"]).read_text(encoding="utf-8"))
+    optimization_batch = json.loads(Path(patch_propose_inputs["optimization_batch"]).read_text(encoding="utf-8"))
     batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
 
     assert batch == {
@@ -4924,6 +4925,7 @@ llmff:
         "success_patterns": [],
         "failure_patterns": ["You skipped regression tests"],
     }
+    assert optimization_batch == batch
     assert optimizer_memory["slow_update_records"] == [
         {
             "category": "optimizer_guidance",
@@ -4933,6 +4935,40 @@ llmff:
             ),
         }
     ]
+
+
+def test_patch_propose_rejects_held_out_refs_as_training_evidence(tmp_path: Path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "optimization-batch.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "train_episodes": ["episode:train-1"],
+                "held_out_episodes": ["held-out:no-regression"],
+                "unseen_suites": ["governance"],
+                "held_out_suite": "held-out",
+                "success_episodes": [],
+                "failure_episodes": ["episode:train-1"],
+                "success_patterns": [],
+                "failure_patterns": ["You skipped regression tests"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as error:
+        _validate_no_batch_training_evidence_refs(
+            run_dir,
+            "proposal_rationale",
+            ("held-out:no-regression", "suite:governance"),
+        )
+
+    assert str(error.value) == (
+        "proposal_rationale cannot cite held-out or unseen batch refs as training evidence: "
+        "held-out:no-regression, suite:governance"
+    )
 
 
 def test_optimize_minibatch_guidance_uses_prior_episode_history(tmp_path: Path):
