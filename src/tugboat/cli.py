@@ -2001,6 +2001,7 @@ def _write_apply_plan(
     auto_apply_approval: dict[str, object] | None = None
     pr_metadata: dict[str, object] = {}
     branch_created = False
+    applied_worktree_change = False
 
     if auto_apply:
         _assert_auto_apply_precheck(
@@ -2024,6 +2025,7 @@ def _write_apply_plan(
             branch_created = True
             adapter.apply_diff(run_dir / "candidate.diff")
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            applied_worktree_change = True
             rollback_command = [
                 ["git", "restore", "--worktree", "--staged", "--", *target_files],
                 ["git", "switch", base_branch],
@@ -2034,6 +2036,7 @@ def _write_apply_plan(
             branch_created = True
             adapter.apply_diff(run_dir / "candidate.diff")
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            applied_worktree_change = True
             applied_commit = adapter.commit_files(target_files, commit_message)
             rollback_command = [
                 list(command)
@@ -2065,6 +2068,7 @@ def _write_apply_plan(
             branch_created = True
             adapter.apply_diff(run_dir / "candidate.diff")
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
+            applied_worktree_change = True
             applied_commit = adapter.commit_files(target_files, commit_message)
             rollback_command = [
                 list(command)
@@ -2136,12 +2140,12 @@ def _write_apply_plan(
             candidate_id=candidate_id,
             actor=review_actor,
             policy="apply_controller",
-            decision="applied" if applied_commit else "planned",
+            decision="applied" if applied_worktree_change else "planned",
             reason="policy gate and eval report passed",
             applied_commit=applied_commit,
             rollback_ref=json.dumps(rollback_command, sort_keys=True),
         )
-        if applied_commit:
+        if applied_worktree_change:
             store.append_audit_event(
                 "apply.applied",
                 _apply_applied_event_payload(

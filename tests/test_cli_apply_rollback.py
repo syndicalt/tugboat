@@ -1758,6 +1758,25 @@ def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_p
         ["git", "branch", "-D", apply_plan["branch_name"]],
     ]
     assert "Record rollback notes." in (repo / "CODEX.md").read_text(encoding="utf-8")
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        applied_event = connection.execute(
+            """
+            SELECT payload_json
+            FROM audit_events
+            WHERE event_type = 'apply.applied'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        decision = connection.execute(
+            "SELECT decision, applied_commit FROM decisions ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert applied_event is not None
+    applied_payload = json.loads(applied_event[0])
+    assert applied_payload["mode"] == "branch"
+    assert applied_payload["applied_commit"] == ""
+    assert applied_payload["post_hashes"] == apply_plan["post_hashes"]
+    assert decision == ("applied", "")
 
 
 def test_apply_pr_mode_writes_pr_metadata_bundle(tmp_path: Path):
