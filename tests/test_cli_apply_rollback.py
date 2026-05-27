@@ -881,6 +881,25 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
     )
 
 
+def test_rollback_execute_is_blocked_by_read_only_kill_switch_before_revert(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    applied_text = (repo / "CODEX.md").read_text(encoding="utf-8")
+    applied_head = _git(repo, "rev-parse", "HEAD")
+    (repo / ".sidecar" / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 1
+
+    assert "rollback blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert _git(repo, "rev-parse", "HEAD") == applied_head
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == applied_text
+    assert not (run_dir / "rollback-plan.json").exists()
+
+
 def test_rollback_execute_rejects_dirty_worktree_before_revert(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

@@ -555,6 +555,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "rollback":
         repo = Path(args.repo)
+        if args.execute and _write_blocked_by_read_only(repo, "rollback"):
+            return 1
         run_dir = latest_run_dir(repo) if args.decision == "latest" else runs_dir(repo) / args.decision
         try:
             rollback_path = _write_rollback_plan(repo, run_dir, execute=args.execute)
