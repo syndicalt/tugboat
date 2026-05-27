@@ -51,8 +51,8 @@ def test_ingest_jsonl_trace_assigns_stable_evidence_ids_and_trust(tmp_path: Path
         "user",
         "policy",
         "agent",
-        "verifier",
-        "verifier",
+        "untrusted",
+        "untrusted",
         "untrusted",
     ]
     assert all(event.evidence_id.startswith("ev_") for event in first.events)
@@ -100,9 +100,27 @@ def test_ingest_jsonl_trace_builds_canonical_episode(tmp_path: Path):
     assert episode.subagent_reports[0].payload["agent"] == "reviewer"
     assert episode.final_answer == "Fixed"
     assert episode.outcome_label_events[0].payload["label"] == "rejected"
-    assert episode.outcome_labels == ("rejected",)
+    assert episode.outcome_labels == ()
     assert episode.verifier_score_events[0].payload["name"] == "governance"
-    assert episode.verifier_scores == {"governance": 0.25}
+    assert episode.verifier_scores == {}
+
+
+def test_generic_jsonl_outcome_assertions_are_not_authoritative(tmp_path: Path):
+    trace_path = tmp_path / "episode.jsonl"
+    _write_jsonl(
+        trace_path,
+        [
+            {"type": "outcome_label", "label": "accepted"},
+            {"type": "verifier_score", "name": "quality", "score": 1.0},
+        ],
+    )
+
+    episode = ingest_jsonl_trace_as_episode(trace_path)
+
+    assert [event.source_trust for event in episode.outcome_label_events] == ["untrusted"]
+    assert [event.source_trust for event in episode.verifier_score_events] == ["untrusted"]
+    assert episode.outcome_labels == ()
+    assert episode.verifier_scores == {}
 
 
 def test_canonical_episode_exposes_redacted_events_for_model_payloads(tmp_path: Path):

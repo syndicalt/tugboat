@@ -51,7 +51,10 @@ def ingest_jsonl_trace(path: Path) -> TraceBundle:
                 TraceEvent(
                     evidence_id=_evidence_id(line_number, payload),
                     event_type=event_type,
-                    source_trust=source_trust_for_event_type(event_type),
+                    source_trust=source_trust_for_event_type(
+                        event_type,
+                        trusted_assertions=False,
+                    ),
                     line_number=line_number,
                     payload=payload,
                 )
@@ -59,7 +62,9 @@ def ingest_jsonl_trace(path: Path) -> TraceBundle:
     return TraceBundle(trace_path=path, events=tuple(events))
 
 
-def source_trust_for_event_type(event_type: str) -> str:
+def source_trust_for_event_type(event_type: str, *, trusted_assertions: bool = True) -> str:
+    if not trusted_assertions and event_type in {"outcome_label", "verifier_score"}:
+        return "untrusted"
     return TRUST_BY_EVENT_TYPE.get(event_type, "untrusted")
 
 
@@ -74,7 +79,9 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
     verifier_scores = {
         str(event.payload.get("name", "default")): float(event.payload["score"])
         for event in bundle.events
-        if event.event_type == "verifier_score" and "score" in event.payload
+        if event.event_type == "verifier_score"
+        and "score" in event.payload
+        and _is_authoritative_outcome_event(event)
     }
     return CanonicalEpisode(
         trace_path=bundle.trace_path,
@@ -101,7 +108,9 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
         outcome_labels=tuple(
             str(event.payload["label"])
             for event in bundle.events
-            if event.event_type == "outcome_label" and "label" in event.payload
+            if event.event_type == "outcome_label"
+            and "label" in event.payload
+            and _is_authoritative_outcome_event(event)
         ),
         verifier_score_events=_events_of_type(bundle.events, "verifier_score"),
         verifier_scores=verifier_scores,
@@ -110,6 +119,10 @@ def canonical_episode_from_bundle(bundle: TraceBundle) -> CanonicalEpisode:
 
 def _events_of_type(events: tuple[TraceEvent, ...], event_type: str) -> tuple[TraceEvent, ...]:
     return tuple(event for event in events if event.event_type == event_type)
+
+
+def _is_authoritative_outcome_event(event: TraceEvent) -> bool:
+    return event.source_trust in {"user", "verifier", "policy"}
 
 
 def _first_text(events: tuple[TraceEvent, ...], event_type: str) -> str | None:

@@ -4197,9 +4197,9 @@ def test_optimize_feeds_episode_minibatch_guidance_to_patch_propose(tmp_path: Pa
     trace.write_text(
         "\n".join(
             [
-                '{"type":"user_request","text":"Fix bug"}',
-                '{"type":"user_correction","content":"You skipped regression tests"}',
-                '{"type":"outcome_label","label":"rejected"}',
+                '{"event":"request","text":"Fix bug"}',
+                '{"event":"user.correction","text":"You skipped regression tests"}',
+                '{"event":"outcome.label","label":"rejected"}',
                 "",
             ]
         ),
@@ -4219,7 +4219,22 @@ llmff:
         encoding="utf-8",
     )
 
-    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "mcp",
+                "--suite",
+                "held-out",
+            ]
+        )
+        == 0
+    )
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     inputs_by_manifest = [

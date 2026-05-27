@@ -30,6 +30,8 @@ def score_episode(episode: Any) -> tuple[ScoreOutcome, ...]:
                 )
             )
         elif event_type in {"human_decision", "human_label", "human_review", "outcome_label"}:
+            if event_type == "outcome_label" and not _is_authoritative_outcome_event(event):
+                continue
             human_label = str(_field(event, "label") or _field(event, "status")).lower()
             if human_label in {"accepted", "accept", "approved", "approve"}:
                 outcomes.append(
@@ -50,6 +52,8 @@ def score_episode(episode: Any) -> tuple[ScoreOutcome, ...]:
                     )
                 )
         elif event_type == "verifier_score":
+            if not _is_authoritative_outcome_event(event):
+                continue
             score = _verifier_score(event)
             if score < 0.5:
                 outcomes.append(
@@ -147,6 +151,10 @@ def _field(event: dict[str, Any], name: str) -> Any:
     if isinstance(payload, dict):
         return payload.get(name)
     return None
+
+
+def _is_authoritative_outcome_event(event: dict[str, Any]) -> bool:
+    return str(_field(event, "source_trust") or "") in {"user", "verifier", "policy"}
 
 
 def _evidence_id(event: dict[str, Any]) -> str:

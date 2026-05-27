@@ -144,12 +144,40 @@ def test_scoring_accepts_canonical_episode_objects(tmp_path):
 
 
 def test_scoring_uses_canonical_outcome_label_and_verifier_evidence(tmp_path):
+    episode = {
+        "events": [
+            {
+                "type": "outcome_label",
+                "label": "rejected",
+                "source_trust": "verifier",
+                "evidence_id": "ev_label",
+            },
+            {
+                "type": "verifier_score",
+                "name": "governance",
+                "score": 0.25,
+                "source_trust": "verifier",
+                "evidence_id": "ev_score",
+            },
+        ]
+    }
+
+    outcomes = score_episode(episode)
+
+    assert [(outcome.plugin, outcome.label, outcome.metrics) for outcome in outcomes] == [
+        ("human", "human-rejected", {"rejected": 1}),
+        ("verifier", "verifier-failed", {"score_percent": 25}),
+    ]
+    assert [outcome.evidence for outcome in outcomes] == [("ev_label",), ("ev_score",)]
+
+
+def test_scoring_ignores_untrusted_generic_outcome_assertions(tmp_path):
     trace = tmp_path / "episode.jsonl"
     trace.write_text(
         "\n".join(
             [
-                '{"type":"outcome_label","label":"rejected"}',
-                '{"type":"verifier_score","name":"governance","score":0.25}',
+                '{"type":"outcome_label","label":"accepted"}',
+                '{"type":"verifier_score","name":"quality","score":1.0}',
             ]
         )
         + "\n",
@@ -159,11 +187,7 @@ def test_scoring_uses_canonical_outcome_label_and_verifier_evidence(tmp_path):
 
     outcomes = score_episode(episode)
 
-    assert [(outcome.plugin, outcome.label, outcome.metrics) for outcome in outcomes] == [
-        ("human", "human-rejected", {"rejected": 1}),
-        ("verifier", "verifier-failed", {"score_percent": 25}),
-    ]
-    assert all(outcome.evidence[0].startswith("ev_") for outcome in outcomes)
+    assert outcomes == ()
 
 
 def test_canonical_user_correction_content_events_count_recurrence(tmp_path):
