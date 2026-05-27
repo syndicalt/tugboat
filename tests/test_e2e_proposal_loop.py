@@ -1,11 +1,26 @@
 import json
 import os
 import sqlite3
+import subprocess
 from contextlib import closing
 from pathlib import Path
 from stat import S_IMODE
 
 from tugboat.cli import main
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return result.stdout.strip()
 
 
 def test_fresh_repo_runs_credential_free_proposal_loop_with_shipped_fixture_backend(
@@ -180,7 +195,7 @@ if args[:1] == ["run"]:
         outputs["candidate_patch"].write_text(json.dumps({
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
-            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@ -1,0 +1,1 @@\\n+Add regression-test guidance.\\n",
+            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@ -1,3 +1,4 @@\\n # Rules\\n \\n Use tests.\\n+Add regression-test guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
             "expected_behavior_change": "Agents add regression-test guidance before closing fixes.",
@@ -611,6 +626,89 @@ llmff:
     assert decision_trace["candidate"]["candidate_id"] == candidate["candidate_id"]
     assert (run_dir / "report.md").exists()
     assert codex.read_text(encoding="utf-8") == original
+
+
+def test_inspect_decision_spans_codex_export_to_apply_and_rollback(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "tugboat@example.test")
+    _git(repo, "config", "user.name", "Tugboat Tests")
+    codex = repo / "CODEX.md"
+    original = "# Rules\n\nUse tests.\n"
+    codex.write_text(original, encoding="utf-8")
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / ".gitignore").write_text("*\n!.gitignore\n!policy.yaml\n", encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+
+    trace = FIXTURES / "traces" / "codex-local-session-export.jsonl"
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    assert "Add regression-test guidance." in codex.read_text(encoding="utf-8")
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 0
+    assert codex.read_text(encoding="utf-8") == original
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    rollback_plan = json.loads((run_dir / "rollback-plan.json").read_text(encoding="utf-8"))
+
+    assert decision_trace["decision"]["decision"] == "applied"
+    assert decision_trace["decision"]["applied_commit"] == apply_plan["applied_commit"]
+    assert decision_trace["audit"]["evidence_refs"] == [canonical["events"][0]["evidence_id"]]
+    assert decision_trace["trace_events"][0]["evidence_id"] == canonical["events"][0]["evidence_id"]
+    assert decision_trace["trace_events"][0]["event_type"] == "instruction_snapshot"
+    assert decision_trace["candidate"]["diff_path"] == decision_trace["artifacts"]["candidate_diff"]
+    assert decision_trace["edit_operations"][0]["payload"] == {
+        "changed_lines": 1,
+        "file": "CODEX.md",
+        "normative_changes": 0,
+        "operator": "add",
+        "section": "Rules",
+    }
+    assert {split["split_name"] for split in decision_trace["validation_splits"]} >= {
+        "trigger",
+        "held_out",
+        "governance",
+    }
+    assert decision_trace["artifacts"]["apply_plan"] == apply_plan["provenance_bundle"].replace(
+        "provenance-bundle.json",
+        "apply-plan.json",
+    )
+    assert decision_trace["artifacts"]["provenance_bundle"] == apply_plan["provenance_bundle"]
+    assert decision_trace["artifacts"]["rollback_plan"] == (
+        ".sidecar/runs/" + run_dir.name + "/rollback-plan.json"
+    )
+    assert decision_trace["rollbacks"][0]["executed"] is True
+    assert decision_trace["rollbacks"][0]["revert_commit"] == rollback_plan["revert_commit"]
+    assert decision_trace["rollbacks"][0]["post_rollback_eval_result"]["restored_pre_hashes"] is True
+    assert all(
+        decision_trace[section][0]["event_hash"]
+        for section in (
+            "trace_events",
+            "edit_operations",
+            "eval_runs",
+            "validation_splits",
+            "rollbacks",
+        )
+    )
 
 
 def test_provider_backed_llmff_requires_explicit_network_policy(tmp_path: Path, capsys):
