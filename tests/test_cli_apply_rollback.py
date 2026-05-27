@@ -1894,6 +1894,131 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_instead_of_cli_valu
     assert "rollback_rate_too_high" in event_payload["reasons"]
 
 
+def test_auto_apply_precheck_blocks_without_eval_evidence(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    (run_dir / "eval-report.json").unlink()
+    _write_auto_apply_policy(repo, version=6)
+    _seed_auto_apply_history(repo)
+    candidate = cli_module._candidate_from_artifacts(run_dir)
+
+    with pytest.raises(
+        ValueError,
+        match="held_out_eval_failed, governance_regression_failed",
+    ):
+        cli_module._assert_auto_apply_precheck(
+            repo,
+            run_dir,
+            candidate_id=7,
+            candidate=candidate,
+            mode="commit",
+            branch_name="tugboat/candidate-7",
+            review_actor="operator@example.com",
+            confirmed=True,
+            policy_version=6,
+            burn_in_days=30,
+            rejection_rate=0.0,
+            rollback_rate=0.0,
+        )
+
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["phase"] == "precheck"
+    assert decision["eligible"] is False
+    assert decision["reasons"] == [
+        "held_out_eval_failed",
+        "governance_regression_failed",
+    ]
+    assert decision["candidate"]["held_out_eval_passed"] is False
+    assert decision["candidate"]["governance_regression_passed"] is False
+
+
+def test_auto_apply_final_uses_eval_report_governance_result(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["governance_passed"] = False
+    eval_report["passed"] = True
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    _write_auto_apply_policy(repo, version=7)
+    _seed_auto_apply_history(repo)
+    candidate = cli_module._candidate_from_artifacts(run_dir)
+
+    with pytest.raises(ValueError, match="governance_regression_failed"):
+        cli_module._assert_auto_apply_final(
+            repo,
+            run_dir,
+            candidate_id=7,
+            candidate=candidate,
+            mode="commit",
+            branch_name="tugboat/candidate-7",
+            applied_commit="abc123",
+            review_actor="operator@example.com",
+            confirmed=True,
+            policy_version=7,
+            burn_in_days=30,
+            rejection_rate=0.0,
+            rollback_rate=0.0,
+        )
+
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["phase"] == "final"
+    assert decision["eligible"] is False
+    assert decision["reasons"] == ["governance_regression_failed"]
+    assert decision["candidate"]["held_out_eval_passed"] is True
+    assert decision["candidate"]["governance_regression_passed"] is False
+
+
+def test_auto_apply_eval_evidence_rejects_candidate_mismatch_and_malformed_artifacts(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["candidate_id"] = 99
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert cli_module._auto_apply_eval_evidence(run_dir, candidate_id=7) == (
+        False,
+        False,
+    )
+
+    (run_dir / "eval-report.json").write_text("{not-json\n", encoding="utf-8")
+    assert cli_module._auto_apply_eval_evidence(run_dir, candidate_id=7) == (
+        False,
+        False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("patch", "expected"),
+    [
+        ({"trigger_score": 0.9, "held_out_score": 0.9}, False),
+        ({"trigger_score": None}, False),
+        ({"validation_splits": {"trigger": ["same"], "held_out": ["same"]}}, False),
+        ({"metrics": {"regression_score": 2, "baseline_regression_score": 1}}, False),
+        ({"metrics": {"regression_score": 1, "baseline_regression_score": 1}}, True),
+        ({"trigger_score": "bad"}, False),
+    ],
+)
+def test_auto_apply_held_out_eval_evidence_checks_validation_shape(
+    tmp_path: Path,
+    patch: dict[str, object],
+    expected: bool,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report.update(patch)
+
+    assert cli_module._auto_apply_held_out_eval_passed(eval_report) is expected
+
+
 def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

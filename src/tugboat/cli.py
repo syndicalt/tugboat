@@ -2370,6 +2370,10 @@ def _assert_auto_apply_precheck(
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
+    held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
+        run_dir,
+        candidate_id=candidate_id,
+    )
     vcs_proof = VcsProof(
         mode=mode,
         commit_sha="pending",
@@ -2381,8 +2385,8 @@ def _assert_auto_apply_precheck(
         repository=str(repo.resolve()),
         change_class=candidate.risk_class,
         categories=categories,
-        held_out_eval_passed=True,
-        governance_regression_passed=True,
+        held_out_eval_passed=held_out_eval_passed,
+        governance_regression_passed=governance_regression_passed,
         rejection_rate=float(metrics["rejection_rate"]),
         rollback_rate=float(metrics["rollback_rate"]),
         vcs_proof=vcs_proof,
@@ -2442,6 +2446,10 @@ def _assert_auto_apply_final(
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
+    held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
+        run_dir,
+        candidate_id=candidate_id,
+    )
     vcs_proof = VcsProof(
         mode=mode,
         commit_sha=applied_commit,
@@ -2453,8 +2461,8 @@ def _assert_auto_apply_final(
         repository=str(repo.resolve()),
         change_class=candidate.risk_class,
         categories=categories,
-        held_out_eval_passed=True,
-        governance_regression_passed=True,
+        held_out_eval_passed=held_out_eval_passed,
+        governance_regression_passed=governance_regression_passed,
         rejection_rate=float(metrics["rejection_rate"]),
         rollback_rate=float(metrics["rollback_rate"]),
         vcs_proof=vcs_proof,
@@ -2610,6 +2618,50 @@ def _auto_apply_candidate_categories(candidate: CandidatePatch) -> tuple[str, ..
         if isinstance(section, str) and section.strip():
             categories.append(section.strip().lower().replace("-", "_").replace(" ", "_"))
     return tuple(categories)
+
+
+def _auto_apply_eval_evidence(run_dir: Path, *, candidate_id: int) -> tuple[bool, bool]:
+    eval_report_path = run_dir / "eval-report.json"
+    policy_gate_path = run_dir / "policy-gate.json"
+    if not eval_report_path.exists() or not policy_gate_path.exists():
+        return False, False
+    try:
+        eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
+        validate_json_artifact("eval-report.json", eval_report)
+        policy_gate = json.loads(policy_gate_path.read_text(encoding="utf-8"))
+        validate_json_artifact("policy-gate.json", policy_gate)
+        if int(eval_report["candidate_id"]) != candidate_id:
+            return False, False
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False, False
+    return (
+        _auto_apply_held_out_eval_passed(eval_report),
+        bool(eval_report.get("governance_passed", False)) and bool(policy_gate.get("allowed", False)),
+    )
+
+
+def _auto_apply_held_out_eval_passed(eval_report: dict[str, object]) -> bool:
+    try:
+        if str(eval_report.get("recommendation")) != "accept":
+            return False
+        trigger_score = eval_report.get("trigger_score")
+        held_out_score = eval_report.get("held_out_score")
+        if trigger_score is None or held_out_score is None:
+            return False
+        if float(held_out_score) <= float(trigger_score):
+            return False
+        if _eval_validation_split_failure(eval_report) is not None:
+            return False
+        regression_score = _score_from_eval_report(eval_report, "regression_score")
+        baseline_regression_score = _score_from_eval_report(eval_report, "baseline_regression_score")
+        if regression_score is None and baseline_regression_score is None:
+            return True
+        if regression_score is None or baseline_regression_score is None:
+            return False
+        regression_tolerance = _score_from_eval_report(eval_report, "regression_tolerance") or 0.0
+        return regression_score <= baseline_regression_score + regression_tolerance
+    except (TypeError, ValueError):
+        return False
 
 
 def _auto_apply_decision_snapshot(
