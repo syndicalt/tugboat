@@ -4303,6 +4303,9 @@ llmff:
     assert batch == {
         "schema_version": 1,
         "held_out_suite": "held-out",
+        "train_episodes": ["1"],
+        "held_out_episodes": [],
+        "unseen_suites": [],
         "success_episodes": [],
         "failure_episodes": ["1"],
         "success_patterns": [],
@@ -4398,6 +4401,9 @@ llmff:
     assert batch == {
         "schema_version": 1,
         "held_out_suite": "held-out",
+        "train_episodes": ["1", "2"],
+        "held_out_episodes": [],
+        "unseen_suites": [],
         "success_episodes": ["1"],
         "failure_episodes": ["2"],
         "success_patterns": ["Added regression coverage"],

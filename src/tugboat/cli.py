@@ -64,6 +64,7 @@ from tugboat.ops.retention import apply_retention_policy
 from tugboat.optimization import (
     REJECTED_EDIT_SUPPRESSION_SIGNAL,
     EpisodeOutcome,
+    build_minibatches,
     build_success_failure_minibatch,
 )
 from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
@@ -2186,18 +2187,24 @@ def _record_optimize_minibatch_guidance(repo: Path, run_dir: Path, *, suite_id: 
     if not outcomes:
         return
     minibatch = build_success_failure_minibatch(tuple(outcomes))
+    batches = build_minibatches(
+        train_episodes=tuple(outcome.episode_id for outcome in outcomes),
+        held_out_episodes=(),
+        unseen_suites=(),
+    )
     batch_payload = {
         "schema_version": SCHEMA_VERSION,
         "failure_episodes": list(minibatch.failure_episodes),
         "failure_patterns": list(minibatch.failure_patterns),
+        "held_out_episodes": list(batches.held_out_episodes),
         "held_out_suite": suite_id,
         "success_episodes": list(minibatch.success_episodes),
         "success_patterns": list(minibatch.success_patterns),
+        "train_episodes": list(batches.train_episodes),
+        "unseen_suites": list(batches.unseen_suites),
     }
-    (run_dir / "optimization-batch.json").write_text(
-        json.dumps(batch_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    validate_json_artifact("optimization-batch.json", batch_payload)
+    write_json_artifact(run_dir / "optimization-batch.json", batch_payload)
     guidance = _optimizer_guidance_from_minibatch(minibatch, suite_id=suite_id)
     if guidance is None:
         return

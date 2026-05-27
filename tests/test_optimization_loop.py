@@ -36,6 +36,19 @@ def test_build_minibatches_keeps_triggering_and_held_out_episodes_separate():
     assert batches.unseen_suites == ("governance",)
 
 
+def test_build_minibatches_rejects_train_held_out_overlap():
+    try:
+        build_minibatches(
+            train_episodes=("ep-1",),
+            held_out_episodes=("ep-1",),
+            unseen_suites=("governance",),
+        )
+    except ValueError as error:
+        assert str(error) == "train and held-out episodes must be separate"
+    else:
+        raise AssertionError("overlapping train and held-out episodes should be rejected")
+
+
 def test_build_success_failure_minibatch_separates_outcomes_for_reflection():
     minibatch = build_success_failure_minibatch(
         (
