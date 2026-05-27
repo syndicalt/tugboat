@@ -149,10 +149,18 @@ Thresholds are not CLI overrides. They live in policy and are checked against le
 ```yaml
 auto_apply:
   enabled: false
-  max_changed_lines: 30
-  minimum_burn_in_days: 14
-  maximum_rejection_rate: 0.10
-  maximum_rollback_rate: 0.02
+  max_changed_lines: 50
+  lanes:
+    docs_hygiene:
+      max_changed_lines: 50
+      minimum_burn_in_days: 3
+      maximum_rejection_rate: 0.20
+      maximum_rollback_rate: 0.05
+    skill_improvement:
+      max_changed_lines: 30
+      minimum_burn_in_days: 7
+      maximum_rejection_rate: 0.15
+      maximum_rollback_rate: 0.03
 ```
 
 Even when enabled, auto-apply requires:
@@ -168,7 +176,7 @@ Even when enabled, auto-apply requires:
 - one-command rollback
 - acceptable ledger-derived burn-in, rejection rate, and rollback rate
 
-Class B is not enabled by default. Policy, authority, provider, network, sandbox, deployment, secrets, approval, and memory-behavior changes remain outside the default auto-apply lane.
+Class B is not enabled by default. Policy, authority, provider, network, sandbox, deployment, secrets, approval, and memory-behavior changes remain outside the default auto-apply lanes.
 
 ## MCP And Daemon Operations
 
@@ -280,6 +288,6 @@ trace -> audit -> proposal -> eval -> review -> governed apply
 
 Default posture: proposal-only.
 
-Auto-apply exists, but narrowly: policy opt-in, Class A only, ledger-derived burn-in/reliability, held-out eval, governance pass, VCS commit, one-command rollback.
+Auto-apply exists, but narrowly: policy opt-in, Class A lanes only, ledger-derived burn-in/reliability, held-out eval, governance pass, VCS commit, one-command rollback.
 
 The goal is not prompt fiddling. It is production maintenance for the instruction/config layer agents rely on.

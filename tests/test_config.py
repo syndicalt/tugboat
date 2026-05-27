@@ -11,10 +11,14 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
 
     assert policy.mode == "proposal_only"
     assert policy.auto_apply_enabled is False
-    assert policy.auto_apply_max_changed_lines == 30
+    assert policy.auto_apply_max_changed_lines == 50
     assert policy.auto_apply_minimum_burn_in_days == 14
     assert policy.auto_apply_maximum_rejection_rate == 0.10
     assert policy.auto_apply_maximum_rollback_rate == 0.02
+    assert [(lane.name, lane.max_changed_lines) for lane in policy.auto_apply_lanes] == [
+        ("docs_hygiene", 50),
+        ("skill_improvement", 30),
+    ]
     assert policy.roadmap_learning_rate_max_files_touched == 2
     assert policy.roadmap_learning_rate_max_sections_touched == 4
     assert policy.roadmap_learning_rate_max_changed_lines == 20
@@ -89,6 +93,40 @@ auto_apply:
     policy = load_policy(tmp_path)
 
     assert policy.auto_apply_allowed_risk_classes == ("A",)
+
+
+def test_load_policy_yaml_reads_auto_apply_lanes(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+auto_apply:
+  lanes:
+    docs_hygiene:
+      enabled: true
+      allowed_categories:
+        - typo_fix
+      allowed_risk_classes:
+        - A
+      max_changed_lines: 50
+      minimum_burn_in_days: 3
+      maximum_rejection_rate: 0.20
+      maximum_rollback_rate: 0.05
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert len(policy.auto_apply_lanes) == 1
+    lane = policy.auto_apply_lanes[0]
+    assert lane.name == "docs_hygiene"
+    assert lane.allowed_categories == ("typo_fix",)
+    assert lane.max_changed_lines == 50
+    assert lane.minimum_burn_in_days == 3
+    assert lane.maximum_rejection_rate == 0.20
+    assert lane.maximum_rollback_rate == 0.05
 
 
 def test_load_policy_yaml_reads_allowed_manifest_hashes(tmp_path: Path):

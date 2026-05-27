@@ -2429,6 +2429,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "policy_version",
             "repository",
             "rollback_command",
+            "lane",
             "vcs",
             "readiness_metrics",
         ],
@@ -2439,6 +2440,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "policy_version": {"type": "integer"},
             "repository": {"type": "string"},
             "rollback_command": {"type": "array", "items": {"type": "string"}},
+            "lane": {"type": "string"},
             "vcs": {
                 "type": "object",
                 "additionalProperties": False,

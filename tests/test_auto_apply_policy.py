@@ -20,6 +20,7 @@ def _passing_candidate(**overrides: object) -> AutoApplyCandidate:
         "governance_regression_passed": True,
         "rejection_rate": 0.02,
         "rollback_rate": 0.001,
+        "changed_lines": 1,
         "vcs_proof": VcsProof(
             mode="branch",
             commit_sha=None,
@@ -66,6 +67,11 @@ def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     assert AutoApplyPolicy().minimum_burn_in_days == 14
     assert AutoApplyPolicy().maximum_rejection_rate == 0.10
     assert AutoApplyPolicy().maximum_rollback_rate == 0.02
+    assert AutoApplyPolicy().max_changed_lines == 50
+    assert [lane.name for lane in AutoApplyPolicy().lanes] == [
+        "docs_hygiene",
+        "skill_improvement",
+    ]
 
     without_policy = evaluate_auto_apply(
         candidate=_passing_candidate(),
@@ -116,6 +122,7 @@ def test_auto_apply_reports_all_auditable_ineligibility_reasons():
             governance_regression_passed=False,
             rejection_rate=0.25,
             rollback_rate=0.08,
+            changed_lines=51,
             vcs_proof=VcsProof(
                 mode="proposal_only",
                 commit_sha=None,
@@ -123,7 +130,7 @@ def test_auto_apply_reports_all_auditable_ineligibility_reasons():
                 rollback_commands=(),
             ),
         ),
-        readiness=_ready(burn_in_days=12),
+        readiness=_ready(burn_in_days=2),
     )
 
     assert decision.eligible is False
@@ -132,6 +139,8 @@ def test_auto_apply_reports_all_auditable_ineligibility_reasons():
         "burn_in_period_too_short",
         "repository_not_allowlisted",
         "change_class_not_allowed",
+        "auto_apply_change_type_not_allowed",
+        "max_changed_lines_exceeded",
         "held_out_eval_failed",
         "governance_regression_failed",
         "rejection_rate_too_high",
@@ -172,6 +181,17 @@ def test_forbidden_categories_and_non_class_a_changes_are_never_eligible():
     ) == tuple(f"forbidden_category:{category}" for category in forbidden_categories)
 
 
+def test_forbidden_category_blocks_even_when_docs_hygiene_lane_matches():
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(categories=("typo_fix", "secrets")),
+        readiness=_ready(burn_in_days=3),
+    )
+
+    assert decision.eligible is False
+    assert decision.lane == "docs_hygiene"
+    assert decision.reasons == ("forbidden_category:secrets",)
+
+
 def test_auto_apply_requires_narrow_allowed_change_type():
     unsupported = evaluate_auto_apply(
         candidate=_passing_candidate(categories=("instruction_clarification",)),
@@ -186,6 +206,38 @@ def test_auto_apply_requires_narrow_allowed_change_type():
     assert unsupported.approval_bundle is None
     assert unsupported.reasons == ("auto_apply_change_type_not_allowed",)
     assert allowed.eligible is True
+    assert allowed.lane == "docs_hygiene"
+
+
+def test_docs_hygiene_lane_relaxes_small_safe_changes_without_cli_thresholds():
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(changed_lines=50, rejection_rate=0.20, rollback_rate=0.05),
+        readiness=_ready(burn_in_days=3),
+    )
+
+    assert decision.eligible is True
+    assert decision.lane == "docs_hygiene"
+
+
+def test_skill_improvement_lane_has_separate_thresholds():
+    accepted = evaluate_auto_apply(
+        candidate=_passing_candidate(
+            categories=("skill_improvement",),
+            changed_lines=30,
+            rejection_rate=0.15,
+            rollback_rate=0.03,
+        ),
+        readiness=_ready(burn_in_days=7),
+    )
+    too_large = evaluate_auto_apply(
+        candidate=_passing_candidate(categories=("skill_improvement",), changed_lines=31),
+        readiness=_ready(burn_in_days=7),
+    )
+
+    assert accepted.eligible is True
+    assert accepted.lane == "skill_improvement"
+    assert too_large.eligible is False
+    assert too_large.reasons == ("max_changed_lines_exceeded",)
 
 
 def test_eligible_candidate_returns_approval_bundle_without_apply_execution():
@@ -204,6 +256,7 @@ def test_eligible_candidate_returns_approval_bundle_without_apply_execution():
         "policy_version": 9,
         "repository": "allowed/repo",
         "rollback_command": ["git", "switch", "main"],
+        "lane": "docs_hygiene",
         "vcs": {
             "branch_name": "tugboat/candidate-123",
             "commit_sha": None,

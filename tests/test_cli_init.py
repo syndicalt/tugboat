@@ -40,10 +40,36 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
         ],
         "auto_apply": {
             "enabled": False,
-            "max_changed_lines": 30,
+            "max_changed_lines": 50,
             "minimum_burn_in_days": 14,
             "maximum_rejection_rate": 0.10,
             "maximum_rollback_rate": 0.02,
+            "lanes": {
+                "docs_hygiene": {
+                    "enabled": True,
+                    "allowed_categories": [
+                        "broken_internal_link",
+                        "duplicate_sentence_removal",
+                        "formatting_normalization",
+                        "stale_command_reference",
+                        "typo_fix",
+                    ],
+                    "allowed_risk_classes": ["A"],
+                    "max_changed_lines": 50,
+                    "minimum_burn_in_days": 3,
+                    "maximum_rejection_rate": 0.20,
+                    "maximum_rollback_rate": 0.05,
+                },
+                "skill_improvement": {
+                    "enabled": True,
+                    "allowed_categories": ["skill_improvement"],
+                    "allowed_risk_classes": ["A"],
+                    "max_changed_lines": 30,
+                    "minimum_burn_in_days": 7,
+                    "maximum_rejection_rate": 0.15,
+                    "maximum_rollback_rate": 0.03,
+                },
+            },
         },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,

@@ -1674,6 +1674,7 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
             run_dir.name,
             "--execute",
         ],
+        "lane": "docs_hygiene",
         "vcs": {
             "branch_name": apply_plan["branch_name"],
             "commit_sha": apply_plan["applied_commit"],
@@ -1722,8 +1723,10 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
     decisions = _auto_apply_decision_payloads(repo)
     assert [payload["phase"] for payload in decisions] == ["precheck", "final"]
     assert [payload["eligible"] for payload in decisions] == [True, True]
+    assert [payload["lane"] for payload in decisions] == ["docs_hygiene", "docs_hygiene"]
     assert decisions[0]["candidate"]["change_class"] == "A"
     assert decisions[0]["candidate"]["categories"] == ["A", "typo_fix"]
+    assert decisions[0]["candidate"]["changed_lines"] == 1
     assert decisions[0]["vcs"]["commit_sha"] == "pending"
     assert decisions[1]["vcs"]["commit_sha"] == apply_plan["applied_commit"]
     assert decisions[1]["readiness_metrics"] == approval["readiness_metrics"]
@@ -1905,6 +1908,7 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
     assert event is not None
     event_payload = json.loads(event[0])
     assert event_payload["eligible"] is False
+    assert event_payload["lane"] is None
     assert event_payload["reasons"] == ["auto_apply_change_type_not_allowed"]
     assert event_payload["phase"] == "precheck"
     assert event_payload["candidate"]["change_class"] == "A"
@@ -1913,6 +1917,35 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
         "allowed_change_classes": ["A"],
         "allowed_repositories": [str(repo)],
         "enabled": True,
+        "lanes": [
+            {
+                "allowed_categories": [
+                    "broken_internal_link",
+                    "duplicate_sentence_removal",
+                    "formatting_normalization",
+                    "stale_command_reference",
+                    "typo_fix",
+                ],
+                "allowed_change_classes": ["A"],
+                "enabled": True,
+                "max_changed_lines": 50,
+                "maximum_rejection_rate": 0.2,
+                "maximum_rollback_rate": 0.05,
+                "minimum_burn_in_days": 3,
+                "name": "docs_hygiene",
+            },
+            {
+                "allowed_categories": ["skill_improvement"],
+                "allowed_change_classes": ["A"],
+                "enabled": True,
+                "max_changed_lines": 30,
+                "maximum_rejection_rate": 0.15,
+                "maximum_rollback_rate": 0.03,
+                "minimum_burn_in_days": 7,
+                "name": "skill_improvement",
+            },
+        ],
+        "max_changed_lines": 50,
         "maximum_rejection_rate": 0.10,
         "maximum_rollback_rate": 0.02,
         "minimum_burn_in_days": 14,
@@ -2118,7 +2151,7 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_without_cli_overrid
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
     _write_auto_apply_policy(repo, version=5)
-    _seed_auto_apply_history(repo, reviewed=20, rejected=3, applied=20, rollbacks=1)
+    _seed_auto_apply_history(repo, reviewed=20, rejected=5, applied=20, rollbacks=2)
 
     assert (
         main(
@@ -2145,10 +2178,10 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_without_cli_overrid
     assert event_payload["phase"] == "precheck"
     assert event_payload["eligible"] is False
     assert event_payload["readiness_metrics"]["reviewed_count"] == 20
-    assert event_payload["readiness_metrics"]["rejected_count"] == 3
-    assert event_payload["readiness_metrics"]["rejection_rate"] == 0.15
-    assert event_payload["readiness_metrics"]["rollback_count"] == 1
-    assert event_payload["readiness_metrics"]["rollback_rate"] == 0.05
+    assert event_payload["readiness_metrics"]["rejected_count"] == 5
+    assert event_payload["readiness_metrics"]["rejection_rate"] == 0.25
+    assert event_payload["readiness_metrics"]["rollback_count"] == 2
+    assert event_payload["readiness_metrics"]["rollback_rate"] == 0.1
     assert event_payload["readiness_metrics"]["source_audit_range"]["first_sequence"] is not None
     assert event_payload["readiness_metrics"]["source_audit_range"]["last_sequence"] is not None
     assert "rejection_rate_too_high" in event_payload["reasons"]

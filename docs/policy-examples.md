@@ -86,10 +86,35 @@ Use `allowed_repositories` and `tool_policy` to keep MCP access scoped to review
 ```yaml
 auto_apply:
   enabled: false
-  max_changed_lines: 30
+  max_changed_lines: 50
   minimum_burn_in_days: 14
   maximum_rejection_rate: 0.10
   maximum_rollback_rate: 0.02
+  lanes:
+    docs_hygiene:
+      enabled: true
+      allowed_categories:
+        - broken_internal_link
+        - duplicate_sentence_removal
+        - formatting_normalization
+        - stale_command_reference
+        - typo_fix
+      allowed_risk_classes:
+        - A
+      max_changed_lines: 50
+      minimum_burn_in_days: 3
+      maximum_rejection_rate: 0.20
+      maximum_rollback_rate: 0.05
+    skill_improvement:
+      enabled: true
+      allowed_categories:
+        - skill_improvement
+      allowed_risk_classes:
+        - A
+      max_changed_lines: 30
+      minimum_burn_in_days: 7
+      maximum_rejection_rate: 0.15
+      maximum_rollback_rate: 0.03
 ```
 
-Auto-apply remains disabled unless a separate burn-in, confirmation, VCS, and rollback policy is satisfied.
+Auto-apply remains disabled unless the global switch is enabled and a lane-specific burn-in, confirmation, VCS, eval, governance, and rollback policy is satisfied.

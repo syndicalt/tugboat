@@ -2013,6 +2013,7 @@ def test_validate_auto_apply_approval_requires_readiness_metrics():
                 "policy_version": 9,
                 "repository": "/repo",
                 "rollback_command": ["tugboat", "rollback", "--execute"],
+                "lane": "docs_hygiene",
                 "vcs": {"branch_name": "branch", "commit_sha": "abc", "mode": "commit"},
             },
         )

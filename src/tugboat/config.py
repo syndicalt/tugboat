@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from tugboat.models import InstructionFilePolicy, Policy
+from tugboat.models import AutoApplyLaneConfig, InstructionFilePolicy, Policy
 
 
 DEFAULT_INSTRUCTION_FILES = (
@@ -99,6 +99,68 @@ def _as_non_empty_string_tuple(raw: Any, field_name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in values)
 
 
+def _as_auto_apply_lanes(raw: Any) -> tuple[AutoApplyLaneConfig, ...]:
+    defaults_by_name = {lane.name: lane for lane in Policy().auto_apply_lanes}
+    if raw is None:
+        return Policy().auto_apply_lanes
+    if not isinstance(raw, dict):
+        raise ValueError("auto_apply.lanes must be a mapping")
+
+    lanes: list[AutoApplyLaneConfig] = []
+    for lane_name, lane_raw in raw.items():
+        if not isinstance(lane_raw, dict):
+            raise ValueError(f"auto_apply.lanes.{lane_name} must be a mapping")
+        name = str(lane_name)
+        default = defaults_by_name.get(name)
+        lanes.append(
+            AutoApplyLaneConfig(
+                name=name,
+                enabled=bool(lane_raw.get("enabled", default.enabled if default else False)),
+                allowed_categories=_as_string_tuple(
+                    lane_raw.get(
+                        "allowed_categories",
+                        list(default.allowed_categories) if default else [],
+                    ),
+                    f"auto_apply.lanes.{name}.allowed_categories",
+                ),
+                allowed_risk_classes=_as_string_tuple(
+                    lane_raw.get(
+                        "allowed_risk_classes",
+                        list(default.allowed_risk_classes) if default else ["A"],
+                    ),
+                    f"auto_apply.lanes.{name}.allowed_risk_classes",
+                ),
+                max_changed_lines=_as_non_negative_int(
+                    lane_raw.get(
+                        "max_changed_lines",
+                        default.max_changed_lines if default else 30,
+                    ),
+                    f"auto_apply.lanes.{name}.max_changed_lines",
+                ),
+                minimum_burn_in_days=_as_non_negative_days(
+                    lane_raw.get(
+                        "minimum_burn_in_days",
+                        default.minimum_burn_in_days if default else 14,
+                    ),
+                    f"auto_apply.lanes.{name}.minimum_burn_in_days",
+                ),
+                maximum_rejection_rate=float(
+                    lane_raw.get(
+                        "maximum_rejection_rate",
+                        default.maximum_rejection_rate if default else 0.10,
+                    )
+                ),
+                maximum_rollback_rate=float(
+                    lane_raw.get(
+                        "maximum_rollback_rate",
+                        default.maximum_rollback_rate if default else 0.02,
+                    )
+                ),
+            )
+        )
+    return tuple(lanes)
+
+
 def load_policy(repo: Path) -> Policy:
     path = repo / ".sidecar" / "policy.yaml"
     if not path.exists():
@@ -141,6 +203,7 @@ def load_policy(repo: Path) -> Policy:
             ),
             "auto_apply.allowed_risk_classes",
         ),
+        auto_apply_lanes=_as_auto_apply_lanes(auto_apply.get("lanes")),
         roadmap_learning_rate_max_files_touched=_as_non_negative_int(
             learning_rate_budget.get(
                 "max_files_touched",

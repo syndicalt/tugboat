@@ -26,7 +26,7 @@ Avoid roadmap items that turn Tugboat into generic agent analytics, a remote das
 
 Goal: build a reliable auto-update system for low-risk harness/config maintenance without weakening the default proposal-first posture.
 
-This is broader than the current narrow auto-apply lane. Auto-update should mean a complete controlled-update lifecycle:
+This is broader than the current narrow auto-apply lanes. The release baseline has `docs_hygiene` and `skill_improvement` lanes, but auto-update should mean a complete controlled-update lifecycle:
 
 ```text
 eligible candidate -> preflight -> staged update -> validation -> commit/PR -> monitor -> rollback
@@ -38,6 +38,7 @@ Required capabilities:
   - `enabled`;
   - allowed repositories;
   - allowed files and headings;
+  - lane-specific limits for `docs_hygiene`, `skill_improvement`, and future reviewed lanes;
   - allowed risk classes;
   - allowed change categories;
   - maximum changed lines;

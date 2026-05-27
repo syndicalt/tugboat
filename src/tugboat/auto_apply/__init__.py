@@ -25,6 +25,7 @@ ALLOWED_CHANGE_CATEGORIES = frozenset(
         "typo_fix",
     }
 )
+SKILL_IMPROVEMENT_CATEGORIES = frozenset({"skill_improvement"})
 REASON_ORDER = (
     "explicit_policy_required",
     "auto_apply_disabled",
@@ -34,6 +35,7 @@ REASON_ORDER = (
     "repository_not_allowlisted",
     "change_class_not_allowed",
     "auto_apply_change_type_not_allowed",
+    "max_changed_lines_exceeded",
     "held_out_eval_failed",
     "governance_regression_failed",
     "rejection_rate_too_high",
@@ -42,6 +44,53 @@ REASON_ORDER = (
     "one_command_rollback_required",
 )
 VCS_BACKED_MODES = frozenset({"branch", "commit"})
+
+
+def _category_key(category: str) -> str:
+    return category.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+@dataclass(frozen=True)
+class AutoApplyLanePolicy:
+    name: str
+    enabled: bool
+    allowed_categories: tuple[str, ...]
+    allowed_change_classes: tuple[str, ...] = ("A",)
+    max_changed_lines: int = 30
+    minimum_burn_in_days: int = 14
+    maximum_rejection_rate: float = 0.10
+    maximum_rollback_rate: float = 0.02
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _category_key(self.name))
+        object.__setattr__(
+            self,
+            "allowed_categories",
+            tuple(_category_key(category) for category in self.allowed_categories),
+        )
+        object.__setattr__(self, "allowed_change_classes", tuple(self.allowed_change_classes))
+
+
+DEFAULT_AUTO_APPLY_LANES = (
+    AutoApplyLanePolicy(
+        name="docs_hygiene",
+        enabled=True,
+        allowed_categories=tuple(sorted(ALLOWED_CHANGE_CATEGORIES)),
+        max_changed_lines=50,
+        minimum_burn_in_days=3,
+        maximum_rejection_rate=0.20,
+        maximum_rollback_rate=0.05,
+    ),
+    AutoApplyLanePolicy(
+        name="skill_improvement",
+        enabled=True,
+        allowed_categories=tuple(sorted(SKILL_IMPROVEMENT_CATEGORIES)),
+        max_changed_lines=30,
+        minimum_burn_in_days=7,
+        maximum_rejection_rate=0.15,
+        maximum_rollback_rate=0.03,
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -53,10 +102,13 @@ class AutoApplyPolicy:
     minimum_burn_in_days: int = 14
     maximum_rejection_rate: float = 0.10
     maximum_rollback_rate: float = 0.02
+    max_changed_lines: int = 50
+    lanes: tuple[AutoApplyLanePolicy, ...] = DEFAULT_AUTO_APPLY_LANES
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowed_repositories", tuple(self.allowed_repositories))
         object.__setattr__(self, "allowed_change_classes", tuple(self.allowed_change_classes))
+        object.__setattr__(self, "lanes", tuple(self.lanes))
 
 
 @dataclass(frozen=True)
@@ -103,6 +155,7 @@ class AutoApplyCandidate:
     governance_regression_passed: bool
     rejection_rate: float
     rollback_rate: float
+    changed_lines: int
     vcs_proof: VcsProof
 
     def __post_init__(self) -> None:
@@ -125,6 +178,7 @@ class AutoApplyApprovalBundle:
     repository: str
     rollback_command: tuple[str, ...]
     vcs: VcsProof
+    lane: str
 
     def to_json_dict(self) -> dict[str, object]:
         return {
@@ -134,6 +188,7 @@ class AutoApplyApprovalBundle:
             "policy_version": self.policy_version,
             "repository": self.repository,
             "rollback_command": list(self.rollback_command),
+            "lane": self.lane,
             "vcs": {
                 "branch_name": self.vcs.branch_name,
                 "commit_sha": self.vcs.commit_sha,
@@ -147,6 +202,7 @@ class AutoApplyDecision:
     eligible: bool
     reasons: tuple[str, ...]
     approval_bundle: AutoApplyApprovalBundle | None = None
+    lane: str | None = None
 
 
 def evaluate_auto_apply(
@@ -157,31 +213,39 @@ def evaluate_auto_apply(
     policy = readiness.policy
     confirmation = readiness.confirmation
     found_reasons: set[str] = set()
+    lane: AutoApplyLanePolicy | None = None
 
     if policy is None:
         found_reasons.add("explicit_policy_required")
     else:
+        lane = _matching_lane(policy, candidate)
         if not policy.enabled:
             found_reasons.add("auto_apply_disabled")
         if candidate.repository not in policy.allowed_repositories:
             found_reasons.add("repository_not_allowlisted")
-        if readiness.burn_in_days < policy.minimum_burn_in_days:
+        threshold_policy = lane if lane is not None else policy
+        if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
             found_reasons.add("burn_in_period_too_short")
-        if candidate.rejection_rate > policy.maximum_rejection_rate:
+        if candidate.rejection_rate > threshold_policy.maximum_rejection_rate:
             found_reasons.add("rejection_rate_too_high")
-        if candidate.rollback_rate > policy.maximum_rollback_rate:
+        if candidate.rollback_rate > threshold_policy.maximum_rollback_rate:
             found_reasons.add("rollback_rate_too_high")
+        if candidate.changed_lines > threshold_policy.max_changed_lines:
+            found_reasons.add("max_changed_lines_exceeded")
 
     if confirmation is None or not confirmation.confirmed or not confirmation.actor:
         found_reasons.add("cli_confirmation_required")
     elif policy is not None and confirmation.policy_version != policy.version:
         found_reasons.add("cli_confirmation_policy_version_mismatch")
 
+    allowed_change_classes = lane.allowed_change_classes if lane is not None else ()
+    if policy is not None and lane is None:
+        allowed_change_classes = policy.allowed_change_classes
     if candidate.change_class != "A" or (
-        policy is not None and candidate.change_class not in policy.allowed_change_classes
+        policy is not None and candidate.change_class not in allowed_change_classes
     ):
         found_reasons.add("change_class_not_allowed")
-    if not any(_category_key(category) in ALLOWED_CHANGE_CATEGORIES for category in candidate.categories):
+    if policy is not None and lane is None:
         found_reasons.add("auto_apply_change_type_not_allowed")
     if not candidate.held_out_eval_passed:
         found_reasons.add("held_out_eval_failed")
@@ -200,13 +264,18 @@ def evaluate_auto_apply(
     ordered_reasons = tuple(reason for reason in REASON_ORDER if reason in found_reasons)
     reasons = ordered_reasons + forbidden_reasons
     if reasons:
-        return AutoApplyDecision(eligible=False, reasons=reasons)
+        return AutoApplyDecision(
+            eligible=False,
+            reasons=reasons,
+            lane=lane.name if lane is not None else None,
+        )
 
-    if policy is None or confirmation is None:
+    if policy is None or confirmation is None or lane is None:
         raise AssertionError("eligible auto-apply requires policy and confirmation")
     return AutoApplyDecision(
         eligible=True,
         reasons=(),
+        lane=lane.name,
         approval_bundle=AutoApplyApprovalBundle(
             actor=confirmation.actor,
             candidate_id=candidate.candidate_id,
@@ -215,22 +284,35 @@ def evaluate_auto_apply(
             repository=candidate.repository,
             rollback_command=candidate.vcs_proof.rollback_commands[0],
             vcs=candidate.vcs_proof,
+            lane=lane.name,
         ),
     )
 
 
-def _category_key(category: str) -> str:
-    return category.strip().lower().replace("-", "_").replace(" ", "_")
+def _matching_lane(policy: AutoApplyPolicy, candidate: AutoApplyCandidate) -> AutoApplyLanePolicy | None:
+    if candidate.change_class not in policy.allowed_change_classes:
+        return None
+    candidate_categories = {_category_key(category) for category in candidate.categories}
+    for lane in policy.lanes:
+        if not lane.enabled:
+            continue
+        if candidate.change_class not in lane.allowed_change_classes:
+            continue
+        if candidate_categories.intersection(lane.allowed_categories):
+            return lane
+    return None
 
 
 __all__ = [
     "AutoApplyApprovalBundle",
     "AutoApplyCandidate",
     "AutoApplyConfirmation",
+    "AutoApplyLanePolicy",
     "AutoApplyDecision",
     "AutoApplyPolicy",
     "AutoApplyReadiness",
     "ALLOWED_CHANGE_CATEGORIES",
+    "DEFAULT_AUTO_APPLY_LANES",
     "FORBIDDEN_CATEGORIES",
     "VcsProof",
     "evaluate_auto_apply",

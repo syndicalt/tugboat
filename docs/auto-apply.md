@@ -18,7 +18,7 @@ Do not enable auto-apply for policy, authority, provider routing, secrets, deplo
 
 ## Eligibility
 
-Auto-apply is only for narrow Class A changes after a burn-in period. A candidate must have:
+Auto-apply is only for narrow Class A changes in an enabled policy lane after a burn-in period. A candidate must have:
 
 - explicit repo policy enabling auto-apply;
 - matching policy version confirmation;
@@ -32,7 +32,12 @@ Auto-apply is only for narrow Class A changes after a burn-in period. A candidat
 - allowed change category;
 - no protected policy-domain escalation.
 
-Default policy thresholds are intentionally usable but still bounded: 14 burn-in days, 10% maximum rejection rate, 2% maximum rollback rate, and 30 changed lines. Repos can tighten these values in `.sidecar/policy.yaml`; runtime auto-apply commands cannot override them.
+Default lane thresholds are intentionally usable but still bounded:
+
+- `docs_hygiene`: 3 burn-in days, 20% maximum rejection rate, 5% maximum rollback rate, and 50 changed lines.
+- `skill_improvement`: 7 burn-in days, 15% maximum rejection rate, 3% maximum rollback rate, and 30 changed lines.
+
+Repos can tighten these values in `.sidecar/policy.yaml`; runtime auto-apply commands cannot override them.
 
 Allowed examples include typo fixes, broken internal links, formatting normalization, duplicate sentence removal, and verified stale command references.
 

@@ -30,6 +30,7 @@ from tugboat.audit.pipeline import run_audit_pipeline
 from tugboat.auto_apply import (
     AutoApplyCandidate,
     AutoApplyConfirmation,
+    AutoApplyLanePolicy,
     AutoApplyPolicy,
     AutoApplyReadiness,
     VcsProof,
@@ -150,6 +151,18 @@ def _initialize_repo_policy(repo: Path) -> Path:
             "minimum_burn_in_days": Policy().auto_apply_minimum_burn_in_days,
             "maximum_rejection_rate": Policy().auto_apply_maximum_rejection_rate,
             "maximum_rollback_rate": Policy().auto_apply_maximum_rollback_rate,
+            "lanes": {
+                lane.name: {
+                    "enabled": lane.enabled,
+                    "allowed_categories": list(lane.allowed_categories),
+                    "allowed_risk_classes": list(lane.allowed_risk_classes),
+                    "max_changed_lines": lane.max_changed_lines,
+                    "minimum_burn_in_days": lane.minimum_burn_in_days,
+                    "maximum_rejection_rate": lane.maximum_rejection_rate,
+                    "maximum_rollback_rate": lane.maximum_rollback_rate,
+                }
+                for lane in Policy().auto_apply_lanes
+            },
         },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
@@ -2397,6 +2410,7 @@ def _assert_auto_apply_precheck(
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
+    changed_lines = _auto_apply_candidate_changed_lines(candidate)
     held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
         run_dir,
         candidate_id=candidate_id,
@@ -2416,6 +2430,7 @@ def _assert_auto_apply_precheck(
         governance_regression_passed=governance_regression_passed,
         rejection_rate=float(metrics["rejection_rate"]),
         rollback_rate=float(metrics["rollback_rate"]),
+        changed_lines=changed_lines,
         vcs_proof=vcs_proof,
     )
     readiness = _auto_apply_readiness(
@@ -2435,6 +2450,7 @@ def _assert_auto_apply_precheck(
         run_dir.name,
         decision.reasons,
         review_actor,
+        lane=decision.lane,
         snapshot=_auto_apply_decision_snapshot(
             phase="precheck",
             candidate=auto_apply_candidate,
@@ -2470,6 +2486,7 @@ def _assert_auto_apply_final(
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
+    changed_lines = _auto_apply_candidate_changed_lines(candidate)
     held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
         run_dir,
         candidate_id=candidate_id,
@@ -2489,6 +2506,7 @@ def _assert_auto_apply_final(
         governance_regression_passed=governance_regression_passed,
         rejection_rate=float(metrics["rejection_rate"]),
         rollback_rate=float(metrics["rollback_rate"]),
+        changed_lines=changed_lines,
         vcs_proof=vcs_proof,
     )
     readiness = _auto_apply_readiness(
@@ -2508,6 +2526,7 @@ def _assert_auto_apply_final(
         run_dir.name,
         decision.reasons,
         review_actor,
+        lane=decision.lane,
         snapshot=_auto_apply_decision_snapshot(
             phase="final",
             candidate=auto_apply_candidate,
@@ -2614,6 +2633,20 @@ def _auto_apply_readiness(
             minimum_burn_in_days=policy.auto_apply_minimum_burn_in_days,
             maximum_rejection_rate=policy.auto_apply_maximum_rejection_rate,
             maximum_rollback_rate=policy.auto_apply_maximum_rollback_rate,
+            max_changed_lines=policy.auto_apply_max_changed_lines,
+            lanes=tuple(
+                AutoApplyLanePolicy(
+                    name=lane.name,
+                    enabled=lane.enabled,
+                    allowed_categories=lane.allowed_categories,
+                    allowed_change_classes=lane.allowed_risk_classes,
+                    max_changed_lines=lane.max_changed_lines,
+                    minimum_burn_in_days=lane.minimum_burn_in_days,
+                    maximum_rejection_rate=lane.maximum_rejection_rate,
+                    maximum_rollback_rate=lane.maximum_rollback_rate,
+                )
+                for lane in policy.auto_apply_lanes
+            ),
         ),
         confirmation=AutoApplyConfirmation(
             confirmed=confirmed,
@@ -2642,6 +2675,17 @@ def _auto_apply_candidate_categories(candidate: CandidatePatch) -> tuple[str, ..
         if isinstance(section, str) and section.strip():
             categories.append(section.strip().lower().replace("-", "_").replace(" ", "_"))
     return tuple(categories)
+
+
+def _auto_apply_candidate_changed_lines(candidate: CandidatePatch) -> int:
+    changed_lines = 0
+    for metadata in candidate.bounded_edit_metadata:
+        raw_value = metadata.get("changed_lines")
+        if isinstance(raw_value, bool):
+            continue
+        if isinstance(raw_value, int):
+            changed_lines += max(0, raw_value)
+    return changed_lines
 
 
 def _auto_apply_eval_evidence(run_dir: Path, *, candidate_id: int) -> tuple[bool, bool]:
@@ -2707,6 +2751,7 @@ def _auto_apply_decision_snapshot(
             "categories": list(candidate.categories),
             "held_out_eval_passed": candidate.held_out_eval_passed,
             "governance_regression_passed": candidate.governance_regression_passed,
+            "changed_lines": candidate.changed_lines,
         },
         "policy": None
         if policy is None
@@ -2718,6 +2763,20 @@ def _auto_apply_decision_snapshot(
             "minimum_burn_in_days": policy.minimum_burn_in_days,
             "maximum_rejection_rate": policy.maximum_rejection_rate,
             "maximum_rollback_rate": policy.maximum_rollback_rate,
+            "max_changed_lines": policy.max_changed_lines,
+            "lanes": [
+                {
+                    "name": lane.name,
+                    "enabled": lane.enabled,
+                    "allowed_categories": list(lane.allowed_categories),
+                    "allowed_change_classes": list(lane.allowed_change_classes),
+                    "max_changed_lines": lane.max_changed_lines,
+                    "minimum_burn_in_days": lane.minimum_burn_in_days,
+                    "maximum_rejection_rate": lane.maximum_rejection_rate,
+                    "maximum_rollback_rate": lane.maximum_rollback_rate,
+                }
+                for lane in policy.lanes
+            ],
         },
         "confirmation": None
         if confirmation is None
@@ -2743,6 +2802,7 @@ def _record_auto_apply_decision(
     reasons: tuple[str, ...],
     actor: str,
     *,
+    lane: str | None,
     snapshot: dict[str, object],
 ) -> None:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -2753,6 +2813,7 @@ def _record_auto_apply_decision(
                 "run_id": run_id,
                 "actor": actor,
                 "eligible": not reasons,
+                "lane": lane,
                 "reasons": list(reasons),
                 **snapshot,
             },
