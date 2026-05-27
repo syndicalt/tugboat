@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import tomllib
 import uuid
@@ -989,6 +990,23 @@ def _write_release_artifact_manifest(
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
     if not any("pytest-coverage" in Path(entry["path"]).name for entry in retained_evidence):
         raise ValueError("pytest coverage evidence is required")
+    preflight_findings = scan_text(
+        "release-artifact-manifest.json",
+        json.dumps(
+            {
+                "approver": approver,
+                "ci_url": ci_url,
+                "commit": commit,
+                "security_review_decision": security_review_decision,
+            },
+            sort_keys=True,
+        ),
+    )
+    if preflight_findings:
+        raise SecretScanError(preflight_findings)
+    current_head = _current_git_head(resolved_repo)
+    if commit != current_head:
+        raise ValueError(f"commit does not match current HEAD: {current_head}")
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -1029,6 +1047,20 @@ def _write_release_artifact_manifest(
             },
         )
     return output_path
+
+
+def _current_git_head(repo: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("repo must have a current git HEAD") from error
+    return result.stdout.strip()
 
 
 def _file_manifest_entry(path: Path) -> dict[str, object]:

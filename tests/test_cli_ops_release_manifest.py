@@ -3,11 +3,34 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 from tugboat.cli import main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return result.stdout.strip()
+
+
+def _init_release_repo(repo: Path) -> str:
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "tugboat@example.test")
+    _git(repo, "config", "user.name", "Tugboat Tests")
+    (repo / "README.md").write_text("# Release repo\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    return _git(repo, "rev-parse", "HEAD")
 
 
 def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
@@ -27,6 +50,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
         encoding="utf-8",
     )
+    current_head = _init_release_repo(repo)
 
     previous_umask = os.umask(0o022)
     try:
@@ -40,7 +64,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
                     "--wheel",
                     str(wheel),
                     "--commit",
-                    "abc1234",
+                    current_head,
                     "--ci-url",
                     "https://ci.example/runs/1",
                     "--approver",
@@ -68,7 +92,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         "schema_version": 1,
         "artifact_kind": "release_artifact_manifest",
         "package": {"name": "tugboat", "version": "0.1.0"},
-        "commit": "abc1234",
+        "commit": current_head,
         "ci_url": "https://ci.example/runs/1",
         "approver": "release-owner",
         "security_review": {
@@ -110,11 +134,61 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     assert audit_payload["artifact_sha256"] == hashlib.sha256(
         output_path.read_bytes()
     ).hexdigest()
-    assert audit_payload["commit"] == "abc1234"
+    assert audit_payload["commit"] == current_head
     assert audit_payload["security_review"] == {
         "decision": "approved_proposal_only",
         "critical_high_findings": 0,
     }
+
+
+def test_ops_release_manifest_rejects_commit_that_is_not_current_head(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    current_head = _init_release_repo(repo)
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    pytest_log = repo / ".sidecar" / "ci" / "pytest-coverage.log"
+    pytest_log.parent.mkdir(parents=True)
+    pytest_log.write_text("817 passed\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "ops",
+                "release-manifest",
+                "--repo",
+                str(repo),
+                "--wheel",
+                str(wheel),
+                "--commit",
+                "0" * 40,
+                "--ci-url",
+                "https://ci.example/runs/1",
+                "--approver",
+                "release-owner",
+                "--security-review-decision",
+                "approved_proposal_only",
+                "--security-review-critical-high-findings",
+                "0",
+                "--evidence",
+                str(pytest_log),
+            ]
+        )
+        == 1
+    )
+
+    assert (
+        f"release manifest blocked: commit does not match current HEAD: {current_head}"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 
 def test_ops_release_manifest_requires_retained_evidence_without_writing(
