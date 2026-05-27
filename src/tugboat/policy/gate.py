@@ -622,8 +622,13 @@ def _has_higher_priority_contradiction(
     policy: Policy,
     candidate: CandidatePatch,
 ) -> bool:
+    normalized_base = _repo_relative_posix(candidate.base_file)
     candidate_entry = next(
-        (entry for entry in policy.instruction_files if entry.path == candidate.base_file),
+        (
+            entry
+            for entry in policy.instruction_files
+            if fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(entry.path))
+        ),
         None,
     )
     if candidate_entry is None:

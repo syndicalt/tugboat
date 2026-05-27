@@ -267,6 +267,41 @@ def test_policy_gate_allows_base_file_matching_instruction_file_glob(tmp_path: P
     assert "base_file_not_allowed" not in decision.reasons
 
 
+def test_policy_gate_rejects_glob_matched_lower_priority_contradiction(
+    tmp_path: Path,
+):
+    agents = tmp_path / "AGENTS.md"
+    skill = tmp_path / ".codex" / "skills" / "python" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    agents.write_text("Agents must run tests before applying patches.\n", encoding="utf-8")
+    skill.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_file=".codex/skills/python/SKILL.md",
+        base_hash=CandidatePatch.hash_file(skill),
+        diff=(
+            "--- a/.codex/skills/python/SKILL.md\n"
+            "+++ b/.codex/skills/python/SKILL.md\n"
+            "@@\n"
+            " Keep this instruction.\n"
+            "+Agents may skip tests before applying patches.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy("AGENTS.md", "repo_policy", 100, True),
+                InstructionFilePolicy(".codex/skills/**/SKILL.md", "skill", 60, True),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert "higher_priority_contradiction" in decision.reasons
+
+
 def test_policy_gate_rejects_lower_priority_instruction_contradicting_higher_priority(
     tmp_path: Path,
 ):
