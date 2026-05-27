@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from shutil import copytree
@@ -660,6 +661,142 @@ def test_run_offline_eval_suite_all_rejects_malformed_incident_replay_payload(
     )
 
     with pytest.raises(ValueError, match="incident_replay fixture payload must be a JSON object"):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
+def test_run_offline_eval_suite_all_scores_parser_golden_fixture(tmp_path: Path):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "parser-golden"
+    fixture_dir.mkdir(parents=True)
+    markdown = "# Café\n\nBody.\n\n## Café\n\nMore.\n"
+    first_chunk = "# Café\n\nBody.\n\n"
+    second_chunk = "## Café\n\nMore.\n"
+    (fixture_dir / "unicode-heading-ranges.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "parser-golden-unicode-heading-ranges",
+                "category": "parser_golden",
+                "markdown": markdown,
+                "expected_passed": True,
+                "parser_golden": {
+                    "document_hash": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+                    "parser_version": "markdown-heading-v1",
+                    "chunks": [
+                        {
+                            "anchor": "caf",
+                            "byte_start": 0,
+                            "byte_end": len(first_chunk.encode("utf-8")),
+                            "heading_path": ["Café"],
+                            "text_hash": hashlib.sha256(first_chunk.encode("utf-8")).hexdigest(),
+                        },
+                        {
+                            "anchor": "caf-1",
+                            "byte_start": len(first_chunk.encode("utf-8")),
+                            "byte_end": len(markdown.encode("utf-8")),
+                            "heading_path": ["Café", "Café"],
+                            "text_hash": hashlib.sha256(second_chunk.encode("utf-8")).hexdigest(),
+                        },
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is True
+    assert report.metrics["parser_golden_cases"] == 1
+    assert report.metrics["parser_golden_passed"] == 1
+    assert report.metrics["fixture_case_failures"] == 0
+    assert "parser_golden:unicode-heading-ranges" in report.validation_splits["trigger"]
+
+
+def test_run_offline_eval_suite_all_rejects_parser_golden_document_hash_mismatch(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "parser-golden"
+    fixture_dir.mkdir(parents=True)
+    markdown = "# Rules\n\nFollow tests.\n"
+    (fixture_dir / "wrong-document-hash.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "parser-golden-wrong-document-hash",
+                "category": "parser_golden",
+                "markdown": markdown,
+                "expected_passed": True,
+                "parser_golden": {
+                    "document_hash": "0" * 64,
+                    "parser_version": "markdown-heading-v1",
+                    "chunks": [
+                        {
+                            "anchor": "rules",
+                            "byte_start": 0,
+                            "byte_end": len(markdown.encode("utf-8")),
+                            "heading_path": ["Rules"],
+                            "text_hash": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+                        }
+                    ],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is False
+    assert report.metrics["parser_golden_cases"] == 1
+    assert report.metrics["parser_golden_passed"] == 0
+    assert report.metrics["fixture_case_failures"] == 1
+
+
+def test_run_offline_eval_suite_all_rejects_malformed_parser_golden_chunks(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "parser-golden"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "bad-chunks.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "parser-golden-bad-chunks",
+                "category": "parser_golden",
+                "markdown": "# Rules\n\nFollow tests.\n",
+                "expected_passed": True,
+                "parser_golden": {
+                    "document_hash": "0" * 64,
+                    "parser_version": "markdown-heading-v1",
+                    "chunks": {},
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="parser_golden fixture chunks must be a JSON list"):
         run_offline_eval_suite(tmp_path, suite_id="all")
 
 

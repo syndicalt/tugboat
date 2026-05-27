@@ -7,8 +7,11 @@ import json
 import re
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+from tugboat.corpus.markdown import PARSER_VERSION, parse_markdown
 
 
 class Severity(str, Enum):
@@ -413,6 +416,8 @@ def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord
     metrics = {
         "incident_replay_cases": 0,
         "incident_replay_passed": 0,
+        "parser_golden_cases": 0,
+        "parser_golden_passed": 0,
         "held_out_cases": 0,
         "adversarial_cases": 0,
         "cross_agent_cases": 0,
@@ -429,6 +434,7 @@ def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord
 
     category_metric = {
         "incident_replay": "incident_replay_cases",
+        "parser_golden": "parser_golden_cases",
         "held_out": "held_out_cases",
         "adversarial": "adversarial_cases",
         "cross_agent": "cross_agent_cases",
@@ -468,6 +474,8 @@ def _run_fixture_cases(root: Path) -> tuple[dict[str, int], tuple[EvalCaseRecord
         metrics[metric] += 1
         if category == "incident_replay" and actual_passed == expected_passed:
             metrics["incident_replay_passed"] += 1
+        if category == "parser_golden" and actual_passed == expected_passed:
+            metrics["parser_golden_passed"] += 1
         if category == "held_out" and actual_passed == expected_passed:
             metrics["held_out_passed"] += 1
         if actual_passed != expected_passed:
@@ -487,7 +495,55 @@ def _evaluate_fixture_case(
         return False
     if category == "incident_replay" and "incident_replay" in payload:
         return _evaluate_incident_replay_payload(payload["incident_replay"])
+    if category == "parser_golden":
+        return _evaluate_parser_golden_payload(payload, markdown)
     return True
+
+
+def _evaluate_parser_golden_payload(payload: dict[str, object], markdown: str) -> bool:
+    raw_golden = payload.get("parser_golden")
+    if not isinstance(raw_golden, dict):
+        raise ValueError("parser_golden fixture payload must be a JSON object")
+    expected_parser_version = raw_golden.get("parser_version")
+    if expected_parser_version != PARSER_VERSION:
+        return False
+    raw_chunks = raw_golden.get("chunks")
+    if not isinstance(raw_chunks, list) or not all(isinstance(chunk, dict) for chunk in raw_chunks):
+        raise ValueError("parser_golden fixture chunks must be a JSON list of objects")
+    expected_chunks = [
+        {
+            "anchor": str(chunk.get("anchor", "")),
+            "byte_start": chunk.get("byte_start"),
+            "byte_end": chunk.get("byte_end"),
+            "heading_path": list(chunk.get("heading_path", [])),
+            "text_hash": str(chunk.get("text_hash", "")),
+        }
+        for chunk in raw_chunks
+    ]
+    with tempfile.TemporaryDirectory(prefix="tugboat-parser-golden-") as temp_dir:
+        path = Path(temp_dir) / "fixture.md"
+        path.write_text(markdown, encoding="utf-8")
+        document = parse_markdown(
+            path,
+            kind="parser_golden",
+            precedence=0,
+            protected=False,
+            document_path=str(payload.get("id", "parser-golden")),
+        )
+    expected_document_hash = raw_golden.get("document_hash")
+    if expected_document_hash is not None and expected_document_hash != document.hash:
+        return False
+    actual_chunks = [
+        {
+            "anchor": chunk.anchor,
+            "byte_start": chunk.byte_start,
+            "byte_end": chunk.byte_end,
+            "heading_path": list(chunk.heading_path),
+            "text_hash": chunk.text_hash,
+        }
+        for chunk in document.chunks
+    ]
+    return actual_chunks == expected_chunks
 
 
 def _evaluate_incident_replay_payload(raw_replay: object) -> bool:
