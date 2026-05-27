@@ -2941,9 +2941,15 @@ llmff:
     assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
     codex.write_text("# Rules\n\nUse tests.\n\nRepo changed after proposal.\n", encoding="utf-8")
-    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+    previous_umask = os.umask(0o022)
+    try:
+        assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+    finally:
+        os.umask(previous_umask)
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert (run_dir / "eval-suite.json").stat().st_mode & 0o777 == 0o600
+    assert (run_dir / "policy-gate.json").stat().st_mode & 0o777 == 0o600
     raw_policy_decision = json.loads((run_dir / "policy-decision.raw.json").read_text(encoding="utf-8"))
     policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))

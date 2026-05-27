@@ -14,8 +14,9 @@ from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
 from tugboat.optimization import REJECTED_EDIT_SUPPRESSION_SIGNAL
-from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
+from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
+from tugboat.security.secrets import SecretScanError, scan_text
 
 
 @dataclass(frozen=True)
@@ -296,8 +297,7 @@ def _run_patch_eval(
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
     suite_path = run_dir / "eval-suite.json"
     suite_payload = {"schema_version": SCHEMA_VERSION, "suite_id": suite_id}
-    validate_json_artifact("eval-suite.json", suite_payload)
-    suite_path.write_text(json.dumps(suite_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_private_json_artifact(suite_path, "eval-suite.json", suite_payload)
     run = run_manifest(
         manifest,
         run_dir=run_dir,
@@ -469,7 +469,16 @@ def _write_policy_gate(run_dir: Path, *, allowed: bool, reasons: list[object]) -
         "allowed": allowed,
         "reasons": [str(reason) for reason in reasons],
     }
-    validate_json_artifact("policy-gate.json", payload)
     path = run_dir / "policy-gate.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_private_json_artifact(path, "policy-gate.json", payload)
     return path
+
+
+def _write_private_json_artifact(path: Path, artifact_name: str, payload: dict[str, object]) -> None:
+    validate_json_artifact(artifact_name, payload)
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
+    path.write_text(text, encoding="utf-8")
+    mark_private_file(path)
