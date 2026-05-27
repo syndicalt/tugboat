@@ -127,8 +127,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--trace", required=True)
     audit.add_argument(
         "--trace-format",
-        choices=("generic-jsonl", "codex", "claude", "ci", "mcp"),
-        default="generic-jsonl",
+        choices=("auto", "generic-jsonl", "codex", "claude", "ci", "mcp"),
+        default="auto",
     )
     audit.add_argument("--mock-llmff-inspect", action="store_true")
 
@@ -147,8 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--suite", required=True)
     optimize.add_argument(
         "--trace-format",
-        choices=("generic-jsonl", "codex", "claude", "ci", "mcp"),
-        default="generic-jsonl",
+        choices=("auto", "generic-jsonl", "codex", "claude", "ci", "mcp"),
+        default="auto",
     )
 
     apply = subcommands.add_parser("apply")

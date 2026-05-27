@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from tugboat.audit.pipeline import detect_trace_format
 from tugboat.cli import main
 
 
@@ -19,10 +21,30 @@ def _event_rows(repo: Path) -> list[tuple[str, str]]:
         ).fetchall()
 
 
+def test_detect_trace_format_classifies_supported_real_trace_shapes(tmp_path: Path):
+    claude_json = tmp_path / "claude.json"
+    claude_json.write_text(
+        json.dumps({"messages": [{"role": "user", "content": "Fix bug"}]}),
+        encoding="utf-8",
+    )
+    mcp_jsonl = tmp_path / "mcp.jsonl"
+    mcp_jsonl.write_text(json.dumps({"event": "request", "text": "Fix bug"}) + "\n")
+    generic_jsonl = tmp_path / "generic.jsonl"
+    generic_jsonl.write_text(
+        json.dumps({"type": "user_request", "content": "Fix bug"}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert detect_trace_format(claude_json) == "claude"
+    assert detect_trace_format(mcp_jsonl) == "mcp"
+    assert detect_trace_format(generic_jsonl) == "generic-jsonl"
+
+
 def test_audit_cli_ingests_claude_trace_format_as_normalized_events(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    instruction_text = "# Rules\n\nUse tests.\n"
+    (repo / "CODEX.md").write_text(instruction_text, encoding="utf-8")
     trace = tmp_path / "claude.json"
     trace.write_text(
         json.dumps(
@@ -265,6 +287,75 @@ def test_audit_cli_ingests_codex_response_item_envelopes(tmp_path: Path):
     ]
     assert json.loads(rows[1][1])["tool"] == "exec_command"
     assert json.loads(rows[2][1])["output"] == "1 failed"
+
+
+def test_audit_cli_auto_detects_codex_response_item_trace(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "codex.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix bug"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-1",
+                            "output": "1 failed",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == [
+        "user_request",
+        "tool_call",
+        "tool_result",
+    ]
+    assert json.loads(rows[1][1])["tool"] == "exec_command"
+    assert json.loads(rows[2][1])["tool"] == "exec_command"
 
 
 def test_audit_cli_ingests_codex_custom_tool_response_items(tmp_path: Path):
@@ -642,6 +733,44 @@ def test_audit_cli_canonical_episode_groups_policy_events(tmp_path: Path):
     ]
 
 
+def test_audit_cli_canonical_episode_includes_active_instruction_snapshot(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    instruction_text = "# Rules\n\nUse tests.\n"
+    (repo / "CODEX.md").write_text(instruction_text, encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","content":"Fix bug"}\n', encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical_episode = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+
+    assert canonical_episode["instruction_snapshot"] == [
+        {
+            "type": "instruction_snapshot",
+            "source": "CODEX.md",
+            "origin": "audit_snapshot",
+            "sha256": hashlib.sha256(instruction_text.encode("utf-8")).hexdigest(),
+            "text": instruction_text,
+        }
+    ]
+
+
 def test_audit_cli_redacted_trace_includes_instruction_snapshot(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -708,3 +837,44 @@ def test_audit_cli_redacted_trace_includes_instruction_snapshot(tmp_path: Path):
         "source": "CODEX.md",
         "text": "Use tests and cite verification.",
     }
+
+
+def test_audit_cli_auto_detects_ci_failure_json_trace(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "ci-failure.json"
+    trace.write_text(
+        json.dumps(
+            {
+                "suite": "unit",
+                "command": "pytest -q",
+                "exit_code": 1,
+                "output": "1 failed",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == [
+        "tool_result",
+        "test_result",
+        "outcome_label",
+    ]
+    assert json.loads(rows[0][1])["tool"] == "pytest -q"
+    assert json.loads(rows[1][1]) == {"type": "test_result", "suite": "unit", "passed": False}

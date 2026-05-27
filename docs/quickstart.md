@@ -49,6 +49,8 @@ Run the governed local optimization loop against a saved trace bundle:
 tugboat optimize --repo . --trace traces/example.jsonl --suite all
 ```
 
+Tugboat auto-detects generic JSONL, Codex JSONL, Claude transcript JSON/JSONL, MCP session JSONL, and CI failure JSON traces. Use `--trace-format` only when you need to override detection.
+
 This runs audit, proposal, held-out evaluation, and the final acceptance gate. It writes `optimization-summary.json` next to the candidate and eval artifacts.
 
 For debugging or CI decomposition, the same loop can be run step by step:

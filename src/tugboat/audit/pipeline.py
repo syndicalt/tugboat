@@ -43,7 +43,7 @@ def run_audit_pipeline(
     repo: Path,
     trace: Path,
     *,
-    trace_format: str = "generic-jsonl",
+    trace_format: str = "auto",
     mock_llmff_inspect: bool = False,
 ) -> AuditPipelineResult:
     policy = load_policy(repo)
@@ -79,7 +79,11 @@ def run_audit_pipeline(
     redacted_trace = run_dir / "trace-redacted.jsonl"
     _write_redacted_trace(bundle, redacted_trace)
     canonical_episode_path = run_dir / "canonical-episode.json"
-    _write_canonical_episode(bundle, canonical_episode_path)
+    _write_canonical_episode(
+        bundle,
+        canonical_episode_path,
+        instruction_snapshot_dir=run_dir / "instruction-snapshot",
+    )
     manifests = materialize_manifests(repo)
     if not manifests_are_allowed_by_policy(manifests, policy):
         return AuditPipelineResult(1, run_dir, "manifest hash is not allowed by policy")
@@ -511,6 +515,8 @@ def _write_instruction_snapshot(repo: Path, run_dir: Path) -> None:
 
 
 def _ingest_trace(trace: Path, trace_format: str):
+    if trace_format == "auto":
+        trace_format = detect_trace_format(trace)
     if trace_format == "generic-jsonl":
         return ingest_jsonl_trace(trace)
     if trace_format == "codex":
@@ -522,6 +528,74 @@ def _ingest_trace(trace: Path, trace_format: str):
     if trace_format == "mcp":
         return ingest_mcp_session_bundle(trace)
     raise ValueError(f"unsupported trace format: {trace_format}")
+
+
+def detect_trace_format(trace: Path) -> str:
+    sample = _trace_sample(trace)
+    if isinstance(sample, dict):
+        if _looks_like_claude_json(sample):
+            return "claude"
+        if _looks_like_ci_failure_json(sample):
+            return "ci"
+        return "generic-jsonl"
+    for row in sample:
+        if _looks_like_mcp_jsonl_row(row):
+            return "mcp"
+        if _looks_like_codex_jsonl_row(row):
+            return "codex"
+        if _looks_like_claude_jsonl_row(row):
+            return "claude"
+    return "generic-jsonl"
+
+
+def _trace_sample(trace: Path) -> dict | list[dict]:
+    if trace.suffix == ".json":
+        payload = json.loads(trace.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+        raise ValueError("JSON trace must contain an object")
+
+    rows: list[dict] = []
+    with trace.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError("trace line must be a JSON object")
+            rows.append(payload)
+            if len(rows) >= 20:
+                break
+    return rows
+
+
+def _looks_like_claude_json(payload: dict) -> bool:
+    return isinstance(payload.get("messages"), list)
+
+
+def _looks_like_ci_failure_json(payload: dict) -> bool:
+    return (
+        "exit_code" in payload
+        and "command" in payload
+        and ("suite" in payload or "output" in payload)
+    )
+
+
+def _looks_like_mcp_jsonl_row(row: dict) -> bool:
+    return isinstance(row.get("event"), str)
+
+
+def _looks_like_codex_jsonl_row(row: dict) -> bool:
+    if row.get("type") in {"response_item", "session_meta"} and isinstance(
+        row.get("payload"),
+        dict,
+    ):
+        return True
+    return row.get("role") in {"user", "assistant"} and "content" in row
+
+
+def _looks_like_claude_jsonl_row(row: dict) -> bool:
+    return isinstance(row.get("message"), dict)
 
 
 def _write_redacted_trace(bundle, path: Path) -> None:
@@ -543,14 +617,23 @@ def _write_redacted_trace(bundle, path: Path) -> None:
     mark_private_file(path)
 
 
-def _write_canonical_episode(bundle, path: Path) -> None:
+def _write_canonical_episode(
+    bundle,
+    path: Path,
+    *,
+    instruction_snapshot_dir: Path | None = None,
+) -> None:
     episode = canonical_episode_from_bundle(bundle)
+    instruction_snapshot = [
+        *list(episode.instruction_snapshot),
+        *_active_instruction_snapshot(instruction_snapshot_dir),
+    ]
     payload = {
         "schema_version": SCHEMA_VERSION,
         "trace_path": bundle.trace_path.as_posix(),
         "request": redact_payload(episode.request),
         "final_answer": redact_payload(episode.final_answer),
-        "instruction_snapshot": redact_payload(list(episode.instruction_snapshot)),
+        "instruction_snapshot": redact_payload(instruction_snapshot),
         "tool_calls": _event_group_json(episode.tool_calls),
         "command_outputs": _event_group_json(episode.command_outputs),
         "diffs": _event_group_json(episode.diffs),
@@ -565,6 +648,39 @@ def _write_canonical_episode(bundle, path: Path) -> None:
     validate_json_artifact("canonical-episode.json", payload)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     mark_private_file(path)
+
+
+def _active_instruction_snapshot(snapshot_dir: Path | None) -> list[dict[str, object]]:
+    if snapshot_dir is None:
+        return []
+    graph_path = snapshot_dir.parent / "instruction-graph.json"
+    if not graph_path.is_file():
+        return []
+    graph = load_json_object_artifact(graph_path, "instruction-graph.json")
+    documents = graph.get("documents", [])
+    if not isinstance(documents, list):
+        return []
+    snapshots: list[dict[str, object]] = []
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
+        source = document.get("path")
+        sha256 = document.get("hash")
+        if not isinstance(source, str) or not isinstance(sha256, str):
+            continue
+        snapshot_path = snapshot_dir / source
+        if not snapshot_path.is_file():
+            continue
+        snapshots.append(
+            {
+                "type": "instruction_snapshot",
+                "source": source,
+                "origin": "audit_snapshot",
+                "sha256": sha256,
+                "text": snapshot_path.read_text(encoding="utf-8"),
+            }
+        )
+    return snapshots
 
 
 def _event_group_json(events) -> list[dict[str, object]]:
