@@ -28,9 +28,8 @@ class EvalPipelineResult:
 def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipelineResult:
     repo = repo.resolve()
     run_dir = _resolve_candidate_run_dir(repo, candidate_ref)
-    candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
-    if not isinstance(candidate_meta, dict):
-        raise ValueError("candidate.json must be a JSON object")
+    candidate_meta = load_json_object_artifact(run_dir / "candidate.json", "candidate.json")
+    validate_json_artifact("candidate.json", candidate_meta)
     candidate_id = int(candidate_meta["candidate_id"])
     policy = load_policy(repo)
     passed = True

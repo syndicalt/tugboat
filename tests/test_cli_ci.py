@@ -34,6 +34,29 @@ def _write_candidate_preview(run_dir: Path, text: str) -> None:
     )
 
 
+def _write_candidate_json(run_dir: Path) -> None:
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "base",
+                "diff_hash": "diff",
+                "expected_behavior_change": "Clarifies the testing obligation.",
+                "evals_required": ["all"],
+                "risk_class": "instruction_clarification",
+                "rationale": "Fixture candidate for CI eval.",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fixture", "trusted": True}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_path: Path, capsys):
     repo = tmp_path
     docs = repo / "docs"
@@ -234,10 +257,7 @@ def test_ci_check_runs_requested_eval_suite_and_records_scores(tmp_path: Path, c
         run_dir,
         "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou must run tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
     (repo / ".sidecar").mkdir(exist_ok=True)
     copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
 
@@ -279,10 +299,7 @@ def test_ci_check_with_relative_repo_path_records_relative_eval_report_path(
         run_dir,
         "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou must run tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
     monkeypatch.chdir(tmp_path)
 
     assert main(["ci", "--repo", "repo", "--candidate", "run-1", "--suite", "all"]) == 1
@@ -309,10 +326,7 @@ def test_ci_check_fails_when_requested_eval_suite_fails(tmp_path: Path, capsys):
         run_dir,
         "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou may skip tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["ci", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -343,10 +357,7 @@ def test_ci_check_failed_eval_does_not_reuse_stale_eval_report_metrics(tmp_path:
         run_dir,
         "# Policy\n\nSee [runbook](docs/runbook.md).\n\nYou must run tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     (run_dir / "eval-report.json").write_text(
         json.dumps(

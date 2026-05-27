@@ -7,6 +7,7 @@ import pytest
 from tugboat.artifacts import ArtifactValidationError
 from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
+from tugboat.eval.pipeline import run_eval_pipeline
 from tugboat.paths import sidecar_dir
 from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.security.secrets import SecretScanError
@@ -1048,6 +1049,33 @@ def test_propose_requires_real_llmff_audit_output(tmp_path: Path, capsys):
     assert "propose requires llmff audit output" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
+
+
+def test_propose_rejects_malformed_prior_audit_artifact_before_llmff(tmp_path: Path):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "audit.json").write_text(
+        json.dumps(
+            {
+                "audit_id": 7,
+                "edit_warranted": True,
+                "evidence_refs": ["ev_1"],
+                "failure_class": "instruction_conflict",
+                "severity": "high",
+                "confidence": 0.9,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "audit.raw.json").write_text("{}\n", encoding="utf-8")
+    (run_dir / "instruction-index.raw.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactValidationError, match="audit.json missing required field: schema_version"):
+        run_propose_pipeline(repo, "run-1")
+
+    assert not (run_dir / "candidate.json").exists()
 
 
 def test_propose_rejects_llmff_candidate_output_with_secret(tmp_path: Path, capsys):
@@ -2630,6 +2658,39 @@ llmff:
     assert job_row[0:2] == ("failed", "run_failed")
     assert json.loads(job_row[2])["run_failed"]["failure_kind"] == "fixture_failure"
     assert candidate_count == 0
+
+
+def test_eval_rejects_malformed_prior_candidate_artifact_before_eval(tmp_path: Path):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": 7,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "def",
+                "expected_behavior_change": "Clarifies testing.",
+                "evals_required": ["provider-smoke"],
+                "risk_class": "instruction_clarification",
+                "rationale": "Based on evidence.",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_1", "trusted": True}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ArtifactValidationError,
+        match="candidate.json missing required field: schema_version",
+    ):
+        run_eval_pipeline(repo, "run-1", "provider-smoke")
+
+    assert not (run_dir / "eval-report.json").exists()
 
 
 def test_eval_rejects_llmff_eval_output_with_secret(tmp_path: Path, capsys):

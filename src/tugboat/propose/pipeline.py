@@ -37,9 +37,8 @@ class ProposePipelineResult:
 def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
     repo = repo.resolve()
     run_dir = _resolve_audit_run_dir(repo, audit_ref)
-    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
-    if not isinstance(audit, dict):
-        raise ValueError("audit.json must be a JSON object")
+    audit = load_json_object_artifact(run_dir / "audit.json", "audit.json")
+    validate_json_artifact("audit.json", audit)
     if not audit.get("edit_warranted", False):
         return ProposePipelineResult(1, run_dir, "audit does not warrant an instruction edit")
     if not (run_dir / "audit.raw.json").exists():

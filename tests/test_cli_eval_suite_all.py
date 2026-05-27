@@ -35,6 +35,29 @@ def _write_candidate_preview(run_dir: Path, text: str, *, preview_hash: str | No
     )
 
 
+def _write_candidate_json(run_dir: Path) -> None:
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "audit_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "base",
+                "diff_hash": "diff",
+                "expected_behavior_change": "Clarifies the testing obligation.",
+                "evals_required": ["all"],
+                "risk_class": "instruction_clarification",
+                "rationale": "Fixture candidate for offline eval.",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fixture", "trusted": True}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -48,10 +71,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         run_dir,
         "# Policy\n\nYou must run tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
     (repo / ".sidecar").mkdir(exist_ok=True)
     copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
 
@@ -148,10 +168,7 @@ def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path
         run_dir,
         "# Policy\n\nYou may skip tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -175,10 +192,7 @@ def test_eval_suite_all_uses_candidate_preview_artifact_for_report_and_db_rows(
         run_dir,
         "# Policy\n\nYou may skip tests before final answers.\n",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -218,10 +232,7 @@ def test_eval_suite_all_rejects_missing_candidate_preview_without_repo_fallback(
     )
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -241,10 +252,7 @@ def test_eval_suite_all_rejects_candidate_preview_hash_mismatch(tmp_path: Path):
         "# Policy\n\nYou must run tests before final answers.\n",
         preview_hash="not-the-preview-hash",
     )
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -256,10 +264,7 @@ def test_eval_rejects_unsupported_offline_suite_without_accepting_report(tmp_pat
     repo.mkdir()
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "unknown-suite"]) == 1
 
@@ -272,10 +277,7 @@ def test_eval_provider_smoke_requires_explicit_opt_in(tmp_path: Path, monkeypatc
     repo.mkdir()
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
 
@@ -299,10 +301,7 @@ def test_eval_provider_smoke_env_flag_without_repo_policy_still_skips(tmp_path: 
     repo.mkdir()
     run_dir = repo / ".sidecar" / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
 
@@ -341,10 +340,7 @@ provider_smoke:
     )
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
 
@@ -389,10 +385,7 @@ provider_smoke:
     )
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 0
 
@@ -444,10 +437,7 @@ provider_smoke:
     )
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 0
 
@@ -486,10 +476,7 @@ provider_smoke:
     )
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
 
@@ -539,10 +526,7 @@ provider_smoke:
     )
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "candidate.json").write_text(
-        json.dumps({"schema_version": 1, "candidate_id": 7}) + "\n",
-        encoding="utf-8",
-    )
+    _write_candidate_json(run_dir)
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "provider-smoke"]) == 1
 
