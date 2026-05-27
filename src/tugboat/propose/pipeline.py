@@ -683,7 +683,7 @@ def _source_ref_from_payload(source: object, *, index: int) -> SourceRef:
 
 
 def _bounded_edit_metadata_from_payload(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
-    raw_metadata = payload.get("bounded_edit_metadata", payload.get("operator_metadata"))
+    raw_metadata = payload.get("bounded_edit_metadata")
     if raw_metadata is None:
         raise ValueError("candidate.bounded_edit_metadata is required")
     if not isinstance(raw_metadata, list):

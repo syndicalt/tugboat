@@ -643,6 +643,26 @@ def test_validate_candidate_raw_artifact_rejects_unknown_top_level_fields():
         )
 
 
+def test_validate_candidate_raw_artifact_rejects_operator_metadata_alias():
+    with pytest.raises(ArtifactValidationError, match="additional property"):
+        validate_json_artifact(
+            "candidate.raw.json",
+            {
+                "base_file": "CODEX.md",
+                "base_hash": "abc123",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Use tests.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Preserve regression guidance.",
+                "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["revert generated diff"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": BOUNDED_EDIT_METADATA,
+                "operator_metadata": BOUNDED_EDIT_METADATA,
+            },
+        )
+
+
 def test_validate_eval_report_raw_artifact_rejects_unknown_top_level_fields():
     with pytest.raises(ArtifactValidationError, match="additional property"):
         validate_json_artifact(

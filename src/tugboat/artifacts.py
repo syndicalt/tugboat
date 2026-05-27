@@ -366,27 +366,6 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                 },
             },
-            "operator_metadata": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "operator",
-                        "file",
-                        "section",
-                        "changed_lines",
-                        "normative_changes",
-                    ],
-                    "properties": {
-                        "operator": {"type": "string", "enum": list(BOUNDED_EDIT_OPERATORS)},
-                        "file": {"type": "string"},
-                        "section": {"type": "string"},
-                        "changed_lines": {"type": "integer"},
-                        "normative_changes": {"type": "integer"},
-                    },
-                },
-            },
             "pending_audit_eval_definition_paths": {
                 "type": "array",
                 "items": {"type": "string"},
