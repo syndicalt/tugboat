@@ -155,7 +155,13 @@ def test_discover_trace_jobs_enqueues_new_jsonl_traces_once(tmp_path: Path):
         "1",
         str(tmp_path),
         "queued",
-        json.dumps({"trace_path": str(trace_dir / "episode.jsonl")}, sort_keys=True),
+        json.dumps(
+            {
+                "trace_format": "generic-jsonl",
+                "trace_path": str(trace_dir / "episode.jsonl"),
+            },
+            sort_keys=True,
+        ),
     )
     assert ledger_job[4] is not None
     assert event_type == "daemon_job.recorded"
@@ -317,8 +323,63 @@ def test_run_daemon_cycle_watches_configured_trace_dirs_without_duplicate_enqueu
     assert len(rows) == 1
     assert rows[0]["kind"] == "trace_audit"
     assert json.loads(rows[0]["payload_json"]) == {
-        "trace_path": str(trace_dir / "episode.jsonl")
+        "trace_format": "generic-jsonl",
+        "trace_path": str(trace_dir / "episode.jsonl"),
     }
+
+
+def test_run_daemon_cycle_discovers_real_trace_formats_for_audit_jobs(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "configured-traces"
+    trace_dir.mkdir()
+    codex_trace = trace_dir / "codex-session.jsonl"
+    codex_trace.write_text(
+        json.dumps(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Fix bug"}],
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    ci_trace = trace_dir / "ci-failure.json"
+    ci_trace.write_text(
+        json.dumps({"command": "pytest -q", "exit_code": 1, "suite": "unit"}),
+        encoding="utf-8",
+    )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-a",
+            max_jobs_per_cycle=0,
+            concurrency_limit=0,
+            lease_duration=timedelta(seconds=30),
+            trace_dirs=(trace_dir,),
+            now=_at(0),
+        ),
+    )
+
+    assert result["trace_discovery"] == {"discovered": 2, "skipped": 0}
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        rows = queue.connection.execute(
+            "SELECT kind, payload_json FROM daemon_jobs ORDER BY id"
+        ).fetchall()
+
+    assert [row["kind"] for row in rows] == ["trace_audit", "trace_audit"]
+    assert sorted(
+        (json.loads(row["payload_json"]) for row in rows),
+        key=lambda payload: payload["trace_path"],
+    ) == [
+        {"trace_format": "ci", "trace_path": str(ci_trace)},
+        {"trace_format": "codex", "trace_path": str(codex_trace)},
+    ]
 
 
 def test_run_daemon_cycle_read_only_kill_switch_blocks_trace_discovery_writes(
@@ -391,7 +452,7 @@ def test_run_daemon_cycle_recovers_corrupt_discovered_trace_registry(
         job = queue.get_job(1)
         assert job is not None
         assert job.kind == "trace_audit"
-        assert job.payload == {"trace_path": str(trace)}
+        assert job.payload == {"trace_format": "generic-jsonl", "trace_path": str(trace)}
 
 
 def test_run_daemon_cycle_updates_main_store_job_state_for_discovered_trace(

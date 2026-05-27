@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.audit.pipeline import detect_trace_format
 from tugboat.config import load_policy
 from tugboat.daemon.queue import (
     DaemonQueue,
@@ -52,14 +53,18 @@ def discover_trace_jobs(
     now: datetime | None = None,
 ) -> dict[str, int]:
     registry = _load_discovered_traces(repo)
-    eligible_traces: list[tuple[Path, str]] = []
+    eligible_traces: list[tuple[Path, str, str]] = []
     planned_registry = set(registry)
     discovered = 0
     skipped = 0
     repo_root = repo.resolve()
     for trace_dir in trace_dirs:
         trace_dir_path = trace_dir.resolve()
-        trace_paths = sorted(trace_dir_path.glob("*.jsonl"))
+        trace_paths = sorted(
+            path
+            for pattern in ("*.jsonl", "*.json")
+            for path in trace_dir_path.glob(pattern)
+        )
         if not trace_dir_path.is_relative_to(repo_root):
             skipped += len(trace_paths)
             continue
@@ -70,17 +75,18 @@ def discover_trace_jobs(
                 continue
             try:
                 scan_path(path)
-            except SecretScanError:
+                trace_format = detect_trace_format(path)
+            except (OSError, ValueError, SecretScanError, json.JSONDecodeError):
                 skipped += 1
                 continue
-            eligible_traces.append((path, trace_key))
+            eligible_traces.append((path, trace_key, trace_format))
             planned_registry.add(trace_key)
 
     validate_json_artifact("daemon-discovered-traces.json", _discovered_traces_payload(planned_registry))
 
     with DaemonQueue.open_sidecar(repo) as queue:
-        for path, trace_key in eligible_traces:
-            payload = {"trace_path": str(path)}
+        for path, trace_key, trace_format in eligible_traces:
+            payload = {"trace_format": trace_format, "trace_path": str(path)}
             job = queue.enqueue(kind="trace_audit", payload=payload, now=now)
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
                 store.record_daemon_job(

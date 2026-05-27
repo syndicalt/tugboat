@@ -746,7 +746,10 @@ def test_daemon_cycle_cli_watches_trace_dir_and_reports_discovery(tmp_path: Path
         job = queue.get_job(1)
         assert job is not None
         assert job.kind == "trace_audit"
-        assert job.payload == {"trace_path": str(trace_dir / "episode.jsonl")}
+        assert job.payload == {
+            "trace_format": "generic-jsonl",
+            "trace_path": str(trace_dir / "episode.jsonl"),
+        }
 
 
 def test_daemon_cycle_cli_can_run_bounded_loop(tmp_path: Path, capsys):

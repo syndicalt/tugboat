@@ -236,7 +236,7 @@ def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> AuditPipelineRe
     trace_path = Path(_required_payload_text(payload, "trace_path")).expanduser().resolve()
     if not trace_path.is_relative_to(repo_root):
         raise DaemonJobPayloadError("trace_path must resolve inside repo")
-    trace_format = str(payload.get("trace_format", "generic-jsonl"))
+    trace_format = str(payload.get("trace_format", "auto"))
     return run_audit_pipeline(repo, trace_path, trace_format=trace_format)
 
 
