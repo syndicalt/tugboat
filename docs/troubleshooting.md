@@ -35,6 +35,14 @@ Run `tugboat ci --repo .` to materialize manifests, then review `.sidecar/manife
 
 ## llmff Failures
 
+`audit blocked: trace file not found`
+
+Create or export the trace file first, then rerun with the same `--trace` path. For a quick local smoke test, use `tests/fixtures/traces/codex-local-session-export.jsonl`.
+
+`audit blocked: invalid trace`
+
+Validate that the trace is JSONL or JSON matching the selected `--trace-format`. Use `--trace-format auto` for generic JSONL, Codex JSONL, Claude transcript JSON/JSONL, MCP session JSONL, or CI failure JSON traces.
+
 `instruction index blocked: llmff inspect failed: binary not found`
 
 Check `.sidecar/policy.yaml` and verify `llmff.binary`. The default after `tugboat init --repo .` is `python -m tugboat.llmff.fixture_backend`.

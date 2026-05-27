@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 from contextlib import closing
 from pathlib import Path
 from stat import S_IMODE
@@ -93,6 +94,115 @@ llmff:
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
     assert audit["failure_class"] == "llmff_inspect_failed"
     assert audit["llmff_failure_kind"] == "inspect_failed"
+
+
+def test_audit_missing_trace_returns_clear_error_without_traceback(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    missing = repo / "traces" / "session.jsonl"
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(missing)]) == 1
+
+    output = capsys.readouterr().out
+    assert f"audit blocked: trace file not found: {missing}" in output
+    assert "Traceback" not in output
+    assert not (repo / ".sidecar" / "runs").exists()
+
+
+def test_optimize_missing_trace_returns_clear_error_without_traceback(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    missing = repo / "traces" / "session.jsonl"
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(missing), "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert f"audit blocked: trace file not found: {missing}" in output
+    assert "Traceback" not in output
+    assert not (repo / ".sidecar" / "runs").exists()
+
+
+def test_optimize_missing_trace_cli_exits_cleanly_without_python_traceback(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    missing = repo / "traces" / "session.jsonl"
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tugboat",
+            "optimize",
+            "--repo",
+            str(repo),
+            "--trace",
+            str(missing),
+            "--suite",
+            "all",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert f"audit blocked: trace file not found: {missing}" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
+def test_optimize_missing_train_trace_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    main_trace = repo / "trace.jsonl"
+    main_trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    missing_train = repo / "traces" / "success.jsonl"
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(main_trace),
+                "--train-trace",
+                str(missing_train),
+                "--suite",
+                "all",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert f"audit blocked: trace file not found: {missing_train}" in output
+    assert "Traceback" not in output
+    assert not (repo / ".sidecar" / "runs").exists()
+
+
+def test_audit_invalid_trace_returns_clear_error_without_traceback(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text("{not-json\n", encoding="utf-8")
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    assert "audit blocked: invalid trace:" in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "invalid_trace"
 
 
 def _write_fake_llmff(path: Path) -> Path:

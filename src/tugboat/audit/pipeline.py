@@ -52,6 +52,10 @@ def run_audit_pipeline(
     trace_format: str = "auto",
     mock_llmff_inspect: bool = False,
 ) -> AuditPipelineResult:
+    trace_problem = _trace_input_problem(trace)
+    if trace_problem is not None:
+        return AuditPipelineResult(1, sidecar_dir(repo), trace_problem)
+
     policy = load_policy(repo)
     run_dir = new_run_dir(repo)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -97,7 +101,31 @@ def run_audit_pipeline(
             },
         )
         return AuditPipelineResult(1, run_dir, "audit blocked: secret detected")
-    bundle = _ingest_trace(trace, trace_format)
+    try:
+        bundle = _ingest_trace(trace, trace_format)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash="preflight",
+                status="failed",
+                run_dir=run_dir,
+            )
+        write_audit(
+            run_dir,
+            {
+                "audit_id": 0,
+                "edit_warranted": False,
+                "evidence_refs": [],
+                "failure_class": "invalid_trace",
+                "severity": "high",
+                "confidence": 1.0,
+                "llmff_failure_kind": "invalid_trace",
+                "llmff_failure_message": str(error),
+            },
+        )
+        return AuditPipelineResult(1, run_dir, f"audit blocked: invalid trace: {error}")
     redacted_trace = run_dir / "trace-redacted.jsonl"
     _write_redacted_trace(bundle, redacted_trace)
     canonical_episode_path = run_dir / "canonical-episode.json"
@@ -620,6 +648,14 @@ def _ingest_trace(trace: Path, trace_format: str):
     if trace_format == "mcp":
         return ingest_mcp_session_bundle(trace)
     raise ValueError(f"unsupported trace format: {trace_format}")
+
+
+def _trace_input_problem(trace: Path) -> str | None:
+    if not trace.exists():
+        return f"audit blocked: trace file not found: {trace}"
+    if not trace.is_file():
+        return f"audit blocked: trace path is not a file: {trace}"
+    return None
 
 
 def detect_trace_format(trace: Path) -> str:
