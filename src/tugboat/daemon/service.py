@@ -17,7 +17,7 @@ from tugboat.daemon.queue import (
 )
 from tugboat.db import Store
 from tugboat.eval.pipeline import EvalPipelineResult, run_eval_pipeline
-from tugboat.paths import sidecar_dir
+from tugboat.paths import ensure_private_dir, mark_private_file, sidecar_dir
 from tugboat.propose.pipeline import ProposePipelineResult, run_propose_pipeline
 
 
@@ -129,12 +129,13 @@ def serve_daemon_socket(
     repo = repo.resolve()
     socket_path = socket_path.expanduser().resolve()
     socket_ref = _sidecar_relative_socket_path(repo, socket_path)
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(socket_path.parent)
     socket_path.unlink(missing_ok=True)
     requests_served = 0
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             server.bind(str(socket_path))
+            mark_private_file(socket_path)
             server.listen(1)
             while max_requests is None or requests_served < max_requests:
                 connection, _ = server.accept()

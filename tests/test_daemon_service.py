@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sqlite3
 import threading
@@ -885,6 +886,68 @@ def test_daemon_unix_socket_returns_error_for_malformed_request_and_cleans_up(
     assert not socket_path.exists()
 
 
+def test_daemon_unix_socket_creates_private_sidecar_and_socket_permissions(
+    tmp_path: Path,
+):
+    socket_path = tmp_path / ".sidecar" / "daemon.sock"
+    result: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def run_server() -> None:
+        previous_umask = os.umask(0)
+        try:
+            result.update(
+                serve_daemon_socket(
+                    tmp_path,
+                    socket_path=socket_path,
+                    config=DaemonRunConfig(
+                        worker_id="socket-worker",
+                        lease_duration=timedelta(seconds=30),
+                        now=_at(10),
+                    ),
+                    max_requests=1,
+                )
+            )
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            os.umask(previous_umask)
+
+    thread = threading.Thread(target=run_server)
+    thread.start()
+    with _connect_unix_socket(socket_path) as client:
+        assert (tmp_path / ".sidecar").stat().st_mode & 0o777 == 0o700
+        assert socket_path.stat().st_mode & 0o777 == 0o600
+        client.sendall(b'{"command":"status"}\n')
+        response = json.loads(client.recv(4096).decode("utf-8"))
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert response["socket_path"] == ".sidecar/daemon.sock"
+    assert result == {"requests_served": 1, "socket_path": ".sidecar/daemon.sock"}
+
+
+def test_daemon_unix_socket_tightens_existing_sidecar_permissions(tmp_path: Path):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    sidecar.chmod(0o755)
+
+    result = serve_daemon_socket(
+        tmp_path,
+        socket_path=sidecar / "daemon.sock",
+        config=DaemonRunConfig(
+            worker_id="socket-worker",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+        max_requests=0,
+    )
+
+    assert result == {"requests_served": 0, "socket_path": ".sidecar/daemon.sock"}
+    assert sidecar.stat().st_mode & 0o777 == 0o700
+
+
 def test_daemon_unix_socket_rejects_path_outside_repo_before_bind(tmp_path: Path):
     outside_socket = tmp_path.parent / f"{tmp_path.name}-outside.sock"
 
@@ -1028,6 +1091,7 @@ def test_daemon_socket_service_constructs_only_unix_socket(
 
         def bind(self, address: str) -> None:
             assert address == str(tmp_path / ".sidecar" / "daemon.sock")
+            Path(address).touch()
 
         def listen(self, backlog: int) -> None:
             assert backlog == 1
