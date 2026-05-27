@@ -597,6 +597,7 @@ def test_audit_cli_ingests_mcp_session_rich_canonical_events(tmp_path: Path):
         "name": "pytest",
         "verifier": "pytest",
         "score": 0.25,
+        "trusted": False,
     }
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     canonical_episode = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
@@ -604,7 +605,13 @@ def test_audit_cli_ingests_mcp_session_rich_canonical_events(tmp_path: Path):
         event for event in canonical_episode["events"] if event["event_type"] == "test_result"
     ]
     assert test_events[0]["payload"]["passed"] is False
-    assert canonical_episode["verifier_scores"] == {"pytest": 0.25}
+    verifier_events = [
+        event for event in canonical_episode["events"] if event["event_type"] == "verifier_score"
+    ]
+    assert verifier_events[0]["source_trust"] == "untrusted"
+    assert verifier_events[0]["payload"]["score"] == 0.25
+    assert canonical_episode["outcome_labels"] == []
+    assert canonical_episode["verifier_scores"] == {}
 
 
 def test_audit_cli_writes_canonical_redacted_trace_for_llmff_input(tmp_path: Path):

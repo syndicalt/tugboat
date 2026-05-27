@@ -451,6 +451,67 @@ def test_ingest_ci_failure_maps_failed_suite_and_outcome(tmp_path: Path):
     assert episode.outcome_labels == ("ci_failed",)
 
 
+def test_ingest_mcp_session_preserves_untrusted_outcome_assertions_without_promoting(
+    tmp_path: Path,
+):
+    session = tmp_path / "mcp-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps({"event": "outcome.label", "label": "accepted"}),
+                json.dumps({"event": "verifier.score", "name": "quality", "score": 1.0}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_mcp_session(session)
+
+    assert [event.source_trust for event in episode.outcome_label_events] == ["untrusted"]
+    assert [event.source_trust for event in episode.verifier_score_events] == ["untrusted"]
+    assert episode.outcome_label_events[0].payload["label"] == "accepted"
+    assert episode.verifier_score_events[0].payload["score"] == 1.0
+    assert episode.outcome_labels == ()
+    assert episode.verifier_scores == {}
+
+
+def test_ingest_mcp_session_promotes_explicitly_trusted_outcome_assertions(
+    tmp_path: Path,
+):
+    session = tmp_path / "mcp-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event": "outcome.label",
+                        "label": "accepted",
+                        "trusted": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event": "verifier.score",
+                        "name": "quality",
+                        "score": 0.75,
+                        "trusted": True,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_mcp_session(session)
+
+    assert [event.source_trust for event in episode.outcome_label_events] == ["verifier"]
+    assert [event.source_trust for event in episode.verifier_score_events] == ["verifier"]
+    assert episode.outcome_labels == ("accepted",)
+    assert episode.verifier_scores == {"quality": 0.75}
+
+
 def test_ingest_mcp_session_maps_live_tool_events(tmp_path: Path):
     session = tmp_path / "mcp-session.jsonl"
     session.write_text(

@@ -87,7 +87,7 @@ def ingest_ci_failure_bundle(path: Path) -> TraceBundle:
         {"type": "test_result", "suite": suite, "passed": exit_code == 0},
         {"type": "outcome_label", "label": "ci_failed" if exit_code else "ci_passed"},
     ]
-    return _bundle_from_payloads(path, events)
+    return _bundle_from_payloads(path, events, trusted_outcome_assertions=True)
 
 
 def ingest_mcp_session(path: Path) -> CanonicalEpisode:
@@ -136,7 +136,13 @@ def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
                 }
             )
         elif event == "outcome.label":
-            events.append({"type": "outcome_label", "label": row.get("label", "")})
+            events.append(
+                {
+                    "type": "outcome_label",
+                    "label": row.get("label", ""),
+                    "trusted": bool(row.get("trusted", False)),
+                }
+            )
         elif event == "verifier.score":
             verifier_name = row.get("name", row.get("verifier", "unknown"))
             events.append(
@@ -145,6 +151,7 @@ def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
                     "name": verifier_name,
                     "verifier": row.get("verifier", verifier_name),
                     "score": float(row.get("score", 0.0)),
+                    "trusted": bool(row.get("trusted", False)),
                 }
             )
         elif event == "tool.started":
@@ -570,15 +577,32 @@ def _diff_hunk(old_string: str, new_string: str) -> str:
     )
 
 
-def _bundle_from_payloads(path: Path, payloads: list[dict[str, Any]]) -> TraceBundle:
+def _bundle_from_payloads(
+    path: Path,
+    payloads: list[dict[str, Any]],
+    *,
+    trusted_outcome_assertions: bool = False,
+) -> TraceBundle:
     events = tuple(
         TraceEvent(
             evidence_id=_evidence_id(index, payload),
             event_type=str(payload.get("type", "unknown")),
-            source_trust=source_trust_for_event_type(str(payload.get("type", "unknown"))),
+            source_trust=source_trust_for_event_type(
+                str(payload.get("type", "unknown")),
+                trusted_assertions=_trusted_outcome_assertion(
+                    payload,
+                    default=trusted_outcome_assertions,
+                ),
+            ),
             line_number=index,
             payload=payload,
         )
         for index, payload in enumerate(payloads, start=1)
     )
     return TraceBundle(trace_path=path, events=events)
+
+
+def _trusted_outcome_assertion(payload: dict[str, Any], *, default: bool) -> bool:
+    if payload.get("type") not in {"outcome_label", "verifier_score"}:
+        return True
+    return bool(payload.get("trusted", default))

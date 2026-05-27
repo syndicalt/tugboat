@@ -5752,7 +5752,7 @@ def test_optimize_feeds_episode_minibatch_guidance_to_patch_propose(tmp_path: Pa
             [
                 '{"event":"request","text":"Fix bug"}',
                 '{"event":"user.correction","text":"You skipped regression tests"}',
-                '{"event":"outcome.label","label":"rejected"}',
+                '{"event":"outcome.label","label":"rejected","trusted":true}',
                 "",
             ]
         ),
@@ -5906,7 +5906,7 @@ def test_optimize_minibatch_guidance_uses_prior_episode_history(tmp_path: Path):
         "\n".join(
             [
                 '{"event":"request","text":"Added regression coverage"}',
-                '{"event":"outcome.label","label":"accepted"}',
+                '{"event":"outcome.label","label":"accepted","trusted":true}',
                 "",
             ]
         ),
@@ -5918,7 +5918,7 @@ def test_optimize_minibatch_guidance_uses_prior_episode_history(tmp_path: Path):
             [
                 '{"event":"request","text":"Fix bug"}',
                 '{"event":"user.correction","text":"You skipped regression tests"}',
-                '{"event":"outcome.label","label":"rejected"}',
+                '{"event":"outcome.label","label":"rejected","trusted":true}',
                 "",
             ]
         ),
@@ -5997,7 +5997,7 @@ def test_optimize_accepts_multiple_training_traces_and_records_batch_metadata(
         "\n".join(
             [
                 '{"event":"request","text":"Added regression coverage"}',
-                '{"event":"outcome.label","label":"accepted"}',
+                '{"event":"outcome.label","label":"accepted","trusted":true}',
                 "",
             ]
         ),
@@ -6009,7 +6009,7 @@ def test_optimize_accepts_multiple_training_traces_and_records_batch_metadata(
             [
                 '{"event":"request","text":"Fix bug"}',
                 '{"event":"user.correction","text":"You skipped regression tests"}',
-                '{"event":"outcome.label","label":"rejected"}',
+                '{"event":"outcome.label","label":"rejected","trusted":true}',
                 "",
             ]
         ),
@@ -6406,7 +6406,7 @@ def test_optimize_rejects_held_out_episode_overlap_with_training_batch(
         "\n".join(
             [
                 '{"event":"request","text":"Fix bug"}',
-                '{"event":"outcome.label","label":"rejected"}',
+                '{"event":"outcome.label","label":"rejected","trusted":true}',
                 "",
             ]
         ),
