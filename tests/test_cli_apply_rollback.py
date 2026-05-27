@@ -401,6 +401,32 @@ def test_apply_rejects_policy_invalid_patch_without_mutation_or_branch_change(tm
                 ).fetchone()[0] == 0
 
 
+def test_apply_rejects_candidate_diff_mutated_after_eval(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+    mutated_diff = (
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -1,3 +1,4 @@\n"
+        " # Rules\n"
+        " \n"
+        " Use tests.\n"
+        "+Post-eval mutated instruction.\n"
+    )
+    (run_dir / "candidate.diff").write_text(mutated_diff, encoding="utf-8")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
+
+
 def test_apply_restores_original_branch_when_vcs_apply_fails_after_branch_creation(
     tmp_path: Path,
     monkeypatch,

@@ -1421,6 +1421,8 @@ def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, obje
 def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
     metadata = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
+    if hashlib.sha256(diff.encode("utf-8")).hexdigest() != str(metadata["diff_hash"]):
+        raise ValueError("candidate diff hash does not match candidate.diff")
     return CandidatePatch(
         audit_id=int(metadata["audit_id"]),
         base_file=str(metadata["base_file"]),
