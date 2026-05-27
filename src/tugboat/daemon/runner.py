@@ -20,8 +20,8 @@ from tugboat.daemon.queue import (
 from tugboat.daemon.service import process_daemon_job
 from tugboat.db import Store
 from tugboat.llmff.runner import run_manifest as run_llmff_manifest
-from tugboat.paths import sidecar_dir
-from tugboat.security.secrets import SecretScanError, scan_path
+from tugboat.paths import ensure_private_dir, mark_private_file, sidecar_dir
+from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 
 
 _SAFE_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -208,12 +208,7 @@ def write_worktree_profile(
         "observability_refs": observability_refs,
         "runs_dir": ".sidecar/runs",
     }
-    validate_json_artifact("worktree-profile.json", payload)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _write_private_json_artifact(path, "worktree-profile.json", payload)
     return path
 
 
@@ -431,9 +426,7 @@ def _load_discovered_traces(repo: Path) -> set[str]:
 def _write_discovered_traces(repo: Path, traces: set[str]) -> None:
     path = repo / ".sidecar" / "discovered-traces.json"
     payload = _discovered_traces_payload(traces)
-    validate_json_artifact("daemon-discovered-traces.json", payload)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_private_json_artifact(path, "daemon-discovered-traces.json", payload)
 
 
 def _discovered_traces_payload(traces: set[str]) -> dict[str, Any]:
@@ -441,3 +434,14 @@ def _discovered_traces_payload(traces: set[str]) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "traces": sorted(traces),
     }
+
+
+def _write_private_json_artifact(path: Path, artifact_name: str, payload: dict[str, Any]) -> None:
+    validate_json_artifact(artifact_name, payload)
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
+    ensure_private_dir(path.parent)
+    path.write_text(text, encoding="utf-8")
+    mark_private_file(path)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from tugboat.daemon.runner import (
     run_daemon_loop,
     write_worktree_profile,
 )
+from tugboat.security.secrets import SecretScanError
 
 
 def _write_fake_llmff(path: Path) -> Path:
@@ -191,6 +193,24 @@ def test_discover_trace_jobs_writes_schema_versioned_registry(tmp_path: Path):
     assert json.loads(
         (tmp_path / ".sidecar" / "discovered-traces.json").read_text(encoding="utf-8")
     ) == {"schema_version": 1, "traces": [str(trace.resolve())]}
+
+
+def test_discover_trace_jobs_writes_private_registry_under_permissive_umask(tmp_path: Path):
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    trace = trace_dir / "episode.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    previous_umask = os.umask(0o022)
+    try:
+        result = discover_trace_jobs(tmp_path, [trace_dir], now=_at(0))
+    finally:
+        os.umask(previous_umask)
+
+    registry = tmp_path / ".sidecar" / "discovered-traces.json"
+    assert result == {"discovered": 1, "skipped": 0}
+    assert registry.stat().st_mode & 0o777 == 0o600
+    assert registry.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_discover_trace_jobs_deduplicates_overlapping_trace_dirs_in_one_pass(
@@ -1019,6 +1039,35 @@ def test_write_worktree_profile_records_local_observability_refs(tmp_path: Path)
         "observability_refs": ["http://127.0.0.1:3000/health"],
         "runs_dir": ".sidecar/runs",
     }
+
+
+def test_write_worktree_profile_rejects_secret_bearing_metadata_before_write(tmp_path: Path):
+    with pytest.raises(SecretScanError):
+        write_worktree_profile(
+            tmp_path,
+            app_boot={
+                "command": "python -m app",
+                "env": {"OPENAI_API_KEY": "sk-abcdefghijklmnopqrstuvwx"},
+            },
+            observability_refs=["http://127.0.0.1:3000/health"],
+        )
+
+    assert not (tmp_path / ".sidecar" / "worktree-profile.json").exists()
+
+
+def test_write_worktree_profile_writes_private_artifact_under_permissive_umask(tmp_path: Path):
+    previous_umask = os.umask(0o022)
+    try:
+        profile_path = write_worktree_profile(
+            tmp_path,
+            app_boot={"command": "python -m app"},
+            observability_refs=["http://127.0.0.1:3000/health"],
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert profile_path.stat().st_mode & 0o777 == 0o600
+    assert profile_path.parent.stat().st_mode & 0o777 == 0o700
 
 
 def _at(seconds: int) -> datetime:
