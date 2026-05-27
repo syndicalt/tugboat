@@ -61,6 +61,7 @@ from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
     materialize_manifests,
+    require_manifest_contracts,
     validate_manifest_contracts,
 )
 from tugboat.mcp import run_stdio_server
@@ -1674,6 +1675,7 @@ def _run_acceptance_summary(
     eval_reports_path: Path | None = None,
 ) -> dict[str, object]:
     manifests = materialize_manifests(repo)
+    require_manifest_contracts(manifests)
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
     manifest = next(record.path for record in manifests if record.name == "acceptance-summary.yaml")

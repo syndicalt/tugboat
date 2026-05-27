@@ -16,7 +16,11 @@ from tugboat.artifacts import (
 from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.llmff.runner import inspect_manifest, run_manifest
-from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
+from tugboat.manifests import (
+    manifests_are_allowed_by_policy,
+    materialize_manifests,
+    require_manifest_contracts,
+)
 from tugboat.optimization import (
     LearningRateBudget,
     OptimizationMemory,
@@ -131,6 +135,7 @@ def _resolve_audit_run_dir(repo: Path, audit_ref: str) -> Path:
 
 def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> CandidatePatch:
     manifests = materialize_manifests(repo)
+    require_manifest_contracts(manifests)
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
     instruction_index_path = run_dir / "instruction-index.raw.json"

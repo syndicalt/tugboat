@@ -12,7 +12,11 @@ from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.llmff.runner import inspect_manifest, run_manifest
-from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
+from tugboat.manifests import (
+    manifests_are_allowed_by_policy,
+    materialize_manifests,
+    require_manifest_contracts,
+)
 from tugboat.optimization import REJECTED_EDIT_SUPPRESSION_SIGNAL
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
@@ -340,6 +344,7 @@ def _run_patch_eval(
     suite_id: str,
 ) -> tuple[dict[str, object], dict[str, object]]:
     manifests = materialize_manifests(repo)
+    require_manifest_contracts(manifests)
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
     manifest = next(record.path for record in manifests if record.name == "patch-eval.yaml")

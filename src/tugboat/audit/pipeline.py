@@ -17,7 +17,12 @@ from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
 from tugboat.db import Store
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
-from tugboat.manifests import manifests_are_allowed_by_policy, materialize_manifests
+from tugboat.manifests import (
+    ManifestContractError,
+    manifests_are_allowed_by_policy,
+    materialize_manifests,
+    require_manifest_contracts,
+)
 from tugboat.paths import ensure_private_dir, mark_private_file, new_run_dir, sidecar_dir
 from tugboat.scoring import ScoreOutcome, score_episode
 from tugboat.security.redaction import redact_payload
@@ -85,6 +90,10 @@ def run_audit_pipeline(
         instruction_snapshot_dir=run_dir / "instruction-snapshot",
     )
     manifests = materialize_manifests(repo)
+    try:
+        require_manifest_contracts(manifests)
+    except ManifestContractError as error:
+        return AuditPipelineResult(1, run_dir, str(error))
     if not manifests_are_allowed_by_policy(manifests, policy):
         return AuditPipelineResult(1, run_dir, "manifest hash is not allowed by policy")
     instruction_index_path = run_dir / "instruction-snapshot"

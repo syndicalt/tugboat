@@ -35,6 +35,10 @@ class ManifestContractResult:
     findings: tuple[str, ...]
 
 
+class ManifestContractError(RuntimeError):
+    pass
+
+
 def _template_bytes(name: str) -> bytes:
     return (
         files("tugboat.manifests")
@@ -77,6 +81,14 @@ def validate_manifest_contracts(records: tuple[ManifestRecord, ...]) -> Manifest
     for record in sorted(records, key=lambda item: item.name):
         findings.extend(_manifest_contract_findings(record))
     return ManifestContractResult(passed=not findings, findings=tuple(findings))
+
+
+def require_manifest_contracts(records: tuple[ManifestRecord, ...]) -> None:
+    result = validate_manifest_contracts(records)
+    if not result.passed:
+        raise ManifestContractError(
+            "manifest contract validation failed: " + "; ".join(result.findings)
+        )
 
 
 def _manifest_contract_findings(record: ManifestRecord) -> list[str]:

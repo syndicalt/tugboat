@@ -526,6 +526,58 @@ llmff:
     assert not (run_dir / "audit.json").exists()
 
 
+def test_audit_rejects_invalid_local_episode_manifest_contract(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    manifest_dir = repo / ".sidecar" / "manifests"
+    manifest_dir.mkdir()
+    (manifest_dir / "episode-audit.yaml").write_text(
+        """
+name: episode-audit
+purpose: malformed local manifest
+inputs:
+  - episode_trace
+  - instruction_index
+  - policy
+outputs:
+  - audit_report
+  - evidence_ids
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "manifest contract validation failed" in output
+    assert (
+        "episode-audit.yaml missing required manifest field output_artifacts"
+        in output
+    )
+    assert not (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
 def test_audit_rejects_llmff_audit_with_unknown_instruction_refs(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1912,6 +1964,9 @@ inputs:
 outputs:
   - drift_clusters
   - optimizer_notes
+output_artifacts:
+  drift_clusters: drift.raw.json
+  optimizer_notes: optimizer-notes.raw.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -1927,6 +1982,9 @@ inputs:
 outputs:
   - candidate_patch
   - proposal_rationale
+output_artifacts:
+  candidate_patch: candidate.raw.json
+  proposal_rationale: proposal-rationale.raw.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -1987,6 +2045,10 @@ inputs:
   - instruction_index
 outputs:
   - drift_clusters
+  - optimizer_notes
+output_artifacts:
+  drift_clusters: drift.raw.json
+  optimizer_notes: optimizer-notes.raw.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -2032,6 +2094,8 @@ inputs:
   - instruction_index
 outputs:
   - drift_clusters
+output_artifacts:
+  drift_clusters: drift.raw.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -2082,6 +2146,8 @@ inputs:
   - policy
 outputs:
   - candidate_patch
+output_artifacts:
+  candidate_patch: candidate.raw.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -2130,6 +2196,8 @@ input:
   - instruction_index
 outputs:
   - drift_clusters
+output_artifacts:
+  drift_clusters: drift.raw.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -2137,7 +2205,59 @@ outputs:
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
 
     output = capsys.readouterr().out
-    assert "drift-detect.yaml must declare llmff inputs as a list" in output
+    assert "drift-detect.yaml missing required manifest field inputs" in output
+
+
+def test_propose_rejects_invalid_local_drift_manifest_contract(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+    manifest_dir = repo / ".sidecar" / "manifests"
+    (manifest_dir / "drift-detect.yaml").write_text(
+        """
+name: drift-detect
+purpose: malformed local manifest
+inputs:
+  - audit_reports
+  - instruction_index
+outputs:
+  - drift_clusters
+  - optimizer_notes
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "manifest contract validation failed" in output
+    assert (
+        "drift-detect.yaml missing required manifest field output_artifacts"
+        in output
+    )
+    assert not (run_dir / "candidate.json").exists()
 
 
 def test_propose_rejects_malformed_llmff_drift_raw_output(tmp_path: Path, capsys):
