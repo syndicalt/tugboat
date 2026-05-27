@@ -317,7 +317,8 @@ def _select_candidate_payload(repo: Path, run_dir: Path, payload: dict[str, obje
     raw_candidates = payload["candidates"]
     if not isinstance(raw_candidates, list):
         raise ValueError("candidate-set.raw.json candidates must be a JSON list")
-    selected_payload, ranking = _rank_and_merge_candidate_payloads(repo, raw_candidates)
+    policy = load_policy(repo)
+    selected_payload, ranking = _rank_and_merge_candidate_payloads(repo, raw_candidates, policy)
     _write_private_json_artifact(run_dir / "candidate-ranking.json", "candidate-ranking.json", ranking)
     _write_private_json_artifact(run_dir / "candidate.raw.json", "candidate.raw.json", selected_payload)
     return selected_payload
@@ -326,6 +327,7 @@ def _select_candidate_payload(repo: Path, run_dir: Path, payload: dict[str, obje
 def _rank_and_merge_candidate_payloads(
     repo: Path,
     raw_candidates: list[object],
+    policy,
 ) -> tuple[dict[str, object], dict[str, object]]:
     candidates = [
         candidate for candidate in raw_candidates if isinstance(candidate, dict)
@@ -339,6 +341,8 @@ def _rank_and_merge_candidate_payloads(
     for candidate in candidates:
         candidate_id = str(candidate.get("candidate_id", f"candidate-{len(selected) + len(rejected) + 1}"))
         candidate_reasons = _candidate_set_memory_rejection_reasons(memory, candidate)
+        if not candidate_reasons:
+            candidate_reasons = _candidate_set_budget_rejection_reasons(policy, candidate)
         if not candidate_reasons:
             candidate_reasons = _candidate_set_merge_rejection_reasons(repo, selected, candidate)
         if candidate_reasons:
@@ -361,6 +365,18 @@ def _rank_and_merge_candidate_payloads(
         "rejected_candidates": rejected,
     }
     return merged_payload, ranking
+
+
+def _candidate_set_budget_rejection_reasons(policy, candidate: dict[str, object]) -> list[str]:
+    raw_metadata = candidate.get("bounded_edit_metadata", [])
+    if not raw_metadata:
+        return ["bounded_edit_metadata_required"]
+    if not isinstance(raw_metadata, list):
+        return ["bounded_edit_metadata_required"]
+    metadata = tuple(item for item in raw_metadata if isinstance(item, dict))
+    if not metadata:
+        return ["bounded_edit_metadata_required"]
+    return _learning_rate_budget_reasons_for_metadata(policy, metadata)
 
 
 def _candidate_set_memory_rejection_reasons(
@@ -873,6 +889,13 @@ def _required_non_negative_int(item: dict[str, object], field: str, prefix: str)
 def _learning_rate_budget_policy_reasons(policy, candidate: CandidatePatch) -> list[str]:
     if not candidate.bounded_edit_metadata:
         return ["bounded_edit_metadata_required"]
+    return _learning_rate_budget_reasons_for_metadata(policy, candidate.bounded_edit_metadata)
+
+
+def _learning_rate_budget_reasons_for_metadata(
+    policy,
+    bounded_edit_metadata: tuple[dict[str, object], ...],
+) -> list[str]:
     budget = LearningRateBudget(
         max_files_touched=policy.roadmap_learning_rate_max_files_touched,
         max_sections_touched=policy.roadmap_learning_rate_max_sections_touched,
@@ -880,7 +903,7 @@ def _learning_rate_budget_policy_reasons(policy, candidate: CandidatePatch) -> l
         max_normative_changes=policy.roadmap_learning_rate_max_normative_changes,
         operator_risk_limits=dict(policy.roadmap_learning_rate_operator_risk_limits),
     )
-    return list(budget_reasons_for_bounded_edit_metadata(candidate.bounded_edit_metadata, budget=budget))
+    return list(budget_reasons_for_bounded_edit_metadata(bounded_edit_metadata, budget=budget))
 
 
 def _rejected_memory_policy_reasons(repo: Path, candidate: CandidatePatch) -> list[str]:

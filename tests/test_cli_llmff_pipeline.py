@@ -3419,6 +3419,167 @@ llmff:
     assert stored_state == "rejected"
 
 
+def test_propose_candidate_set_skips_over_budget_edit_and_selects_viable_alternative(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    base_candidate = {
+        "base_file": "CODEX.md",
+        "base_hash": base_hash,
+        "risk_class": "instruction_clarification",
+        "expected_behavior_change": "Agents add regression tests.",
+        "evals_required": ["governance-regression"],
+        "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+        "sources": [{"source_id": "ev_fake", "trusted": True}],
+    }
+    candidate_set = {
+        "candidates": [
+            {
+                **base_candidate,
+                "candidate_id": "oversized-testing-add",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add oversized regression test guidance.\n",
+                "rationale": "Testing guidance is missing but too broad.",
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Testing",
+                        "changed_lines": 21,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+            {
+                **base_candidate,
+                "candidate_id": "viable-review-add",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add review checklist guidance.\n",
+                "rationale": "Review guidance is missing.",
+                "expected_behavior_change": "Agents preserve review checklists.",
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Review",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+        ]
+    }
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", candidate_set=candidate_set)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+roadmap:
+  learning_rate_budget:
+    max_changed_lines: 20
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    ranking = json.loads((run_dir / "candidate-ranking.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+
+    assert candidate["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Review",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+    assert ranking == {
+        "schema_version": 1,
+        "selected_candidate_ids": ["viable-review-add"],
+        "merged": False,
+        "rejected_candidates": [
+            {"candidate_id": "oversized-testing-add", "reasons": ["max_changed_lines_exceeded"]}
+        ],
+    }
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": True,
+        "reasons": [],
+    }
+
+
+def test_propose_candidate_set_fails_when_all_candidates_exceed_budget(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    candidate_set = {
+        "candidates": [
+            {
+                "candidate_id": "oversized-testing-add",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add oversized regression test guidance.\n",
+                "rationale": "Testing guidance is missing but too broad.",
+                "risk_class": "instruction_clarification",
+                "expected_behavior_change": "Agents add regression tests.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Testing",
+                        "changed_lines": 21,
+                        "normative_changes": 0,
+                    }
+                ],
+            }
+        ]
+    }
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", candidate_set=candidate_set)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+roadmap:
+  learning_rate_budget:
+    max_changed_lines: 20
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+    output = capsys.readouterr().out
+    assert "candidate-set.raw.json candidates were all rejected" in output
+    assert "oversized-testing-add=max_changed_lines_exceeded" in output
+
+
 def test_propose_records_llmff_failure_without_traceback(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
