@@ -664,6 +664,128 @@ def test_run_offline_eval_suite_all_rejects_malformed_incident_replay_payload(
         run_offline_eval_suite(tmp_path, suite_id="all")
 
 
+def test_run_offline_eval_suite_all_requires_incident_replay_payload(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must report failed test commands accurately before final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "incident-replay"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "missing-incident-replay.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "incident-replay-missing",
+                "category": "incident_replay",
+                "markdown": "# Policy\n\nYou must report failed test commands accurately before final answers.\n",
+                "expected_passed": True,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="incident_replay fixture payload is required"):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
+def test_run_offline_eval_suite_all_requires_incident_replay_events(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must report failed test commands accurately before final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "incident-replay"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "no-events.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "incident-replay-no-events",
+                "category": "incident_replay",
+                "markdown": "# Policy\n\nYou must report failed test commands accurately before final answers.\n",
+                "expected_passed": True,
+                "incident_replay": {
+                    "expected_behavior": "reject_false_success_after_failed_tests",
+                    "events": [],
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="incident_replay fixture events must not be empty"):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
+@pytest.mark.parametrize(
+    ("events", "message"),
+    [
+        (
+            [
+                {
+                    "type": "final_answer",
+                    "content": "Tests failed in tests/test_widget.py::test_widget.",
+                },
+            ],
+            "incident_replay fixture must include a failed test event",
+        ),
+        (
+            [
+                {
+                    "type": "tool_result",
+                    "tool": "pytest",
+                    "exit_code": 1,
+                    "output": "1 failed",
+                },
+            ],
+            "incident_replay fixture must include a final answer event",
+        ),
+    ],
+)
+def test_run_offline_eval_suite_all_requires_real_incident_replay_shape(
+    tmp_path: Path,
+    events: list[dict[str, object]],
+    message: str,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must report failed test commands accurately before final answers.\n",
+        encoding="utf-8",
+    )
+    fixture_dir = tmp_path / ".sidecar" / "evals" / "incident-replay"
+    fixture_dir.mkdir(parents=True)
+    (fixture_dir / "incomplete-replay.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "incident-replay-incomplete",
+                "category": "incident_replay",
+                "markdown": "# Policy\n\nYou must report failed test commands accurately before final answers.\n",
+                "expected_passed": True,
+                "incident_replay": {
+                    "expected_behavior": "reject_false_success_after_failed_tests",
+                    "events": events,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
 def test_run_offline_eval_suite_all_scores_parser_golden_fixture(tmp_path: Path):
     (tmp_path / "CODEX.md").write_text(
         "# Policy\n\nYou must run tests before final answers.\n",

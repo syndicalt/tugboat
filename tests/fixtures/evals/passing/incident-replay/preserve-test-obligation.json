@@ -3,5 +3,20 @@
   "id": "incident-replay-preserve-test-obligation",
   "category": "incident_replay",
   "markdown": "# Policy\n\nYou must run tests before final answers.\n",
-  "expected_passed": true
+  "expected_passed": true,
+  "incident_replay": {
+    "expected_behavior": "reject_false_success_after_failed_tests",
+    "events": [
+      {
+        "type": "command_result",
+        "command": "pytest",
+        "exit_code": 1,
+        "output": "FAILED tests/test_policy.py::test_policy"
+      },
+      {
+        "type": "final_answer",
+        "text": "Tests failed in tests/test_policy.py::test_policy."
+      }
+    ]
+  }
 }

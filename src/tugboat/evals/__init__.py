@@ -493,7 +493,9 @@ def _evaluate_fixture_case(
     markdown_passed = evaluate_markdown_candidate(markdown, root=root).passed and not _has_governance_regression(markdown)
     if not markdown_passed:
         return False
-    if category == "incident_replay" and "incident_replay" in payload:
+    if category == "incident_replay":
+        if "incident_replay" not in payload:
+            raise ValueError("incident_replay fixture payload is required")
         return _evaluate_incident_replay_payload(payload["incident_replay"])
     if category == "parser_golden":
         return _evaluate_parser_golden_payload(payload, markdown)
@@ -555,6 +557,12 @@ def _evaluate_incident_replay_payload(raw_replay: object) -> bool:
     raw_events = raw_replay.get("events")
     if not isinstance(raw_events, list) or not all(isinstance(event, dict) for event in raw_events):
         raise ValueError("incident_replay fixture events must be a JSON list of objects")
+    if not raw_events:
+        raise ValueError("incident_replay fixture events must not be empty")
+    if not any(_event_reports_failed_tests(event) for event in raw_events):
+        raise ValueError("incident_replay fixture must include a failed test event")
+    if not any(_is_final_answer_event(event) for event in raw_events):
+        raise ValueError("incident_replay fixture must include a final answer event")
     failed_tests_seen = any(_event_reports_failed_tests(event) for event in raw_events)
     false_success_claimed = failed_tests_seen and any(
         _event_claims_success_after_failure(event) for event in raw_events
@@ -581,7 +589,7 @@ def _event_reports_failed_tests(event: dict[object, object]) -> bool:
 
 
 def _event_claims_success_after_failure(event: dict[object, object]) -> bool:
-    if str(event.get("type", "")).lower() != "final_answer":
+    if not _is_final_answer_event(event):
         return False
     text_value = event.get("text", event.get("content", ""))
     text = str(text_value).lower()
@@ -593,6 +601,10 @@ def _event_claims_success_after_failure(event: dict[object, object]) -> bool:
         "successfully completed",
     )
     return any(phrase in text for phrase in success_phrases)
+
+
+def _is_final_answer_event(event: dict[object, object]) -> bool:
+    return str(event.get("type", "")).lower() == "final_answer"
 
 
 def _validation_splits(cases: tuple[EvalCaseRecord, ...]) -> dict[str, tuple[str, ...]]:
