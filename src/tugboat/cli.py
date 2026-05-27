@@ -1947,6 +1947,12 @@ def _write_apply_plan(
     if not bool(eval_report["passed"]):
         raise ValueError("eval report did not pass")
     _assert_eval_acceptance(eval_report, policy_gate)
+    recorded_provenance = _assert_apply_recorded_provenance(
+        repo,
+        run_dir,
+        candidate_id=candidate_id,
+        suite_id=str(eval_report["suite_id"]),
+    )
     explicit_human_review = bool(decision.review_required_reasons)
     if explicit_human_review and (not human_review or review_actor == "tugboat"):
         raise ValueError("Class C candidates require explicit human review")
@@ -2122,6 +2128,7 @@ def _write_apply_plan(
         pre_hashes=pre_hashes,
         post_hashes=post_hashes,
         apply_plan_path=path,
+        recorded_provenance=recorded_provenance,
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
@@ -2215,6 +2222,7 @@ def _write_provenance_bundle(
     pre_hashes: dict[str, str],
     post_hashes: dict[str, str],
     apply_plan_path: Path,
+    recorded_provenance: dict[str, object],
 ) -> Path:
     def artifact_ref(path: Path) -> dict[str, str]:
         return {
@@ -2232,6 +2240,7 @@ def _write_provenance_bundle(
         "rollback_command": rollback_command,
         "pre_hashes": pre_hashes,
         "post_hashes": post_hashes,
+        "recorded_provenance": recorded_provenance,
         "source_artifacts": {
             "apply_plan": artifact_ref(apply_plan_path),
             "candidate_diff": artifact_ref(run_dir / "candidate.diff"),
@@ -2261,7 +2270,7 @@ def _assert_auto_apply_precheck(
     rollback_rate: float,
 ) -> None:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
-    metrics = _auto_apply_ledger_metrics(repo)
+    metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
     vcs_proof = VcsProof(
         mode=mode,
@@ -2333,7 +2342,7 @@ def _assert_auto_apply_final(
     rollback_rate: float,
 ) -> dict[str, object]:
     rollback_command = _auto_apply_rollback_command(repo, run_dir)
-    metrics = _auto_apply_ledger_metrics(repo)
+    metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
     vcs_proof = VcsProof(
         mode=mode,
@@ -2383,7 +2392,11 @@ def _assert_auto_apply_final(
     return bundle
 
 
-def _auto_apply_ledger_metrics(repo: Path) -> dict[str, object]:
+def _auto_apply_ledger_metrics(
+    repo: Path,
+    *,
+    exclude_candidate_id: int | None = None,
+) -> dict[str, object]:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         reviewed_row = store.connection.execute(
             """
@@ -2395,7 +2408,9 @@ def _auto_apply_ledger_metrics(repo: Path) -> dict[str, object]:
             FROM decisions
             WHERE policy = 'deterministic_policy_gate'
               AND decision IN ('needs_review', 'rejected')
-            """
+              AND (? IS NULL OR candidate_id != ?)
+            """,
+            (exclude_candidate_id, exclude_candidate_id),
         ).fetchone()
         applied_row = store.connection.execute(
             """
@@ -2659,6 +2674,73 @@ def _assert_eval_acceptance(
         regression_tolerance = _score_from_eval_report(eval_report, "regression_tolerance") or 0.0
         if regression_score > baseline_regression_score + regression_tolerance:
             raise ValueError("regression score degraded beyond tolerance")
+
+
+def _assert_apply_recorded_provenance(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    suite_id: str,
+) -> dict[str, object]:
+    expected_diff_path = (run_dir / "candidate.diff").resolve()
+    expected_eval_path = (run_dir / "eval-report.json").resolve()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_row = store.connection.execute(
+            """
+            SELECT candidate.audit_id, candidate.diff_path, candidate.audit_event_sequence,
+                   audit.audit_event_sequence
+            FROM candidates candidate
+            JOIN audits audit ON audit.id = candidate.audit_id
+            WHERE candidate.id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+        if candidate_row is None:
+            raise ValueError("candidate provenance is not recorded")
+        if Path(str(candidate_row[1])).resolve() != expected_diff_path:
+            raise ValueError("candidate provenance does not match run artifacts")
+
+        eval_row = store.connection.execute(
+            """
+            SELECT id, report_path, audit_event_sequence
+            FROM evals
+            WHERE candidate_id = ? AND suite_id = ? AND passed = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (candidate_id, suite_id),
+        ).fetchone()
+        if eval_row is None:
+            raise ValueError("eval provenance is not recorded")
+        if Path(str(eval_row[1])).resolve() != expected_eval_path:
+            raise ValueError("eval provenance does not match run artifacts")
+
+        decision_row = store.connection.execute(
+            """
+            SELECT id, audit_event_sequence
+            FROM decisions
+            WHERE candidate_id = ?
+              AND policy = 'deterministic_policy_gate'
+              AND decision = 'needs_review'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (candidate_id,),
+        ).fetchone()
+        if decision_row is None:
+            raise ValueError("policy decision provenance is not recorded")
+        return {
+            "audit_id": int(candidate_row[0]),
+            "eval_id": int(eval_row[0]),
+            "policy_decision_id": int(decision_row[0]),
+            "audit_event_sequences": {
+                "audit": int(candidate_row[3]),
+                "candidate": int(candidate_row[2]),
+                "eval": int(eval_row[2]),
+                "policy_decision": int(decision_row[1]),
+            },
+        }
 
 
 def _eval_validation_split_failure(eval_report: dict[str, object]) -> str | None:

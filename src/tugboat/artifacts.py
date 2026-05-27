@@ -2017,6 +2017,32 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             "pre_hashes": {"type": "object"},
             "post_hashes": {"type": "object"},
+            "recorded_provenance": {
+                "type": "object",
+                "required": [
+                    "audit_id",
+                    "eval_id",
+                    "policy_decision_id",
+                    "audit_event_sequences",
+                ],
+                "properties": {
+                    "audit_id": {"type": "integer"},
+                    "eval_id": {"type": "integer"},
+                    "policy_decision_id": {"type": "integer"},
+                    "audit_event_sequences": {
+                        "type": "object",
+                        "required": ["audit", "candidate", "eval", "policy_decision"],
+                        "properties": {
+                            "audit": {"type": "integer"},
+                            "candidate": {"type": "integer"},
+                            "eval": {"type": "integer"},
+                            "policy_decision": {"type": "integer"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "additionalProperties": False,
+            },
             "source_artifacts": {
                 "type": "object",
                 "additionalProperties": False,

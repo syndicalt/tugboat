@@ -38,6 +38,11 @@ def _init_repo(tmp_path: Path) -> Path:
     _git(repo, "config", "user.email", "tugboat@example.test")
     _git(repo, "config", "user.name", "Tugboat Tests")
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (repo / ".sidecar").mkdir()
+    (repo / ".sidecar" / ".gitignore").write_text(
+        "*\n!.gitignore\n!policy.yaml\n",
+        encoding="utf-8",
+    )
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "initial")
     return repo
@@ -55,7 +60,11 @@ def _candidate_run(
     base_file: str = "CODEX.md",
     diff: str | None = None,
     pending_eval_definition_paths: tuple[str, ...] = (),
+    recorded_provenance: bool = True,
 ) -> Path:
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir(exist_ok=True)
+    (sidecar / ".gitignore").write_text("*\n!.gitignore\n!policy.yaml\n", encoding="utf-8")
     run_dir = repo / ".sidecar" / "runs" / "20260525T000000000000Z"
     run_dir.mkdir(parents=True)
     if diff is None:
@@ -124,7 +133,116 @@ def _candidate_run(
         + "\n",
         encoding="utf-8",
     )
+    if recorded_provenance:
+        _seed_apply_candidate_provenance(repo, run_dir, candidate, diff)
     return run_dir
+
+
+def _seed_apply_candidate_provenance(
+    repo: Path,
+    run_dir: Path,
+    candidate: dict[str, object],
+    diff: str,
+) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        audit_event = store.append_audit_event(
+            "audit.recorded",
+            {"audit_id": int(candidate["audit_id"]), "run_id": run_dir.name},
+        )
+        store.connection.execute(
+            """
+            INSERT INTO audits(
+              id, run_id, failure_class, severity, confidence, evidence_json,
+              instruction_refs_json, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(candidate["audit_id"]),
+                run_dir.name,
+                "instruction_conflict",
+                "high",
+                0.9,
+                json.dumps(["audit:1"], sort_keys=True),
+                json.dumps(["CODEX.md#rules"], sort_keys=True),
+                audit_event.sequence,
+            ),
+        )
+        candidate_event = store.append_audit_event(
+            "candidate.recorded",
+            {
+                "audit_id": int(candidate["audit_id"]),
+                "candidate_id": int(candidate["candidate_id"]),
+            },
+        )
+        store.connection.execute(
+            """
+            INSERT INTO candidates(
+              id, audit_id, base_file, base_hash, diff_hash, diff_path, risk_class,
+              rationale, state, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(candidate["candidate_id"]),
+                int(candidate["audit_id"]),
+                str(candidate["base_file"]),
+                str(candidate["base_hash"]),
+                hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+                str(run_dir / "candidate.diff"),
+                str(candidate["risk_class"]),
+                str(candidate["rationale"]),
+                "needs_review",
+                candidate_event.sequence,
+            ),
+        )
+        eval_event = store.append_audit_event(
+            "eval.recorded",
+            {"eval_id": 1, "candidate_id": int(candidate["candidate_id"])},
+        )
+        store.connection.execute(
+            """
+            INSERT INTO evals(
+              id, candidate_id, suite_id, report_path, passed, metrics_json,
+              audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                int(candidate["candidate_id"]),
+                "all",
+                str(run_dir / "eval-report.json"),
+                1,
+                json.dumps({"governance_regressions": 0}, sort_keys=True),
+                eval_event.sequence,
+            ),
+        )
+        decision_event = store.append_audit_event(
+            "decision.recorded",
+            {"decision_id": 1, "candidate_id": int(candidate["candidate_id"])},
+        )
+        store.connection.execute(
+            """
+            INSERT INTO decisions(
+              id, candidate_id, actor, policy, decision, reason, created_at,
+              applied_commit, rollback_ref, audit_event_sequence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+            """,
+            (
+                1,
+                int(candidate["candidate_id"]),
+                "tugboat",
+                "deterministic_policy_gate",
+                "needs_review",
+                "",
+                "",
+                "",
+                decision_event.sequence,
+            ),
+        )
+        store.connection.commit()
 
 
 def _write_auto_apply_policy(
@@ -260,6 +378,21 @@ def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_p
     assert payload["provenance_bundle"] == (
         ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json"
     )
+
+
+def test_apply_rejects_artifact_only_candidate_without_recorded_provenance(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, recorded_provenance=False)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: candidate provenance is not recorded" in output
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
 
 
 def test_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
@@ -519,7 +652,7 @@ def test_apply_rejects_sidecar_policy_self_apply_even_when_stored_gate_passed(
 ):
     repo = _init_repo(tmp_path)
     policy_path = repo / ".sidecar" / "policy.yaml"
-    policy_path.parent.mkdir(parents=True)
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
     original_policy = (
         "version: 1\n"
         "mode: proposal_only\n"
@@ -592,7 +725,7 @@ def test_apply_rejects_sidecar_audit_record_edit_even_when_stored_gate_passed(
 ):
     repo = _init_repo(tmp_path)
     sidecar = repo / ".sidecar"
-    sidecar.mkdir(parents=True)
+    sidecar.mkdir(parents=True, exist_ok=True)
     policy_path = sidecar / "policy.yaml"
     policy_path.write_text(
         "version: 1\n"
@@ -1198,6 +1331,17 @@ def test_apply_commit_mode_records_applied_audit_proof(tmp_path: Path):
         "rollback_command": apply_plan["rollback_command"],
         "pre_hashes": apply_plan["pre_hashes"],
         "post_hashes": apply_plan["post_hashes"],
+        "recorded_provenance": {
+            "audit_id": 1,
+            "eval_id": 1,
+            "policy_decision_id": 1,
+            "audit_event_sequences": {
+                "audit": 1,
+                "candidate": 2,
+                "eval": 3,
+                "policy_decision": 4,
+            },
+        },
         "source_artifacts": {
             "apply_plan": {
                 "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
