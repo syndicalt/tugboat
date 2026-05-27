@@ -75,6 +75,96 @@ llmff:
     assert records[3]["checkpoint_path"] == f"{run_dir}/episode-audit/checkpoint.json"
 
 
+def test_propose_uses_strict_external_llmff_cli_contract(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    log_path = tmp_path / "llmff-contract-log.jsonl"
+    strict_llmff = _write_strict_llmff(tmp_path / "strict-llmff")
+    monkeypatch.setenv("TUGBOAT_CONTRACT_LOG", str(log_path))
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {strict_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    records = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [(record["command"], record["manifest"]) for record in records] == [
+        ("inspect", "instruction-index"),
+        ("run", "instruction-index"),
+        ("inspect", "episode-audit"),
+        ("run", "episode-audit"),
+        ("inspect", "drift-detect"),
+        ("run", "drift-detect"),
+        ("inspect", "patch-propose"),
+        ("run", "patch-propose"),
+    ]
+    assert records[5]["inputs"] == {
+        "audit_reports": f"{run_dir}/audit.raw.json",
+        "instruction_index": f"{run_dir}/instruction-snapshot",
+        "instruction_index_artifact": f"{run_dir}/instruction-index.raw.json",
+        "policy": f"{repo}/.sidecar/policy.yaml",
+    }
+    assert records[5]["outputs"] == {
+        "drift_clusters": f"{run_dir}/drift.raw.json",
+        "optimizer_notes": f"{run_dir}/optimizer-notes.raw.json",
+    }
+    assert records[7]["inputs"] == {
+        "instruction_index": f"{run_dir}/instruction-snapshot",
+        "instruction_index_artifact": f"{run_dir}/instruction-index.raw.json",
+        "drift_clusters": f"{run_dir}/drift.raw.json",
+        "optimizer_notes": f"{run_dir}/optimizer-notes.raw.json",
+        "optimizer_memory": f"{run_dir}/optimizer-memory.json",
+        "policy": f"{repo}/.sidecar/policy.yaml",
+    }
+    assert records[7]["outputs"] == {
+        "candidate_patch": f"{run_dir}/candidate.raw.json",
+        "proposal_rationale": f"{run_dir}/proposal-rationale.raw.json",
+    }
+    assert records[5]["trace_path"] == f"{run_dir}/drift-detect/llmff-trace.jsonl"
+    assert records[5]["events_path"] == f"{run_dir}/drift-detect/llmff-events.jsonl"
+    assert records[5]["checkpoint_path"] == f"{run_dir}/drift-detect/checkpoint.json"
+    assert records[7]["trace_path"] == f"{run_dir}/patch-propose/llmff-trace.jsonl"
+    assert records[7]["events_path"] == f"{run_dir}/patch-propose/llmff-events.jsonl"
+    assert records[7]["checkpoint_path"] == f"{run_dir}/patch-propose/checkpoint.json"
+
+    raw_candidate = json.loads((run_dir / "candidate.raw.json").read_text(encoding="utf-8"))
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    rationale = json.loads((run_dir / "proposal-rationale.raw.json").read_text(encoding="utf-8"))
+    assert raw_candidate["rationale"] == "strict external llmff proposed this from audited evidence"
+    assert candidate["rationale"] == raw_candidate["rationale"]
+    assert raw_candidate["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Rules",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+    assert rationale["evidence_refs"] == [raw_candidate["sources"][0]["source_id"]]
+
+
 def _write_strict_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3
@@ -149,10 +239,21 @@ if len(args) >= 14 and args[0] == "run":
     expected_inputs = {
         "instruction-index": ["instruction_corpus", "policy"],
         "episode-audit": ["episode_trace", "instruction_index", "policy"],
+        "drift-detect": ["audit_reports", "instruction_index", "instruction_index_artifact", "policy"],
+        "patch-propose": [
+            "instruction_index",
+            "instruction_index_artifact",
+            "drift_clusters",
+            "optimizer_notes",
+            "optimizer_memory",
+            "policy",
+        ],
     }[manifest]
     expected_outputs = {
         "instruction-index": ["instruction_index"],
         "episode-audit": ["audit_report", "evidence_ids"],
+        "drift-detect": ["drift_clusters", "optimizer_notes"],
+        "patch-propose": ["candidate_patch", "proposal_rationale"],
     }[manifest]
     if list(inputs) != expected_inputs:
         fail(f"{manifest} inputs out of contract: {list(inputs)}")
@@ -196,6 +297,68 @@ if len(args) >= 14 and args[0] == "run":
         )
         Path(outputs["evidence_ids"]).write_text(
             json.dumps({"evidence_ids": [evidence_id]}, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+    elif manifest == "drift-detect":
+        audit = json.loads(Path(inputs["audit_reports"]).read_text(encoding="utf-8"))
+        evidence_refs = [str(ref) for ref in audit["evidence_refs"]]
+        Path(outputs["drift_clusters"]).write_text(
+            json.dumps({
+                "clusters": [{
+                    "cluster_id": "strict-drift-1",
+                    "evidence_refs": evidence_refs,
+                }],
+            }, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+        Path(outputs["optimizer_notes"]).write_text(
+            json.dumps({
+                "notes": [{
+                    "summary": "Strict subprocess proposal should use audited evidence.",
+                    "evidence_refs": evidence_refs,
+                }],
+            }, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+    elif manifest == "patch-propose":
+        drift = json.loads(Path(inputs["drift_clusters"]).read_text(encoding="utf-8"))
+        evidence_id = str(drift["clusters"][0]["evidence_refs"][0])
+        base = Path(outputs["candidate_patch"]).parents[3] / "CODEX.md"
+        Path(outputs["proposal_rationale"]).write_text(
+            json.dumps({
+                "rationale": "Strict proposal is grounded in audited drift evidence.",
+                "evidence_refs": [evidence_id],
+                "style_constraints": ["Preserve concise instruction style."],
+            }, sort_keys=True) + "\\n",
+            encoding="utf-8",
+        )
+        Path(outputs["candidate_patch"]).write_text(
+            json.dumps({
+                "base_file": "CODEX.md",
+                "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
+                "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@ -2,0 +3,1 @@\\n+Prefer regression tests for bug fixes.\\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "strict external llmff proposed this from audited evidence",
+                "expected_behavior_change": "Agents add regression tests before closing similar fixes.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": evidence_id, "trusted": True}],
+                "reflections": [{
+                    "source_ref": evidence_id,
+                    "summary": "Bug fix work lacked explicit regression-test guidance.",
+                    "recurring_failure_patterns": ["Fixes closed without regression tests."],
+                    "preserved_success_patterns": ["Keep short repo-local rules."],
+                    "affected_instruction_chunks": ["CODEX.md#rules"],
+                    "proposed_root_cause": "Regression-test expectations were implicit.",
+                }],
+                "bounded_edit_metadata": [{
+                    "operator": "add",
+                    "file": "CODEX.md",
+                    "section": "Rules",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
+                }],
+            }, sort_keys=True) + "\\n",
             encoding="utf-8",
         )
     log({
