@@ -331,6 +331,14 @@ def run_audit_pipeline(
                 episode_id=episode_id,
                 message=f"audit rejected: {error}",
             )
+        if "instruction_refs" not in raw_audit:
+            return _failed_audit_result(
+                repo,
+                run_dir,
+                manifest_hash=inspect.manifest_hash,
+                episode_id=episode_id,
+                message="audit rejected: llmff audit_report instruction_refs is required",
+            )
         audit_payload.update(raw_audit)
     evidence_refs = [str(ref) for ref in audit_payload.get("evidence_refs", [])]
     raw_instruction_refs = audit_payload.get("instruction_refs")

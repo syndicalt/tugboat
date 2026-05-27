@@ -81,6 +81,7 @@ if args[:1] == ["run"]:
             "severity": "high",
             "confidence": 0.91,
             "evidence_refs": [evidence_id],
+            "instruction_refs": ["CODEX.md#rules"],
         }) + "\\n", encoding="utf-8")
         outputs["evidence_ids"].write_text(json.dumps({
             "evidence_ids": [evidence_id],

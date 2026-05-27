@@ -34,6 +34,7 @@ def _write_fake_llmff(
     invalid_json_output: str | None = None,
     optimizer_notes: object | None = None,
     proposal_rationale: object | None = None,
+    omit_audit_instruction_refs: bool = False,
 ) -> Path:
     if sources is None:
         sources = [{"source_id": "ev_fake", "trusted": True}]
@@ -83,7 +84,10 @@ def _write_fake_llmff(
             "severity": "high",
             "confidence": 0.91,
             "evidence_refs": ["ev_fake"],
+            "instruction_refs": ["CODEX.md#rules"],
         }
+    elif isinstance(audit_report, dict) and "instruction_refs" not in audit_report and not omit_audit_instruction_refs:
+        audit_report = {**audit_report, "instruction_refs": ["CODEX.md#rules"]}
     if evidence_ids is None:
         evidence_ids = {"evidence_ids": ["ev_fake"]}
     if instruction_index is None:
@@ -459,6 +463,45 @@ llmff:
             ).fetchone()[0]
         )
     assert stored_refs == ["CODEX.md#rules"]
+
+
+def test_audit_rejects_llmff_audit_without_instruction_refs(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        omit_audit_instruction_refs=True,
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": ["ev_fake"],
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "audit rejected: llmff audit_report instruction_refs is required" in output
+    assert (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
 
 
 def test_audit_rejects_malformed_llmff_raw_audit_output_without_normalizing(
