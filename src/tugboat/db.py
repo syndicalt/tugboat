@@ -371,6 +371,32 @@ class Store:
             raise ValueError(f"unknown table: {table}")
         return int(self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
+    def _require_audit(self, audit_id: int, *, context: str) -> None:
+        row = self.connection.execute(
+            "SELECT 1 FROM audits WHERE id = ?",
+            (audit_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{context} audit_id does not reference audits")
+
+    def _require_candidate(self, candidate_id: int, *, context: str) -> None:
+        row = self.connection.execute(
+            "SELECT 1 FROM candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{context} candidate_id does not reference candidates")
+
+    def _require_edit_operation(self, edit_operation_id: int, *, context: str) -> None:
+        row = self.connection.execute(
+            "SELECT 1 FROM edit_operations WHERE id = ?",
+            (edit_operation_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(
+                f"{context} edit_operation_id does not reference edit_operations"
+            )
+
     def index_documents(self, repo: Path, result: IndexResult) -> None:
         repo_path = str(repo)
         self.connection.execute("DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE repo_path = ?)", (repo_path,))
@@ -712,6 +738,7 @@ class Store:
         diff_path: Path,
         state: str,
     ) -> int:
+        self._require_audit(audit_id, context="candidate")
         candidate_id = _next_integer_id(self.connection, "candidates")
         event = self.append_audit_event(
             "candidate.recorded",
@@ -742,6 +769,7 @@ class Store:
         return candidate_id
 
     def update_candidate_state(self, *, candidate_id: int, state: str, reason: str) -> None:
+        self._require_candidate(candidate_id, context="candidate state")
         event = self.append_audit_event(
             "candidate.state_updated",
             {"candidate_id": candidate_id, "state": state, "reason": reason},
@@ -761,6 +789,7 @@ class Store:
         passed: bool,
         metrics: dict[str, Any],
     ) -> int:
+        self._require_candidate(candidate_id, context="eval")
         eval_id = _next_integer_id(self.connection, "evals")
         event = self.append_audit_event(
             "eval.recorded",
@@ -877,6 +906,7 @@ class Store:
         applied_commit: str = "",
         rollback_ref: str = "",
     ) -> int:
+        self._require_candidate(candidate_id, context="decision")
         decision_id = _next_integer_id(self.connection, "decisions")
         event = self.append_audit_event(
             "decision.recorded",
@@ -914,6 +944,7 @@ class Store:
         action: str,
         reason: str,
     ) -> int:
+        self._require_candidate(candidate_id, context="review_action")
         event = self.append_audit_event(
             "review_action.recorded",
             {
@@ -1175,6 +1206,7 @@ class Store:
         target_path: str,
         payload: dict[str, Any],
     ) -> int:
+        self._require_candidate(candidate_id, context="edit_operation")
         event = self.append_audit_event(
             "edit_operation.recorded",
             {
@@ -1212,6 +1244,7 @@ class Store:
         rollback_plan: str,
         executed: bool,
     ) -> int:
+        self._require_candidate(candidate_id, context="rollback")
         rollback_id = _next_integer_id(self.connection, "rollbacks")
         event = self.append_audit_event(
             "rollback.recorded",
@@ -1255,6 +1288,8 @@ class Store:
         target_path: str,
         risk_class: str,
     ) -> int:
+        self._require_candidate(candidate_id, context="candidate_edit")
+        self._require_edit_operation(edit_operation_id, context="candidate_edit")
         event = self.append_audit_event(
             "candidate_edit.recorded",
             {

@@ -10,6 +10,33 @@ from tugboat.cli import main
 from tugboat.daemon.queue import DaemonQueue
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.policy.gate import CandidatePatch, SourceRef
+
+
+def _insert_candidate_for_audit(
+    store: Store,
+    tmp_path: Path,
+    *,
+    audit_id: int,
+) -> int:
+    diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use regression tests.\n"
+    diff_path = tmp_path / f"candidate-{audit_id}.diff"
+    diff_path.write_text(diff, encoding="utf-8")
+    candidate = CandidatePatch(
+        audit_id=audit_id,
+        base_file="CODEX.md",
+        base_hash="base",
+        diff=diff,
+        risk_class="instruction_clarification",
+        rationale="seeded observability candidate",
+        sources=(SourceRef("ev-1", trusted=True),),
+    )
+    return store.insert_candidate(
+        audit_id=audit_id,
+        candidate=candidate,
+        diff_path=diff_path,
+        state="needs_review",
+    )
 
 
 def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path, capsys):
@@ -18,24 +45,6 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     eval_report = run_dir / "eval-report.json"
-    eval_report.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "candidate_id": 7,
-                "suite_id": "all",
-                "passed": True,
-                "trigger_score": 0.7,
-                "held_out_score": 0.9,
-                "governance_passed": True,
-                "recommendation": "accept",
-                "metrics": {"governance_regressions": 2},
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     with Store.open(sidecar / "db.sqlite") as store:
         store.insert_run(
             run_id="run-1",
@@ -44,7 +53,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             status="completed",
             run_dir=run_dir,
         )
-        store.insert_audit(
+        audit_id = store.insert_audit(
             run_id="run-2",
             failure_class="missing_tests",
             severity="medium",
@@ -52,7 +61,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             evidence_refs=["ev-1"],
             instruction_refs=[],
         )
-        store.insert_audit(
+        second_audit_id = store.insert_audit(
             run_id="run-3",
             failure_class="missing_tests",
             severity="medium",
@@ -68,22 +77,46 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             evidence_refs=["ev-3"],
             instruction_refs=[],
         )
+        candidate_id = _insert_candidate_for_audit(store, tmp_path, audit_id=audit_id)
+        rejected_candidate_id = _insert_candidate_for_audit(
+            store,
+            tmp_path,
+            audit_id=second_audit_id,
+        )
+        eval_report.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "candidate_id": candidate_id,
+                    "suite_id": "all",
+                    "passed": True,
+                    "trigger_score": 0.7,
+                    "held_out_score": 0.9,
+                    "governance_passed": True,
+                    "recommendation": "accept",
+                    "metrics": {"governance_regressions": 2},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         store.insert_eval(
-            candidate_id=7,
+            candidate_id=candidate_id,
             suite_id="all",
             report_path=eval_report,
             passed=True,
             metrics={"governance_regressions": 2, "held_out_score": 0.9},
         )
         store.insert_decision(
-            candidate_id=7,
+            candidate_id=candidate_id,
             actor="reviewer",
             policy="apply_controller",
             decision="applied",
             reason="accepted",
         )
         store.insert_decision(
-            candidate_id=8,
+            candidate_id=rejected_candidate_id,
             actor="reviewer",
             policy="apply_controller",
             decision="rejected",
@@ -102,7 +135,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
         )
         store.append_audit_event(
             "apply.applied",
-            {"candidate_id": 7, "changed_lines": 4},
+            {"candidate_id": candidate_id, "changed_lines": 4},
         )
         store.append_audit_event("rollback.applied", {"candidate_id": 9})
         store.record_harness_finding(

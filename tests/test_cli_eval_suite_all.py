@@ -10,6 +10,7 @@ from shutil import copytree
 
 from tugboat.cli import main
 from tugboat.db import Store
+from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "evals"
@@ -36,13 +37,50 @@ def _write_candidate_preview(run_dir: Path, text: str, *, preview_hash: str | No
     )
 
 
-def _write_candidate_json(run_dir: Path) -> None:
+def _repo_from_run_dir(run_dir: Path) -> Path:
+    return run_dir.parents[2]
+
+
+def _seed_candidate_row(run_dir: Path) -> tuple[int, int]:
+    repo = _repo_from_run_dir(run_dir)
+    diff_path = run_dir / "candidate.diff"
+    diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use regression tests.\n"
+    diff_path.write_text(diff, encoding="utf-8")
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id=run_dir.name,
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["ev_fixture"],
+            instruction_refs=["CODEX.md"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="CODEX.md",
+            base_hash="base",
+            diff=diff,
+            risk_class="instruction_clarification",
+            rationale="Fixture candidate for offline eval.",
+            sources=(SourceRef("ev_fixture", trusted=True),),
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+    return audit_id, candidate_id
+
+
+def _write_candidate_json(run_dir: Path) -> int:
+    audit_id, candidate_id = _seed_candidate_row(run_dir)
     (run_dir / "candidate.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "candidate_id": 7,
-                "audit_id": 1,
+                "candidate_id": candidate_id,
+                "audit_id": audit_id,
                 "base_file": "CODEX.md",
                 "base_hash": "base",
                 "diff_hash": "diff",
@@ -66,6 +104,7 @@ def _write_candidate_json(run_dir: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    return candidate_id
 
 
 def _install_eval_fixture(repo: Path, relative_path: str) -> None:
@@ -90,25 +129,29 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         run_dir,
         "# Policy\n\nYou must run tests before final answers.\n",
     )
-    _write_candidate_json(run_dir)
+    candidate_id = _write_candidate_json(run_dir)
+    _, rejected_candidate_id = _seed_candidate_row(run_dir)
     (repo / ".sidecar").mkdir(exist_ok=True)
     copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
     with Store.open(repo / ".sidecar" / "db.sqlite") as store:
         store.insert_decision(
-            candidate_id=7,
+            candidate_id=candidate_id,
             actor="reviewer",
             policy="apply_controller",
             decision="applied",
             reason="accepted",
         )
         store.insert_decision(
-            candidate_id=8,
+            candidate_id=rejected_candidate_id,
             actor="reviewer",
             policy="apply_controller",
             decision="rejected",
             reason="too broad",
         )
-        store.append_audit_event("apply.applied", {"candidate_id": 7, "changed_lines": 6})
+        store.append_audit_event(
+            "apply.applied",
+            {"candidate_id": candidate_id, "changed_lines": 6},
+        )
         store.append_audit_event("rollback.applied", {"candidate_id": 9})
         store.insert_audit(
             run_id="incident-1",
@@ -179,7 +222,12 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
             """
         ).fetchall()
 
-    assert eval_run[:4] == (7, "all", "failed", str(run_dir / "eval-report.json"))
+    assert eval_run[:4] == (
+        candidate_id,
+        "all",
+        "failed",
+        str(run_dir / "eval-report.json"),
+    )
     assert eval_run[4] is not None
     assert [row[0] for row in eval_cases] == [
         "adversarial:reject-emergency-deploy-bypass",

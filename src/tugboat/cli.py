@@ -3342,48 +3342,52 @@ def _write_optimization_summary(
             "policy_reasons": [reason],
         },
     )
-    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
-        store.update_candidate_state(
-            candidate_id=candidate_id,
-            state=decision,
-            reason=reason,
-        )
-        store.insert_decision(
-            candidate_id=candidate_id,
-            actor="tugboat",
-            policy="optimization_acceptance_gate",
-            decision=decision,
-            reason=reason,
-        )
-        _record_optimization_slow_update(
-            store,
-            repo=repo,
-            candidate_id=candidate_id,
-            suite_id=suite_id,
-            category="successful" if decision == "needs_review" else "rejected",
-            reason=reason,
-        )
-        if decision == "rejected":
-            _record_missing_rejected_edit_memory(
-                store,
-                repo=repo,
-                candidate=candidate,
-                candidate_id=candidate_id,
-                suite_id=suite_id,
-                reason=reason,
-            )
-        if decision == "needs_review" and held_out_score is not None:
-            _record_validation_baseline_score(
-                store,
-                repo=repo,
-                suite_id=suite_id,
-                candidate_id=candidate_id,
-                held_out_score=held_out_score,
-            )
-
     optimization_summary_path = run_dir / "optimization-summary.json"
     optimization_summary_path.write_text(summary_text, encoding="utf-8")
     mark_private_file(optimization_summary_path)
+    try:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.update_candidate_state(
+                candidate_id=candidate_id,
+                state=decision,
+                reason=reason,
+            )
+            store.insert_decision(
+                candidate_id=candidate_id,
+                actor="tugboat",
+                policy="optimization_acceptance_gate",
+                decision=decision,
+                reason=reason,
+            )
+            _record_optimization_slow_update(
+                store,
+                repo=repo,
+                candidate_id=candidate_id,
+                suite_id=suite_id,
+                category="successful" if decision == "needs_review" else "rejected",
+                reason=reason,
+            )
+            if decision == "rejected":
+                _record_missing_rejected_edit_memory(
+                    store,
+                    repo=repo,
+                    candidate=candidate,
+                    candidate_id=candidate_id,
+                    suite_id=suite_id,
+                    reason=reason,
+                )
+            if decision == "needs_review" and held_out_score is not None:
+                _record_validation_baseline_score(
+                    store,
+                    repo=repo,
+                    suite_id=suite_id,
+                    candidate_id=candidate_id,
+                    held_out_score=held_out_score,
+                )
+    except ValueError as error:
+        print(f"optimization rejected: {error}")
+        return 1
+
     print(f"optimization: {decision}")
     return 0 if decision == "needs_review" else 1
 

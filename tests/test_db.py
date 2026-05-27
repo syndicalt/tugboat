@@ -9,6 +9,44 @@ from tugboat.llmff.contracts import RunResult
 from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
+def _candidate_patch(audit_id: int, *, base_file: str = "CODEX.md") -> CandidatePatch:
+    return CandidatePatch(
+        audit_id=audit_id,
+        base_file=base_file,
+        base_hash="abc123",
+        diff=f"--- a/{base_file}\n+++ b/{base_file}\n@@\n+Clarify this.\n",
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+
+
+def _seed_candidate(
+    store: Store,
+    tmp_path: Path,
+    *,
+    run_id: str = "run-1",
+    state: str = "needs_review",
+) -> int:
+    audit_id = store.insert_audit(
+        run_id=run_id,
+        failure_class="instruction_missing",
+        severity="medium",
+        confidence=0.75,
+        evidence_refs=["event:1"],
+        instruction_refs=["CODEX.md#rules"],
+    )
+    candidate = _candidate_patch(audit_id)
+    diff_path = tmp_path / f"candidate-{audit_id}.diff"
+    diff_path.write_text(candidate.diff, encoding="utf-8")
+    return store.insert_candidate(
+        audit_id=audit_id,
+        candidate=candidate,
+        diff_path=diff_path,
+        state=state,
+    )
+
+
 def test_store_initializes_core_tables(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         tables = store.table_names()
@@ -523,25 +561,8 @@ def test_insert_run_status_update_appends_new_event_without_overwriting_created_
 
 
 def test_update_candidate_state_moves_row_audit_link_to_state_update_event(tmp_path: Path):
-    candidate = CandidatePatch(
-        audit_id=1,
-        base_file="CODEX.md",
-        base_hash="abc123",
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
-        risk_class="instruction_clarification",
-        rationale="Clarify ambiguous guidance.",
-        sources=(SourceRef("trace-1", trusted=True),),
-    )
-    diff_path = tmp_path / "candidate.diff"
-    diff_path.write_text(candidate.diff, encoding="utf-8")
-
     with Store.open(tmp_path / "db.sqlite") as store:
-        candidate_id = store.insert_candidate(
-            audit_id=1,
-            candidate=candidate,
-            diff_path=diff_path,
-            state="needs_review",
-        )
+        candidate_id = _seed_candidate(store, tmp_path)
         original_sequence = store.connection.execute(
             "SELECT audit_event_sequence FROM candidates WHERE id = ?",
             (candidate_id,),
@@ -693,8 +714,9 @@ def test_audit_event_rows_cannot_be_deleted_directly(tmp_path: Path):
 
 def test_insert_decision_stores_audit_event_sequence(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
+        candidate_id = _seed_candidate(store, tmp_path)
         decision_id = store.insert_decision(
-            candidate_id=7,
+            candidate_id=candidate_id,
             actor="tugboat",
             policy="deterministic_policy_gate",
             decision="needs_review",
@@ -716,9 +738,10 @@ def test_insert_decision_stores_audit_event_sequence(tmp_path: Path):
 
 def test_record_rollback_stores_audit_event_sequence(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
+        candidate_id = _seed_candidate(store, tmp_path)
         rollback_id = store.record_rollback(
             decision_id="run-1",
-            candidate_id=7,
+            candidate_id=candidate_id,
             reason="rollback decision run-1",
             revert_commit="def456",
             post_rollback_eval_result={"passed": True},
@@ -743,7 +766,7 @@ def test_record_rollback_stores_audit_event_sequence(tmp_path: Path):
         row[1],
         "rollback.recorded",
         "run-1",
-        7,
+        candidate_id,
         "rollback decision run-1",
         "def456",
         '{"passed": true}',
@@ -778,21 +801,20 @@ def test_insert_audit_stores_audit_event_sequence(tmp_path: Path):
 
 
 def test_insert_candidate_stores_audit_event_sequence(tmp_path: Path):
-    candidate = CandidatePatch(
-        audit_id=3,
-        base_file="CODEX.md",
-        base_hash="abc123",
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
-        risk_class="instruction_clarification",
-        rationale="Clarify ambiguous guidance.",
-        sources=(SourceRef("trace-1", trusted=True),),
-    )
-    diff_path = tmp_path / "candidate.diff"
-    diff_path.write_text(candidate.diff, encoding="utf-8")
-
     with Store.open(tmp_path / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["event:1"],
+            instruction_refs=["CODEX.md#rules"],
+        )
+        candidate = _candidate_patch(audit_id)
+        diff_path = tmp_path / "candidate.diff"
+        diff_path.write_text(candidate.diff, encoding="utf-8")
         candidate_id = store.insert_candidate(
-            audit_id=3,
+            audit_id=audit_id,
             candidate=candidate,
             diff_path=diff_path,
             state="needs_review",
@@ -811,13 +833,31 @@ def test_insert_candidate_stores_audit_event_sequence(tmp_path: Path):
     assert row[1] is not None
 
 
+def test_insert_candidate_rejects_missing_audit_parent_without_audit_event(tmp_path: Path):
+    candidate = _candidate_patch(999)
+    diff_path = tmp_path / "candidate.diff"
+    diff_path.write_text(candidate.diff, encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(ValueError, match="candidate audit_id does not reference audits"):
+            store.insert_candidate(
+                audit_id=999,
+                candidate=candidate,
+                diff_path=diff_path,
+                state="needs_review",
+            )
+
+        assert store.count("audit_events") == 0
+
+
 def test_insert_eval_stores_audit_event_sequence(tmp_path: Path):
     report_path = tmp_path / "eval-report.json"
     report_path.write_text("{}\n", encoding="utf-8")
 
     with Store.open(tmp_path / "db.sqlite") as store:
+        candidate_id = _seed_candidate(store, tmp_path)
         eval_id = store.insert_eval(
-            candidate_id=5,
+            candidate_id=candidate_id,
             suite_id="all",
             report_path=report_path,
             passed=True,
@@ -835,6 +875,137 @@ def test_insert_eval_stores_audit_event_sequence(tmp_path: Path):
 
     assert row == (eval_id, row[1], "eval.recorded")
     assert row[1] is not None
+
+
+def test_insert_eval_rejects_missing_candidate_parent_without_audit_event(tmp_path: Path):
+    report_path = tmp_path / "eval-report.json"
+    report_path.write_text("{}\n", encoding="utf-8")
+
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(ValueError, match="eval candidate_id does not reference candidates"):
+            store.insert_eval(
+                candidate_id=999,
+                suite_id="all",
+                report_path=report_path,
+                passed=True,
+                metrics={"held_out_score": 0.9},
+            )
+
+        assert store.count("audit_events") == 0
+
+
+def test_insert_decision_rejects_missing_candidate_parent_without_audit_event(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(
+            ValueError,
+            match="decision candidate_id does not reference candidates",
+        ):
+            store.insert_decision(
+                candidate_id=999,
+                actor="tugboat",
+                policy="deterministic_policy_gate",
+                decision="needs_review",
+                reason="policy passed",
+            )
+
+        assert store.count("audit_events") == 0
+
+
+def test_record_candidate_edit_rejects_missing_edit_operation_parent_without_audit_event(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        candidate_id = _seed_candidate(store, tmp_path)
+        baseline_events = store.count("audit_events")
+
+        with pytest.raises(
+            ValueError,
+            match="candidate_edit edit_operation_id does not reference edit_operations",
+        ):
+            store.record_candidate_edit(
+                candidate_id=candidate_id,
+                edit_operation_id=999,
+                target_path="CODEX.md",
+                risk_class="instruction_clarification",
+            )
+
+        assert store.count("audit_events") == baseline_events
+
+
+def test_update_candidate_state_rejects_missing_candidate_without_audit_event(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(
+            ValueError,
+            match="candidate state candidate_id does not reference candidates",
+        ):
+            store.update_candidate_state(
+                candidate_id=999,
+                state="rejected",
+                reason="missing parent",
+            )
+
+        assert store.count("audit_events") == 0
+
+
+def test_record_review_action_rejects_missing_candidate_without_audit_event(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(
+            ValueError,
+            match="review_action candidate_id does not reference candidates",
+        ):
+            store.record_review_action(
+                candidate_id=999,
+                actor="reviewer",
+                action="approved",
+                reason="missing parent",
+            )
+
+        assert store.count("audit_events") == 0
+
+
+def test_record_edit_operation_rejects_missing_candidate_without_audit_event(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(
+            ValueError,
+            match="edit_operation candidate_id does not reference candidates",
+        ):
+            store.record_edit_operation(
+                candidate_id=999,
+                operator="replace",
+                target_path="CODEX.md",
+                payload={"section": "Policy"},
+            )
+
+        assert store.count("audit_events") == 0
+
+
+def test_record_rollback_rejects_missing_candidate_without_audit_event(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(
+            ValueError,
+            match="rollback candidate_id does not reference candidates",
+        ):
+            store.record_rollback(
+                decision_id="run-1",
+                candidate_id=999,
+                reason="missing parent",
+                revert_commit="def456",
+                post_rollback_eval_result={"passed": True},
+                rollback_plan=".sidecar/runs/run-1/rollback-plan.json",
+                executed=False,
+            )
+
+        assert store.count("audit_events") == 0
 
 
 def test_store_can_be_used_as_context_manager(tmp_path: Path):

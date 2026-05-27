@@ -9,6 +9,36 @@ from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
 from tugboat.ops.observability import summarize_observability, summarize_sidecar_observability
+from tugboat.policy.gate import CandidatePatch, SourceRef
+
+
+def _insert_candidate(store: Store, tmp_path: Path) -> int:
+    audit_id = store.insert_audit(
+        run_id="run-1",
+        failure_class="instruction_missing",
+        severity="medium",
+        confidence=0.75,
+        evidence_refs=["ev-1"],
+        instruction_refs=["CODEX.md"],
+    )
+    diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use regression tests.\n"
+    diff_path = tmp_path / "candidate.diff"
+    diff_path.write_text(diff, encoding="utf-8")
+    candidate = CandidatePatch(
+        audit_id=audit_id,
+        base_file="CODEX.md",
+        base_hash="base",
+        diff=diff,
+        risk_class="instruction_clarification",
+        rationale="seeded observability candidate",
+        sources=(SourceRef("ev-1", trusted=True),),
+    )
+    return store.insert_candidate(
+        audit_id=audit_id,
+        candidate=candidate,
+        diff_path=diff_path,
+        state="needs_review",
+    )
 
 
 def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
@@ -236,27 +266,28 @@ def test_sidecar_observability_ignores_non_numeric_governance_regression_metric(
     run_dir = sidecar / "runs" / "run-1"
     run_dir.mkdir(parents=True)
     eval_report = run_dir / "eval-report.json"
-    eval_report.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "candidate_id": 7,
-                "suite_id": "all",
-                "passed": True,
-                "trigger_score": 0.7,
-                "held_out_score": 0.9,
-                "governance_passed": True,
-                "recommendation": "accept",
-                "metrics": {"governance_regressions": "n/a"},
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     with Store.open(sidecar / "db.sqlite") as store:
+        candidate_id = _insert_candidate(store, tmp_path)
+        eval_report.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "candidate_id": candidate_id,
+                    "suite_id": "all",
+                    "passed": True,
+                    "trigger_score": 0.7,
+                    "held_out_score": 0.9,
+                    "governance_passed": True,
+                    "recommendation": "accept",
+                    "metrics": {"governance_regressions": "n/a"},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         store.insert_eval(
-            candidate_id=7,
+            candidate_id=candidate_id,
             suite_id="all",
             report_path=eval_report,
             passed=True,

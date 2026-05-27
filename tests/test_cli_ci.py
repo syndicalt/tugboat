@@ -9,6 +9,7 @@ from shutil import copytree
 from tugboat.cli import main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "evals"
@@ -35,13 +36,47 @@ def _write_candidate_preview(run_dir: Path, text: str) -> None:
     )
 
 
-def _write_candidate_json(run_dir: Path) -> None:
+def _seed_candidate_row(run_dir: Path) -> tuple[int, int]:
+    repo = run_dir.parents[2]
+    diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use regression tests.\n"
+    diff_path = run_dir / "candidate.diff"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    diff_path.write_text(diff, encoding="utf-8")
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        audit_id = store.insert_audit(
+            run_id=run_dir.name,
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["ev_fixture"],
+            instruction_refs=["CODEX.md"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="CODEX.md",
+            base_hash="base",
+            diff=diff,
+            risk_class="instruction_clarification",
+            rationale="Fixture candidate for CI eval.",
+            sources=(SourceRef("ev_fixture", trusted=True),),
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+    return audit_id, candidate_id
+
+
+def _write_candidate_json(run_dir: Path) -> int:
+    audit_id, candidate_id = _seed_candidate_row(run_dir)
     (run_dir / "candidate.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "candidate_id": 7,
-                "audit_id": 1,
+                "candidate_id": candidate_id,
+                "audit_id": audit_id,
                 "base_file": "CODEX.md",
                 "base_hash": "base",
                 "diff_hash": "diff",
@@ -65,6 +100,7 @@ def _write_candidate_json(run_dir: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    return candidate_id
 
 
 def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_path: Path, capsys):
