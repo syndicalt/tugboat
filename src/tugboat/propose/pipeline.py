@@ -254,6 +254,13 @@ def _optional_patch_propose_inputs(run_dir: Path) -> dict[str, Path]:
             load_json_object_artifact(optimization_batch, "optimization-batch.json"),
         )
         inputs["optimization_batch"] = optimization_batch
+    reflection_artifact = run_dir / "reflection.json"
+    if reflection_artifact.exists():
+        validate_json_artifact(
+            "reflection.json",
+            load_json_object_artifact(reflection_artifact, "reflection.json"),
+        )
+        inputs["reflection_artifact"] = reflection_artifact
     return inputs
 
 

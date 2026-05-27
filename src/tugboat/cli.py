@@ -82,6 +82,7 @@ from tugboat.optimization import (
     EpisodeOutcome,
     build_minibatches,
     build_success_failure_minibatch,
+    reflect_on_minibatch,
 )
 from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
@@ -3080,6 +3081,7 @@ def _record_optimize_minibatch_guidance(
     validate_json_artifact("optimization-batch.json", batch_payload)
     write_json_artifact(run_dir / "optimization-batch.json", batch_payload)
     _write_batch_audit_reports(repo, run_dir, train_episodes=set(batches.train_episodes))
+    _write_optimization_reflection_artifact(repo, run_dir, minibatch, suite_id=suite_id)
     guidance = _optimizer_guidance_from_minibatch(minibatch, suite_id=suite_id)
     if guidance is None:
         return
@@ -3094,6 +3096,67 @@ def _record_optimize_minibatch_guidance(
                 "note": guidance,
             },
         )
+
+
+def _write_optimization_reflection_artifact(repo: Path, run_dir: Path, minibatch, *, suite_id: str) -> None:
+    artifact = reflect_on_minibatch(
+        failure_patterns=minibatch.failure_patterns,
+        success_patterns=minibatch.success_patterns,
+        affected_instruction_chunks=_affected_instruction_chunks_for_reflection(repo, run_dir),
+        proposed_root_cause=_reflection_root_cause(minibatch),
+    )
+    payload = {
+        "source_ref": "optimization-batch.json",
+        "summary": (
+            f"SkillOpt reflection for held-out suite {suite_id}: "
+            f"{len(artifact.recurring_failure_patterns)} failure pattern"
+            f"{'' if len(artifact.recurring_failure_patterns) == 1 else 's'}, "
+            f"{len(artifact.preserved_success_patterns)} success pattern"
+            f"{'' if len(artifact.preserved_success_patterns) == 1 else 's'}"
+        ),
+        "recurring_failure_patterns": list(artifact.recurring_failure_patterns),
+        "preserved_success_patterns": list(artifact.preserved_success_patterns),
+        "affected_instruction_chunks": list(artifact.affected_instruction_chunks),
+        "proposed_root_cause": artifact.proposed_root_cause,
+    }
+    validate_json_artifact("reflection.json", payload)
+    write_json_artifact(run_dir / "reflection.json", payload)
+
+
+def _affected_instruction_chunks_for_reflection(repo: Path, run_dir: Path) -> tuple[str, ...]:
+    chunks: list[str] = []
+    reports_path = run_dir / "batch-audit-reports.json"
+    if reports_path.exists():
+        reports_payload = load_json_object_artifact(reports_path, "batch-audit-reports.json")
+        validate_json_artifact("batch-audit-reports.json", reports_payload)
+        reports = reports_payload.get("reports", [])
+        if isinstance(reports, list):
+            for report in reports:
+                if not isinstance(report, dict):
+                    continue
+                audit_path = run_dir / str(report.get("path", ""))
+                if not audit_path.exists():
+                    continue
+                audit = load_json_object_artifact(audit_path, "audit.raw.json")
+                validate_json_artifact("audit.raw.json", audit)
+                chunks.extend(_ordered_json_strings(audit.get("instruction_refs", [])))
+    if chunks:
+        return tuple(dict.fromkeys(chunks))
+    return tuple(item.path for item in load_policy(repo).instruction_files if item.protected)
+
+
+def _ordered_json_strings(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(item for item in value if isinstance(item, str) and item))
+
+
+def _reflection_root_cause(minibatch) -> str:
+    if minibatch.failure_patterns:
+        return "Recurring failures indicate instruction guidance is incomplete."
+    if minibatch.success_patterns:
+        return "Successful patterns identify instruction guidance to preserve."
+    return "No labeled optimization patterns were available."
 
 
 def _write_batch_audit_reports(
@@ -3350,6 +3413,9 @@ def _write_optimization_summary(
     }
     if unseen_suite_results is not None:
         summary["unseen_suite_results"] = unseen_suite_results
+    reflection_path = run_dir / "reflection.json"
+    if reflection_path.exists():
+        summary["reflection_artifact_path"] = reflection_path.relative_to(repo).as_posix()
     if decision == "needs_review":
         summary["accepted_bounded_edit_metadata"] = accepted_bounded_edit_metadata
         if acceptance_summary is None:

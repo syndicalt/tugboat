@@ -5799,7 +5799,11 @@ llmff:
     )
     optimizer_memory = json.loads(Path(patch_propose_inputs["optimizer_memory"]).read_text(encoding="utf-8"))
     optimization_batch = json.loads(Path(patch_propose_inputs["optimization_batch"]).read_text(encoding="utf-8"))
+    reflection_artifact = json.loads(
+        Path(patch_propose_inputs["reflection_artifact"]).read_text(encoding="utf-8")
+    )
     batch = json.loads((run_dir / "optimization-batch.json").read_text(encoding="utf-8"))
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
 
     assert batch == {
         "schema_version": 1,
@@ -5813,6 +5817,18 @@ llmff:
         "failure_patterns": ["You skipped regression tests"],
     }
     assert optimization_batch == batch
+    assert reflection_artifact == {
+        "source_ref": "optimization-batch.json",
+        "summary": (
+            "SkillOpt reflection for held-out suite held-out: "
+            "1 failure pattern, 0 success patterns"
+        ),
+        "recurring_failure_patterns": ["You skipped regression tests"],
+        "preserved_success_patterns": [],
+        "affected_instruction_chunks": ["CODEX.md#rules"],
+        "proposed_root_cause": "Recurring failures indicate instruction guidance is incomplete.",
+    }
+    assert summary["reflection_artifact_path"] == f".sidecar/runs/{run_dir.name}/reflection.json"
     assert optimizer_memory["slow_update_records"] == [
         {
             "category": "optimizer_guidance",
