@@ -22,9 +22,10 @@ from tugboat.optimization import (
     OptimizationMemory,
     budget_reasons_for_bounded_edit_metadata,
 )
-from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
+from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
+from tugboat.security.secrets import SecretScanError, scan_text
 
 
 @dataclass(frozen=True)
@@ -77,14 +78,15 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
         )
     _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
     _write_policy_gate(run_dir, allowed=decision_allowed, reasons=decision_reasons)
-    (run_dir / "decision.json").write_text(
-        _decision_json(
+    _write_private_json_artifact(
+        run_dir / "decision.json",
+        "decision.json",
+        _decision_payload(
             candidate_id=candidate_id,
             decision_value="needs_review" if decision_allowed else "rejected",
             policy_allowed=decision_allowed,
             policy_reasons=decision_reasons,
         ),
-        encoding="utf-8",
     )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.insert_decision(
@@ -439,9 +441,8 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
             for _, record in sorted(memory.validation_baselines.items())
         ],
     }
-    validate_json_artifact("optimizer-memory.json", payload)
     path = run_dir / "optimizer-memory.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_private_json_artifact(path, "optimizer-memory.json", payload)
     return path
 
 
@@ -629,9 +630,8 @@ def _record_candidate_provenance(
     for index, reflection in enumerate(reflections, start=1):
         if not isinstance(reflection, dict):
             continue
-        validate_json_artifact("reflection.json", reflection)
         artifact_path = run_dir / f"reflection-{index:03d}.json"
-        artifact_path.write_text(json.dumps(reflection, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _write_private_json_artifact(artifact_path, "reflection.json", reflection)
         store.record_reflection(
             run_id=run_id,
             source_ref=str(reflection.get("source_ref", f"candidate:{candidate_id}")),
@@ -645,19 +645,18 @@ def _write_policy_gate(run_dir: Path, *, allowed: bool, reasons: Sequence[object
         "allowed": allowed,
         "reasons": [str(reason) for reason in reasons],
     }
-    validate_json_artifact("policy-gate.json", payload)
     path = run_dir / "policy-gate.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_private_json_artifact(path, "policy-gate.json", payload)
     return path
 
 
-def _decision_json(
+def _decision_payload(
     *,
     candidate_id: int,
     decision_value: str,
     policy_allowed: bool,
     policy_reasons: list[str],
-) -> str:
+) -> dict[str, object]:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "candidate_id": candidate_id,
@@ -665,11 +664,20 @@ def _decision_json(
         "policy_allowed": policy_allowed,
         "policy_reasons": policy_reasons,
     }
-    validate_json_artifact("decision.json", payload)
-    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    return payload
 
 
 def _merge_json(path: Path, updates: dict[str, object]) -> None:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = load_json_object_artifact(path, path.name)
     payload.update(updates)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_private_json_artifact(path, path.name, payload)
+
+
+def _write_private_json_artifact(path: Path, artifact_name: str, payload: dict[str, object]) -> None:
+    validate_json_artifact(artifact_name, payload)
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
+    path.write_text(text, encoding="utf-8")
+    mark_private_file(path)

@@ -1170,9 +1170,20 @@ llmff:
     )
 
     assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
-    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    previous_umask = os.umask(0o022)
+    try:
+        assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    finally:
+        os.umask(previous_umask)
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    private_artifacts = [
+        run_dir / "optimizer-memory.json",
+        run_dir / "policy-gate.json",
+        run_dir / "decision.json",
+        run_dir / "reflection-001.json",
+    ]
+    assert [path.stat().st_mode & 0o777 for path in private_artifacts] == [0o600] * 4
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
     assert candidate["rationale"] == "llmff proposed this from audited evidence"
