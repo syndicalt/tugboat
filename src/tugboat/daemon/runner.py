@@ -69,7 +69,11 @@ def discover_trace_jobs(
             skipped += len(trace_paths)
             continue
         for path in trace_paths:
-            trace_key = str(path.resolve())
+            trace_target = path.resolve()
+            if not trace_target.is_relative_to(repo_root):
+                skipped += 1
+                continue
+            trace_key = str(trace_target)
             if trace_key in planned_registry:
                 skipped += 1
                 continue

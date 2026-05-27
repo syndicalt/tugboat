@@ -260,6 +260,54 @@ def test_discover_trace_jobs_skips_trace_dirs_outside_repo_without_queueing(
             assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
 
 
+def test_discover_trace_jobs_skips_symlinked_trace_resolving_outside_repo(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    trace_dir = repo / "traces"
+    trace_dir.mkdir()
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text('{"type":"user_request","content":"Fix"}\n', encoding="utf-8")
+    (trace_dir / "outside.jsonl").symlink_to(outside)
+
+    result = discover_trace_jobs(repo, [trace_dir], now=_at(0))
+
+    assert result == {"discovered": 0, "skipped": 1}
+    assert json.loads(
+        (repo / ".sidecar" / "discovered-traces.json").read_text(encoding="utf-8")
+    ) == {"schema_version": 1, "traces": []}
+    assert str(outside.resolve()) not in (
+        repo / ".sidecar" / "discovered-traces.json"
+    ).read_text(encoding="utf-8")
+    queue_path = repo / ".sidecar" / "daemon.sqlite"
+    if queue_path.exists():
+        with DaemonQueue.open_sidecar(repo) as queue:
+            assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
+
+
+def test_discover_trace_jobs_allows_symlinked_trace_resolving_inside_repo(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    source = tmp_path / "episode-source.jsonl"
+    source.write_text('{"type":"user_request","content":"Fix"}\n', encoding="utf-8")
+    link = trace_dir / "episode.jsonl"
+    link.symlink_to(source)
+
+    result = discover_trace_jobs(tmp_path, [trace_dir], now=_at(0))
+
+    assert result == {"discovered": 1, "skipped": 0}
+    assert json.loads(
+        (tmp_path / ".sidecar" / "discovered-traces.json").read_text(encoding="utf-8")
+    ) == {"schema_version": 1, "traces": [str(source.resolve())]}
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.get_job(1)
+        assert job is not None
+        assert job.payload == {"trace_format": "generic-jsonl", "trace_path": str(link)}
+
+
 def test_discover_trace_jobs_validates_registry_before_queue_visibility(
     tmp_path: Path,
     monkeypatch,
