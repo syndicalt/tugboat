@@ -8,6 +8,7 @@ from tugboat.artifacts import ArtifactValidationError
 from tugboat.cli import _write_optimization_summary, main
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
+from tugboat.security.secrets import SecretScanError
 
 
 def _write_fake_llmff(
@@ -3285,6 +3286,86 @@ def test_optimization_summary_requires_acceptance_summary_for_needs_review(tmp_p
         _write_optimization_summary(repo, run_dir, suite_id="held-out")
 
     assert not (run_dir / "optimization-summary.json").exists()
+
+
+def test_optimization_summary_rejects_secret_bearing_acceptance_summary_before_state_update(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": 7,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "risk_class": "instruction_clarification",
+                "bounded_edit_metadata": [
+                    {
+                        "changed_lines": 1,
+                        "file": "CODEX.md",
+                        "normative_changes": 0,
+                        "operator": "add",
+                        "section": "Testing",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    initial_decision = {
+        "schema_version": 1,
+        "candidate_id": 7,
+        "decision": "rejected",
+        "policy_allowed": False,
+        "policy_reasons": ["seed"],
+    }
+    (run_dir / "decision.json").write_text(
+        json.dumps(initial_decision, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 7,
+                "governance_passed": True,
+                "held_out_score": 0.9,
+                "metrics": {"governance_regressions": 0},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "held-out",
+                "trigger_score": 0.7,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "acceptance-summary.raw.json").write_text(
+        json.dumps(
+            {
+                "decision_recommendation": "needs_review",
+                "reasons": ["policy gate and eval report passed"],
+                "evidence": ["audit:1"],
+                "reviewer_checklist": ["Remove sk-abcdefghijklmnopqrstuvwx before review"],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SecretScanError):
+        _write_optimization_summary(repo, run_dir, suite_id="held-out")
+
+    assert not (run_dir / "optimization-summary.json").exists()
+    assert json.loads((run_dir / "decision.json").read_text(encoding="utf-8")) == initial_decision
 
 
 def test_optimization_summary_rejects_malformed_eval_report_before_acceptance(

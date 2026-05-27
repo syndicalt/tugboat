@@ -81,12 +81,21 @@ def _write_blocked_by_read_only(repo: Path, action: str) -> bool:
     return True
 
 
-def _write_secret_scanned_json_artifact(path: Path, artifact_name: str, payload: dict[str, object]) -> None:
+def _serialize_secret_scanned_json_artifact(
+    path: Path,
+    artifact_name: str,
+    payload: dict[str, object],
+) -> str:
     validate_json_artifact(artifact_name, payload)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     findings = scan_text(path.as_posix(), text)
     if findings:
         raise SecretScanError(findings)
+    return text
+
+
+def _write_secret_scanned_json_artifact(path: Path, artifact_name: str, payload: dict[str, object]) -> None:
+    text = _serialize_secret_scanned_json_artifact(path, artifact_name, payload)
     path.write_text(text, encoding="utf-8")
 
 
@@ -2321,6 +2330,38 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
         )
         validate_json_artifact("acceptance-summary.raw.json", acceptance_summary)
 
+    summary = {
+        "schema_version": SCHEMA_VERSION,
+        "audit_run": run_dir.name,
+        "candidate_id": candidate_id,
+        "decision": decision,
+        "governance_passed": governance_passed,
+        "held_out_score": held_out_score,
+        "recommendation": recommendation,
+        "suite_id": suite_id,
+        "trigger_score": trigger_score,
+        "validation_baseline_score": validation_baseline_score,
+    }
+    if decision == "needs_review":
+        summary["accepted_bounded_edit_metadata"] = accepted_bounded_edit_metadata
+        if acceptance_summary is None:
+            raise ArtifactValidationError("acceptance-summary.raw.json is required for needs_review")
+        summary.update(
+            {
+                "acceptance_decision_recommendation": acceptance_summary["decision_recommendation"],
+                "acceptance_evidence": acceptance_summary["evidence"],
+                "acceptance_reasons": acceptance_summary["reasons"],
+                "acceptance_summary_path": acceptance_summary_path.relative_to(repo).as_posix(),
+                "reviewer_checklist": acceptance_summary["reviewer_checklist"],
+                "rollback_command": acceptance_summary["rollback_command"],
+            }
+        )
+    summary_text = _serialize_secret_scanned_json_artifact(
+        run_dir / "optimization-summary.json",
+        "optimization-summary.json",
+        summary,
+    )
+
     _merge_json(
         run_dir / "decision.json",
         {
@@ -2368,37 +2409,7 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
                 held_out_score=held_out_score,
             )
 
-    summary = {
-        "schema_version": SCHEMA_VERSION,
-        "audit_run": run_dir.name,
-        "candidate_id": candidate_id,
-        "decision": decision,
-        "governance_passed": governance_passed,
-        "held_out_score": held_out_score,
-        "recommendation": recommendation,
-        "suite_id": suite_id,
-        "trigger_score": trigger_score,
-        "validation_baseline_score": validation_baseline_score,
-    }
-    if decision == "needs_review":
-        summary["accepted_bounded_edit_metadata"] = accepted_bounded_edit_metadata
-        if acceptance_summary is None:
-            raise ArtifactValidationError("acceptance-summary.raw.json is required for needs_review")
-        summary.update(
-            {
-                "acceptance_decision_recommendation": acceptance_summary["decision_recommendation"],
-                "acceptance_evidence": acceptance_summary["evidence"],
-                "acceptance_reasons": acceptance_summary["reasons"],
-                "acceptance_summary_path": acceptance_summary_path.relative_to(repo).as_posix(),
-                "reviewer_checklist": acceptance_summary["reviewer_checklist"],
-                "rollback_command": acceptance_summary["rollback_command"],
-            }
-        )
-    validate_json_artifact("optimization-summary.json", summary)
-    (run_dir / "optimization-summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    (run_dir / "optimization-summary.json").write_text(summary_text, encoding="utf-8")
     print(f"optimization: {decision}")
     return 0 if decision == "needs_review" else 1
 
