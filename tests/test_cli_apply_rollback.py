@@ -695,6 +695,26 @@ def test_apply_rejects_equal_trigger_and_held_out_scores(tmp_path: Path):
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_eval_report_with_regression_degradation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["metrics"] = {
+        "baseline_regression_score": 0.05,
+        "governance_regressions": 0,
+        "regression_score": 0.20,
+        "regression_tolerance": 0.05,
+    }
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_rejects_eval_report_without_validation_scores(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)

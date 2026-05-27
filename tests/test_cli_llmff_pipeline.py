@@ -5320,6 +5320,80 @@ llmff:
     ]
 
 
+def test_optimize_rejects_candidate_when_regression_gate_fails(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.2,
+            "held_out_score": 0.9,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {
+                "baseline_regression_score": 0.05,
+                "governance_regressions": 0,
+                "held_out_cases": 3,
+                "regression_score": 0.20,
+                "regression_tolerance": 0.05,
+            },
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+                "governance": ["governance:policy"],
+            },
+        },
+        policy_decision={"allowed": True, "reasons": []},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        candidate_state = store.connection.execute("SELECT state FROM candidates").fetchone()[0]
+        jobs = store.connection.execute(
+            """
+            SELECT manifest_name, status
+            FROM llmff_jobs
+            WHERE run_id = ?
+            ORDER BY id
+            """,
+            (run_dir.name,),
+        ).fetchall()
+
+    assert summary["decision"] == "rejected"
+    assert summary["recommendation"] == "accept"
+    assert decision["decision"] == "rejected"
+    assert decision["policy_reasons"] == ["regression score degraded beyond tolerance"]
+    assert candidate_state == "rejected"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+    assert jobs == [
+        ("instruction-index.yaml", "completed"),
+        ("episode-audit.yaml", "completed"),
+        ("drift-detect.yaml", "completed"),
+        ("patch-propose.yaml", "completed"),
+        ("patch-eval.yaml", "completed"),
+    ]
+
+
 def test_optimize_rejects_malformed_acceptance_summary_output(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()

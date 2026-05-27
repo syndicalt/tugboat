@@ -2324,6 +2324,14 @@ def _assert_eval_acceptance(
         raise ValueError("held-out eval score did not improve")
     if validation_baseline_score is not None and float(held_out_score) <= validation_baseline_score:
         raise ValueError("held-out eval score did not improve over baseline")
+    regression_score = _score_from_eval_report(eval_report, "regression_score")
+    baseline_regression_score = _score_from_eval_report(eval_report, "baseline_regression_score")
+    if regression_score is not None or baseline_regression_score is not None:
+        if regression_score is None or baseline_regression_score is None:
+            raise ValueError("eval report is missing regression validation scores")
+        regression_tolerance = _score_from_eval_report(eval_report, "regression_tolerance") or 0.0
+        if regression_score > baseline_regression_score + regression_tolerance:
+            raise ValueError("regression score degraded beyond tolerance")
 
 
 def _validation_baseline_key(suite_id: str) -> str:
