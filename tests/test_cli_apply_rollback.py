@@ -1730,6 +1730,75 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
     assert "rationale" not in serialized_decisions
 
 
+def test_auto_apply_commit_executes_recorded_rollback_and_restores_file(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+                "--burn-in-days",
+                "30",
+                "--rejection-rate",
+                "0.02",
+                "--rollback-rate",
+                "0.001",
+            ]
+        )
+        == 0
+    )
+    assert "Record rollback notes." in (repo / "CODEX.md").read_text(encoding="utf-8")
+    approval = json.loads((run_dir / "auto-apply-approval.json").read_text(encoding="utf-8"))
+
+    assert main(list(approval["rollback_command"][1:])) == 0
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    rollback_plan = json.loads((run_dir / "rollback-plan.json").read_text(encoding="utf-8"))
+    assert rollback_plan["executed"] is True
+    assert rollback_plan["restored_pre_hashes"] is True
+    assert rollback_plan["revert_commit"] == _git(repo, "rev-parse", "HEAD")
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        events = connection.execute(
+            """
+            SELECT event_type FROM audit_events
+            WHERE event_type IN ('auto_apply.applied', 'rollback.applied')
+            ORDER BY sequence
+            """
+        ).fetchall()
+        rollback_row = connection.execute(
+            """
+            SELECT r.decision_id, d.policy, r.executed, r.rollback_plan
+            FROM rollbacks r
+            JOIN decisions d ON d.id = CAST(r.decision_id AS INTEGER)
+            WHERE r.candidate_id = 7
+            """
+        ).fetchone()
+
+    assert [row[0] for row in events] == ["auto_apply.applied", "rollback.applied"]
+    assert rollback_row == (
+        rollback_row[0],
+        "auto_apply_controller",
+        1,
+        ".sidecar/runs/20260525T000000000000Z/rollback-plan.json",
+    )
+
+
 def test_auto_apply_final_gate_failure_cleans_committed_branch_without_silent_apply(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
