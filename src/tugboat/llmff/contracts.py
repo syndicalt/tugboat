@@ -9,6 +9,12 @@ class InspectPolicyError(RuntimeError):
     pass
 
 
+class LlmffRunFailed(RuntimeError):
+    def __init__(self, message: str, *, exit_code: int):
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
 class LlmffRunner(Protocol):
     def inspect(self, manifest_path: Path) -> dict[str, Any]:
         pass

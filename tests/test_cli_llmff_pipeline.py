@@ -3052,10 +3052,11 @@ llmff:
     assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
     capsys.readouterr()
 
-    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+    propose_exit = main(["propose", "--repo", str(repo), "--audit", "latest"])
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert propose_exit == 7
     assert "llmff patch-propose failed with exit code 7" in output
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
@@ -3066,7 +3067,7 @@ llmff:
         ).fetchone()
         job_row = store.connection.execute(
             """
-            SELECT j.status, e.event_type, e.payload_json
+            SELECT j.status, j.exit_code, e.event_type, e.payload_json
             FROM llmff_jobs j
             JOIN llmff_events e ON e.job_id = j.id
             WHERE j.run_id = ? AND j.manifest_name = 'patch-propose.yaml'
@@ -3078,8 +3079,8 @@ llmff:
         ).fetchone()[0]
 
     assert run_row == ("propose", "failed")
-    assert job_row[0:2] == ("failed", "run_failed")
-    assert json.loads(job_row[2])["run_failed"]["failure_kind"] == "fixture_failure"
+    assert job_row[0:3] == ("failed", propose_exit, "run_failed")
+    assert json.loads(job_row[3])["run_failed"]["failure_kind"] == "fixture_failure"
     assert candidate_count == 0
 
 
@@ -3585,10 +3586,11 @@ llmff:
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
     capsys.readouterr()
 
-    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+    eval_exit = main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"])
 
     output = capsys.readouterr().out
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert eval_exit == 7
     assert "llmff patch-eval failed with exit code 7" in output
     assert not (run_dir / "eval-report.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -3598,7 +3600,7 @@ llmff:
         ).fetchone()
         job_row = store.connection.execute(
             """
-            SELECT j.status, e.event_type, e.payload_json
+            SELECT j.status, j.exit_code, e.event_type, e.payload_json
             FROM llmff_jobs j
             JOIN llmff_events e ON e.job_id = j.id
             WHERE j.run_id = ? AND j.manifest_name = 'patch-eval.yaml'
@@ -3608,9 +3610,42 @@ llmff:
         eval_count = store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0]
 
     assert run_row == ("eval", "failed")
-    assert job_row[0:2] == ("failed", "run_failed")
-    assert json.loads(job_row[2])["run_failed"]["failure_kind"] == "fixture_failure"
+    assert job_row[0:3] == ("failed", eval_exit, "run_failed")
+    assert json.loads(job_row[3])["run_failed"]["failure_kind"] == "fixture_failure"
     assert eval_count == 0
+
+
+def test_optimize_preserves_llmff_propose_failure_exit_code(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", fail_manifest="patch-propose")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    optimize_exit = main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"])
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert optimize_exit == 7
+    assert "llmff patch-propose failed with exit code 7" in output
+    assert not (run_dir / "candidate.json").exists()
+    assert not (run_dir / "optimization-summary.json").exists()
 
 
 def test_optimize_runs_llmff_propose_and_eval_as_governed_workflow(tmp_path: Path):

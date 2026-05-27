@@ -57,6 +57,7 @@ from tugboat.harness.checks import (
     generate_cleanup_candidates,
     generate_harness_report,
 )
+from tugboat.llmff.contracts import LlmffRunFailed
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
@@ -593,6 +594,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         propose_exit = main(["propose", "--repo", str(repo), "--audit", trigger_run_id])
         run_dir = runs_dir(repo) / trigger_run_id
         if propose_exit != 0:
+            if not (run_dir / "candidate.json").exists():
+                return propose_exit
             return _write_optimization_summary(repo, run_dir, suite_id=args.suite)
         eval_result = run_eval_pipeline(repo, trigger_run_id, args.suite)
         print(eval_result.message)
@@ -1529,6 +1532,9 @@ def _finalize_governed_candidate_evaluation(
                     load_policy(repo),
                     eval_reports_path=eval_reports_path,
                 )
+            except LlmffRunFailed as error:
+                print(str(error))
+                return error.exit_code
             except (RuntimeError, ValueError) as error:
                 print(str(error))
                 return 1
@@ -1713,7 +1719,10 @@ def _run_acceptance_summary(
                 run_dir=run_dir,
             )
     if run.exit_code != 0:
-        raise RuntimeError(f"llmff acceptance-summary failed with exit code {run.exit_code}")
+        raise LlmffRunFailed(
+            f"llmff acceptance-summary failed with exit code {run.exit_code}",
+            exit_code=run.exit_code,
+        )
     payload = load_json_object_artifact(
         run.output_paths["acceptance_summary"],
         "acceptance-summary.raw.json",

@@ -11,6 +11,7 @@ from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import run_offline_eval_suite, run_provider_smoke_suite
+from tugboat.llmff.contracts import LlmffRunFailed
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
@@ -152,6 +153,8 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 eval_failure_message = f"eval rejected: {split_failure}"
         except ValueError as error:
             return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
+        except LlmffRunFailed as error:
+            return EvalPipelineResult(error.exit_code, run_dir, str(error))
         except RuntimeError as error:
             return EvalPipelineResult(1, run_dir, str(error))
     else:
@@ -380,7 +383,10 @@ def _run_patch_eval(
                 status="failed",
                 run_dir=run_dir,
             )
-        raise RuntimeError(f"llmff patch-eval failed with exit code {run.exit_code}")
+        raise LlmffRunFailed(
+            f"llmff patch-eval failed with exit code {run.exit_code}",
+            exit_code=run.exit_code,
+        )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
     eval_payload = load_json_object_artifact(

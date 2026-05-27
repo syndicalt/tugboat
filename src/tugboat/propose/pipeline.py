@@ -15,6 +15,7 @@ from tugboat.artifacts import (
 )
 from tugboat.config import load_policy
 from tugboat.db import Store
+from tugboat.llmff.contracts import LlmffRunFailed
 from tugboat.llmff.runner import inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
@@ -59,6 +60,8 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
     policy = load_policy(repo)
     try:
         candidate = _run_patch_propose(repo, run_dir, policy, audit_id=int(audit["audit_id"]))
+    except LlmffRunFailed as error:
+        return ProposePipelineResult(error.exit_code, run_dir, str(error))
     except (RuntimeError, ValueError) as error:
         return ProposePipelineResult(1, run_dir, str(error))
     decision = evaluate_candidate(repo, policy, candidate)
@@ -195,7 +198,10 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
                 status="failed",
                 run_dir=run_dir,
             )
-        raise RuntimeError(f"llmff patch-propose failed with exit code {run.exit_code}")
+        raise LlmffRunFailed(
+            f"llmff patch-propose failed with exit code {run.exit_code}",
+            exit_code=run.exit_code,
+        )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
     payload = load_json_object_artifact(
@@ -530,7 +536,10 @@ def _run_drift_detect(
                 run_dir=run_dir,
             )
     if run.exit_code != 0:
-        raise RuntimeError(f"llmff drift-detect failed with exit code {run.exit_code}")
+        raise LlmffRunFailed(
+            f"llmff drift-detect failed with exit code {run.exit_code}",
+            exit_code=run.exit_code,
+        )
     payload = load_json_object_artifact(output_path, "drift.raw.json")
     validate_json_artifact("drift.raw.json", payload)
     optimizer_payload = load_json_object_artifact(
