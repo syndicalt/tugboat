@@ -17,6 +17,7 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 - Use [docs/daemon-guide.md](docs/daemon-guide.md) for queue, cycle, socket, profile, and read-only kill-switch operations.
 - Use [docs/troubleshooting.md](docs/troubleshooting.md) for common blocked commands and incident triage.
 - Use [docs/policy-examples.md](docs/policy-examples.md) for proposal-only, provider-backed, MCP, and auto-apply policy examples.
+- Use [docs/announcements/tugboat-production-release-article.md](docs/announcements/tugboat-production-release-article.md) for the production release narrative and announcement copy.
 - Use [docs/threat-model.md](docs/threat-model.md) before changing trust boundaries, redaction, secrets handling, MCP, daemon, apply, or rollback behavior.
 - Use [docs/ops/operating-runbook.md](docs/ops/operating-runbook.md), [docs/ops/security-review.md](docs/ops/security-review.md), [docs/ops/sidecar-backup-restore.md](docs/ops/sidecar-backup-restore.md), and [docs/ops/artifact-retention-redaction.md](docs/ops/artifact-retention-redaction.md) for production operations.
 - Use [docs/ops/quick-adoption-proposal-only.md](docs/ops/quick-adoption-proposal-only.md) for credential-free existing-repo rollout.

@@ -9,4 +9,7 @@ The default posture is proposal-only. Tugboat creates evidence-backed review art
 Start with [docs/quickstart.md](docs/quickstart.md), then use
 [docs/cli-reference.md](docs/cli-reference.md) for the full command surface.
 
+For the production release framing, see
+[docs/announcements/tugboat-production-release-article.md](docs/announcements/tugboat-production-release-article.md).
+
 For release and production checks, see [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
