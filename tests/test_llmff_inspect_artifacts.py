@@ -383,6 +383,26 @@ def test_write_audit_writes_deterministic_pretty_json(tmp_path: Path):
     assert artifact["schema_version"] == 1
 
 
+def test_write_audit_rejects_secret_bearing_payload(tmp_path: Path):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(SecretScanError, match="openai_api_key"):
+        write_audit(
+            run_dir,
+            {
+                "audit_id": 1,
+                "edit_warranted": False,
+                "evidence_refs": [],
+                "failure_class": "llmff_run_failed",
+                "severity": "high",
+                "confidence": 1.0,
+                "llmff_failure_message": "provider returned sk-abcdefghijklmnopqrstuvwx",
+            },
+        )
+
+    assert not (run_dir / "audit.json").exists()
+
+
 def test_subprocess_inspect_uses_timeout(monkeypatch, tmp_path: Path):
     from tugboat.llmff.runner import SubprocessLlmffRunner
 
