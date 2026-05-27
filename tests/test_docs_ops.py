@@ -245,7 +245,7 @@ DOC_CONTRACTS = {
             "production release candidate",
             "proposal-only",
             "auto-apply remains disabled",
-            "1098 tests and 90.02% coverage",
+            "1099 tests and 90.02% coverage",
             "approved_proposal_only",
             ".sidecar/ops/release-artifact-manifest.json",
         ],
@@ -261,7 +261,7 @@ DOC_CONTRACTS = {
             "Build/code artifact commit reviewed",
             "proposal_only",
             "auto_apply: disabled",
-            "1098 tests and 90.02% coverage",
+            "1099 tests and 90.02% coverage",
             "No open critical or high findings",
             "Not approved",
         ],
@@ -355,8 +355,8 @@ def test_production_release_candidate_evidence_matches_current_tree() -> None:
     assert f"--commit {evidence_commit}" in release_notes
     assert f"--commit {evidence_commit}" in security_review
     assert "PYTHONPATH=src python -m tugboat ci --repo .` passed with `ci: ok`" in release_notes
-    assert "1098 tests and 90.02% coverage" in release_notes
-    assert "1098 tests and 90.02% coverage" in security_review
+    assert "1099 tests and 90.02% coverage" in release_notes
+    assert "1099 tests and 90.02% coverage" in security_review
     assert ".sidecar/ops/release-artifact-manifest.json" in release_notes
     assert "Open Release Work" not in release_notes
     assert "auto_apply: disabled" in security_review
