@@ -49,11 +49,12 @@ DOC_CONTRACTS = {
             "tugboat ci --repo .",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
-            "python -m pytest -q",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
             "actions/upload-artifact",
             ".sidecar/ci/ci-report.json",
             ".sidecar/ci/**",
             "if: always()",
+            "retention-days: 14",
         ],
     },
     "docs/ops/security-review.md": {
@@ -239,10 +240,12 @@ DOC_CONTRACTS = {
             "tugboat ci --repo .",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
-            "python -m pytest --cov -q",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
             "actions/upload-artifact",
+            ".sidecar/ci/ci-report.json",
             ".sidecar/ci/**",
             "if: always()",
+            "retention-days: 14",
         ],
     },
 }
@@ -302,6 +305,33 @@ def test_dated_security_review_matches_release_evidence_commit() -> None:
     assert "725 tests" not in combined
     assert "90.11% coverage" not in combined
     assert "local://release-smoke/2026-05-26 --approver" not in combined
+
+
+def test_github_actions_ci_workflow_enforces_proposal_only_release_gates() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    required_fragments = [
+        "name: tugboat-ci",
+        "pull_request:",
+        "branches: [main]",
+        "permissions:",
+        "contents: read",
+        'python-version: "3.13"',
+        'python -m pip install -e ".[dev]"',
+        "tugboat doctor",
+        "tugboat ci --repo .",
+        "tugboat index --repo . --check",
+        "tugboat harness check --repo .",
+        "python -m pytest --cov=src --cov-report=term-missing -q",
+        "actions/upload-artifact@v4",
+        "if: always()",
+        "retention-days: 14",
+        ".sidecar/ci/ci-report.json",
+    ]
+    for fragment in required_fragments:
+        assert fragment in workflow
+    assert "auto-apply" not in workflow
+    assert "OPENAI_API_KEY" not in workflow
 
 
 def _single_match(pattern: str, content: str) -> str:

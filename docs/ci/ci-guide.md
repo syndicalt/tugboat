@@ -16,7 +16,7 @@ tugboat doctor
 tugboat ci --repo .
 tugboat index --repo . --check
 tugboat harness check --repo .
-python -m pytest -q
+python -m pytest --cov=src --cov-report=term-missing -q
 ```
 
 For scheduled governance checks, also run:
@@ -28,7 +28,7 @@ tugboat harness report --repo .
 ## GitHub Actions Template
 
 ```yaml
-name: tugboat
+name: tugboat-ci
 
 on:
   pull_request:
@@ -38,21 +38,23 @@ on:
 jobs:
   proposal-only-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - run: python -m pip install -e ".[dev]"
       - run: tugboat doctor
       - run: tugboat ci --repo .
       - run: tugboat index --repo . --check
       - run: tugboat harness check --repo .
-      - run: python -m pytest -q
+      - run: python -m pytest --cov=src --cov-report=term-missing -q
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: tugboat-ci-artifacts
+          retention-days: 14
           path: |
             .sidecar/ci/ci-report.json
             .sidecar/ci/**
