@@ -63,6 +63,24 @@ class PullRequestMetadata:
         }
 
 
+@dataclass(frozen=True)
+class PullRequestResult:
+    provider: str
+    created: bool
+    url: str
+    number: int | None = None
+
+    def to_json_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "created": self.created,
+            "provider": self.provider,
+            "url": self.url,
+        }
+        if self.number is not None:
+            payload["number"] = self.number
+        return payload
+
+
 class VcsAdapter:
     def __init__(self, repo: Path):
         self.repo = repo
@@ -142,6 +160,7 @@ class VcsAdapter:
         base_file: str,
         branch_name: str,
         base_branch: str,
+        draft: bool,
         rationale: str,
     ) -> PullRequestMetadata:
         title = f"tugboat: apply candidate {candidate_id} for {base_file}"
@@ -162,6 +181,7 @@ class VcsAdapter:
             body=body,
             branch_name=branch_name,
             base_branch=base_branch,
+            draft=draft,
         )
 
     def create_branch(self, branch_name: str) -> None:
@@ -198,6 +218,60 @@ class VcsAdapter:
             detail = f": {message}" if message else ""
             raise VcsStateError(f"git commit failed{detail}") from error
         return self._git("rev-parse", "HEAD")
+
+    def push_branch(self, remote: str, branch_name: str) -> None:
+        try:
+            self._git("push", "--set-upstream", remote, branch_name)
+        except subprocess.CalledProcessError as error:
+            message = (error.stderr or error.stdout or "").strip()
+            detail = f": {message}" if message else ""
+            raise VcsStateError(f"git push failed{detail}") from error
+
+    def create_pull_request(
+        self,
+        metadata: PullRequestMetadata,
+        *,
+        provider: str,
+    ) -> PullRequestResult:
+        if provider != "github_cli":
+            raise VcsStateError(f"unsupported pull request provider: {provider}")
+        command = [
+            "gh",
+            "pr",
+            "create",
+            "--base",
+            metadata.base_branch,
+            "--head",
+            metadata.branch_name,
+            "--title",
+            metadata.title,
+            "--body",
+            metadata.body,
+        ]
+        if metadata.draft:
+            command.append("--draft")
+        try:
+            result = subprocess.run(
+                command,
+                cwd=self.repo,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as error:
+            message = (error.stderr or error.stdout or "").strip()
+            detail = f": {message}" if message else ""
+            raise VcsStateError(f"gh pr create failed{detail}") from error
+        except OSError as error:
+            raise VcsStateError(f"gh pr create failed: {error}") from error
+        url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+        return PullRequestResult(
+            provider=provider,
+            created=True,
+            url=url,
+            number=_pull_request_number(url),
+        )
 
     def revert_commit(self, *, branch_name: str, commit_sha: str) -> str:
         try:
@@ -247,6 +321,11 @@ class VcsAdapter:
 def _slug(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "item"
+
+
+def _pull_request_number(url: str) -> int | None:
+    match = re.search(r"/pull/([0-9]+)(?:$|[/?#])", url)
+    return int(match.group(1)) if match else None
 
 
 def _unquote_status_path(value: str) -> str:

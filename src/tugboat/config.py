@@ -111,6 +111,8 @@ def load_policy(repo: Path) -> Policy:
     provider_smoke = raw.get("provider_smoke", {}) or {}
     retention = raw.get("retention", {}) or {}
     roadmap = raw.get("roadmap", {}) or {}
+    vcs = raw.get("vcs", {}) or {}
+    pull_request = vcs.get("pull_request", {}) or {}
     learning_rate_budget = roadmap.get("learning_rate_budget", {}) or {}
     entries = tuple(_as_instruction_file(item) for item in raw.get("instruction_files", []))
 
@@ -210,6 +212,19 @@ def load_policy(repo: Path) -> Policy:
         llmff_allowed_providers=_as_non_empty_string_tuple(
             llmff.get("allowed_providers", []),
             "llmff.allowed_providers",
+        ),
+        vcs_pull_request_enabled=bool(pull_request.get("enabled", False)),
+        vcs_pull_request_provider=str(
+            pull_request.get("provider", Policy().vcs_pull_request_provider)
+        ),
+        vcs_pull_request_remote=str(
+            pull_request.get("remote", Policy().vcs_pull_request_remote)
+        ),
+        vcs_pull_request_base_branch=str(
+            pull_request.get("base_branch", Policy().vcs_pull_request_base_branch)
+        ),
+        vcs_pull_request_draft=bool(
+            pull_request.get("draft", Policy().vcs_pull_request_draft)
         ),
         raw_traces_retention_days=_as_non_negative_days(
             retention.get("raw_traces_days", Policy().raw_traces_retention_days),

@@ -22,6 +22,11 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.llmff_timeout_ms == 60_000
     assert policy.llmff_retry_attempts == 0
     assert policy.llmff_retry_backoff_ms == 0
+    assert policy.vcs_pull_request_enabled is False
+    assert policy.vcs_pull_request_provider == ""
+    assert policy.vcs_pull_request_remote == "origin"
+    assert policy.vcs_pull_request_base_branch == ""
+    assert policy.vcs_pull_request_draft is True
     assert policy.raw_traces_retention_days == 14
     assert policy.checkpoints_retention_days == 7
     assert [entry.path for entry in policy.instruction_files] == [
@@ -234,6 +239,32 @@ llmff:
     policy = load_policy(tmp_path)
 
     assert policy.llmff_allowed_providers == ("openai", "anthropic")
+
+
+def test_load_policy_yaml_reads_pull_request_config(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+vcs:
+  pull_request:
+    enabled: true
+    provider: github_cli
+    remote: upstream
+    base_branch: trunk
+    draft: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.vcs_pull_request_enabled is True
+    assert policy.vcs_pull_request_provider == "github_cli"
+    assert policy.vcs_pull_request_remote == "upstream"
+    assert policy.vcs_pull_request_base_branch == "trunk"
+    assert policy.vcs_pull_request_draft is False
 
 
 def test_load_policy_yaml_rejects_malformed_llmff_allowed_providers(tmp_path: Path):

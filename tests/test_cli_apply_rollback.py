@@ -49,6 +49,31 @@ def _init_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _write_pr_policy(
+    repo: Path,
+    *,
+    provider: str = "github_cli",
+    remote: str = "origin",
+    base_branch: str = "main",
+    draft: bool = True,
+) -> None:
+    (repo / ".sidecar" / "policy.yaml").write_text(
+        f"""
+version: 1
+vcs:
+  pull_request:
+    enabled: true
+    provider: {provider}
+    remote: {remote}
+    base_branch: {base_branch}
+    draft: {str(draft).lower()}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".sidecar/policy.yaml")
+    _git(repo, "commit", "-m", "configure pull requests")
+
+
 def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -2238,9 +2263,58 @@ def test_apply_branch_mode_creates_branch_and_applies_patch_without_commit(tmp_p
     assert decision == ("applied", "")
 
 
-def test_apply_pr_mode_writes_pr_metadata_bundle(tmp_path: Path):
+def test_apply_pr_mode_rejects_without_pull_request_config(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
+    original_branch = _git(repo, "branch", "--show-current")
+    original_text = (repo / "CODEX.md").read_text(encoding="utf-8")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original_text
+    assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_pr_mode_rejects_unsupported_provider_before_vcs_mutation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    _write_pr_policy(repo, provider="webhook")
+    original_branch = _git(repo, "branch", "--show-current")
+    original_text = (repo / "CODEX.md").read_text(encoding="utf-8")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original_text
+    assert "tugboat/20260525t000000000000z/candidate-7/codex-md" not in _git(repo, "branch")
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_pr_mode_creates_configured_pull_request_and_records_result(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    _write_pr_policy(repo, remote="upstream", base_branch="trunk", draft=False)
+    calls: dict[str, object] = {}
+
+    def record_push(self, remote: str, branch_name: str) -> None:
+        calls["push"] = {"remote": remote, "branch_name": branch_name}
+
+    def record_pr(self, metadata, *, provider: str):
+        calls["create"] = {"provider": provider, "metadata": metadata.to_json_dict()}
+        return cli_module.PullRequestResult(
+            provider=provider,
+            created=True,
+            url="https://github.com/syndicalt/tugboat/pull/42",
+            number=42,
+        )
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "push_branch", record_push)
+    monkeypatch.setattr(cli_module.VcsAdapter, "create_pull_request", record_pr)
 
     assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 0
 
@@ -2253,13 +2327,36 @@ def test_apply_pr_mode_writes_pr_metadata_bundle(tmp_path: Path):
         ["git", "revert", "--no-edit", apply_plan["applied_commit"]],
     ]
     assert apply_plan["pr_metadata"] == {
-        "base_branch": "main",
+        "base_branch": "trunk",
         "body": apply_plan["pr_metadata"]["body"],
         "branch_name": apply_plan["branch_name"],
-        "draft": True,
+        "draft": False,
         "title": "tugboat: apply candidate 7 for CODEX.md",
     }
+    assert calls["push"] == {"remote": "upstream", "branch_name": apply_plan["branch_name"]}
+    assert calls["create"] == {
+        "provider": "github_cli",
+        "metadata": apply_plan["pr_metadata"],
+    }
+    assert apply_plan["pr_result"] == {
+        "created": True,
+        "number": 42,
+        "provider": "github_cli",
+        "url": "https://github.com/syndicalt/tugboat/pull/42",
+    }
     assert "Candidate: 7" in apply_plan["pr_metadata"]["body"]
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        event = connection.execute(
+            """
+            SELECT payload_json
+            FROM audit_events
+            WHERE event_type = 'apply.applied'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert event is not None
+    assert json.loads(event[0])["pr_result"] == apply_plan["pr_result"]
 
 
 def test_apply_pr_mode_cleans_generated_branch_when_commit_fails(
@@ -2268,6 +2365,7 @@ def test_apply_pr_mode_cleans_generated_branch_when_commit_fails(
 ):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
+    _write_pr_policy(repo)
     original_branch = _git(repo, "branch", "--show-current")
     original_text = (repo / "CODEX.md").read_text(encoding="utf-8")
 

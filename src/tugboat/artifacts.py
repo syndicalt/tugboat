@@ -2280,6 +2280,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             "provenance_bundle": {"type": "string"},
             "pr_metadata": {"type": "object"},
+            "pr_result": {"type": "object"},
             "review_actor": {"type": "string"},
             "auto_apply": {"type": "boolean"},
             "explicit_human_review": {"type": "boolean"},

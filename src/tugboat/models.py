@@ -88,6 +88,11 @@ class Policy:
     llmff_retry_backoff_ms: int = 0
     allowed_manifest_hashes: tuple[str, ...] = field(default_factory=tuple)
     llmff_allowed_providers: tuple[str, ...] = field(default_factory=tuple)
+    vcs_pull_request_enabled: bool = False
+    vcs_pull_request_provider: str = ""
+    vcs_pull_request_remote: str = "origin"
+    vcs_pull_request_base_branch: str = ""
+    vcs_pull_request_draft: bool = True
     raw_traces_retention_days: int = 14
     checkpoints_retention_days: int = 7
     provider_smoke_enabled: bool = False

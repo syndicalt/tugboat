@@ -45,6 +45,20 @@ llmff:
 
 Provider-backed runs require explicit provider policy and reviewed manifest hashes. Omit `allowed_providers` for credential-free local and fixture-backed runs.
 
+## Pull Request Apply Mode
+
+```yaml
+vcs:
+  pull_request:
+    enabled: true
+    provider: github_cli
+    remote: origin
+    base_branch: main
+    draft: true
+```
+
+PR apply mode is fail-closed. `tugboat apply --mode pr` requires explicit policy, pushes the generated Tugboat branch to the configured remote, creates the pull request through the GitHub CLI, and records the PR result in the apply artifact and audit ledger.
+
 ## MCP Allowlist
 
 ```yaml

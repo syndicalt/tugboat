@@ -90,7 +90,7 @@ from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.report.service import write_report
 from tugboat.security.secrets import SecretScanError, scan_path, scan_text
-from tugboat.vcs import VcsAdapter, VcsStateError
+from tugboat.vcs import PullRequestResult, VcsAdapter, VcsStateError
 
 
 def _write_blocked_by_read_only(repo: Path, action: str) -> bool:
@@ -2098,6 +2098,15 @@ def _write_apply_plan(
         raise ValueError("Class C candidates require explicit human review")
     if auto_apply and mode != "commit":
         raise ValueError("auto-apply requires commit mode")
+    if mode == "pr":
+        if not policy.vcs_pull_request_enabled:
+            raise ValueError("PR mode requires vcs.pull_request.enabled")
+        if policy.vcs_pull_request_provider != "github_cli":
+            raise ValueError(
+                f"unsupported pull request provider: {policy.vcs_pull_request_provider}"
+            )
+        if not policy.vcs_pull_request_remote.strip():
+            raise ValueError("PR mode requires vcs.pull_request.remote")
 
     adapter = VcsAdapter(repo)
     if auto_apply:
@@ -2118,16 +2127,21 @@ def _write_apply_plan(
         base_file=candidate.base_file,
         rationale=candidate.rationale,
     )
-    planned_pr_metadata = (
+    pr_base_branch = policy.vcs_pull_request_base_branch or base_branch
+    planned_pr_metadata_obj = (
         adapter.pull_request_metadata(
             candidate_id=candidate_id,
             base_file=candidate.base_file,
             branch_name=branch_name,
-            base_branch=base_branch,
+            base_branch=pr_base_branch,
+            draft=policy.vcs_pull_request_draft,
             rationale=candidate.rationale,
-        ).to_json_dict()
+        )
         if mode == "pr"
-        else {}
+        else None
+    )
+    planned_pr_metadata = (
+        planned_pr_metadata_obj.to_json_dict() if planned_pr_metadata_obj is not None else {}
     )
     _preflight_apply_metadata(
         run_dir / "apply-plan.json",
@@ -2136,6 +2150,7 @@ def _write_apply_plan(
             "commit_message": commit_message,
             "decision_rationale": "policy gate and eval report passed",
             "pr_metadata": planned_pr_metadata,
+            "pr_result": {},
             "review_actor": review_actor,
             "review_required_reasons": list(decision.review_required_reasons),
         },
@@ -2146,6 +2161,7 @@ def _write_apply_plan(
     rollback_command: list[list[str]] = []
     auto_apply_approval: dict[str, object] | None = None
     pr_metadata: dict[str, object] = {}
+    pr_result: dict[str, object] = {}
     branch_created = False
     applied_worktree_change = False
 
@@ -2226,6 +2242,14 @@ def _write_apply_plan(
                 ).commands
             ]
             pr_metadata = planned_pr_metadata
+            adapter.push_branch(policy.vcs_pull_request_remote, branch_name)
+            if planned_pr_metadata_obj is None:
+                raise ValueError("PR metadata was not prepared")
+            created_pr: PullRequestResult = adapter.create_pull_request(
+                planned_pr_metadata_obj,
+                provider=policy.vcs_pull_request_provider,
+            )
+            pr_result = created_pr.to_json_dict()
     except VcsStateError:
         if branch_created and not applied_commit:
             adapter.discard_worktree_changes()
@@ -2255,6 +2279,7 @@ def _write_apply_plan(
         "rollback_command": rollback_command,
         "provenance_bundle": _relative_repo_path(repo, run_dir / "provenance-bundle.json"),
         "pr_metadata": pr_metadata,
+        "pr_result": pr_result,
         "review_actor": review_actor,
         "auto_apply": auto_apply,
         "explicit_human_review": explicit_human_review,
@@ -2313,6 +2338,7 @@ def _write_apply_plan(
                     post_hashes=post_hashes,
                     provenance_bundle=provenance_bundle,
                     rollback_command=rollback_command,
+                    pr_result=pr_result,
                 ),
             )
             _transition_originating_daemon_job(
@@ -2803,10 +2829,11 @@ def _apply_applied_event_payload(
     post_hashes: dict[str, str],
     provenance_bundle: str,
     rollback_command: list[list[str]],
+    pr_result: dict[str, object] | None = None,
 ) -> dict[str, object]:
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
-    return {
+    payload: dict[str, object] = {
         "candidate_id": candidate_id,
         "mode": mode,
         "run_id": run_dir.name,
@@ -2827,6 +2854,9 @@ def _apply_applied_event_payload(
         "provenance_bundle": provenance_bundle,
         "rollback_command": rollback_command,
     }
+    if pr_result:
+        payload["pr_result"] = pr_result
+    return payload
 
 
 def _relative_repo_path(repo: Path, path: Path) -> str:

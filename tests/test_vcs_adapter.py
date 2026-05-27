@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from tugboat.policy.gate import CandidatePatch
-from tugboat.vcs import VcsAdapter, VcsStateError
+from tugboat.vcs import PullRequestMetadata, VcsAdapter, VcsStateError
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -134,6 +134,96 @@ def test_rollback_metadata_contains_revert_commands_without_mutating_repo(tmp_pa
         "strategy": "git_revert",
     }
     assert _git(repo, "rev-parse", "HEAD") == head
+
+
+def test_create_pull_request_uses_github_cli_and_parses_result(tmp_path: Path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        assert kwargs["cwd"] == repo
+        assert kwargs["check"] is True
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="https://github.com/syndicalt/tugboat/pull/42\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = VcsAdapter(repo).create_pull_request(
+        PullRequestMetadata(
+            title="tugboat: apply candidate 7 for CODEX.md",
+            body="Candidate: 7",
+            branch_name="tugboat/run/candidate-7/codex-md",
+            base_branch="main",
+            draft=True,
+        ),
+        provider="github_cli",
+    )
+
+    assert calls == [
+        [
+            "gh",
+            "pr",
+            "create",
+            "--base",
+            "main",
+            "--head",
+            "tugboat/run/candidate-7/codex-md",
+            "--title",
+            "tugboat: apply candidate 7 for CODEX.md",
+            "--body",
+            "Candidate: 7",
+            "--draft",
+        ]
+    ]
+    assert result.to_json_dict() == {
+        "created": True,
+        "number": 42,
+        "provider": "github_cli",
+        "url": "https://github.com/syndicalt/tugboat/pull/42",
+    }
+
+
+def test_create_pull_request_rejects_unsupported_provider(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+
+    with pytest.raises(VcsStateError, match="unsupported pull request provider: webhook"):
+        VcsAdapter(repo).create_pull_request(
+            PullRequestMetadata(
+                title="tugboat",
+                body="body",
+                branch_name="branch",
+                base_branch="main",
+            ),
+            provider="webhook",
+        )
+
+
+def test_create_pull_request_converts_missing_github_cli_to_vcs_state_error(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = _init_repo(tmp_path)
+
+    def missing_binary(command, **kwargs):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(subprocess, "run", missing_binary)
+
+    with pytest.raises(VcsStateError, match="gh pr create failed: gh"):
+        VcsAdapter(repo).create_pull_request(
+            PullRequestMetadata(
+                title="tugboat",
+                body="body",
+                branch_name="branch",
+                base_branch="main",
+            ),
+            provider="github_cli",
+        )
 
 
 def test_apply_diff_converts_git_conflict_to_vcs_state_error(tmp_path: Path):
