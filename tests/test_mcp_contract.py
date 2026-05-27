@@ -1897,6 +1897,7 @@ def test_mcp_eval_request_records_daemon_job_in_audited_store(tmp_path: Path):
 def test_request_proposal_enqueues_daemon_executable_patch_propose(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    original_codex = (repo / "CODEX.md").read_bytes()
     fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
@@ -1936,6 +1937,7 @@ llmff:
         audit_id = int(store.connection.execute("SELECT id FROM audits").fetchone()[0])
 
     request = tugboat_request_proposal(repo, str(audit_id))
+    assert (repo / "CODEX.md").read_bytes() == original_codex
     proposal_result = run_daemon_once(
         repo,
         DaemonRunConfig(
@@ -1948,6 +1950,7 @@ llmff:
     assert request["kind"] == "proposal"
     assert proposal_result["processed"] is True
     assert proposal_result["final_state"] == "waiting_review"
+    assert (repo / "CODEX.md").read_bytes() == original_codex
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     assert candidate["audit_id"] == audit_id
@@ -2101,6 +2104,7 @@ def test_request_optimization_rejects_unsafe_split_ids_before_queueing(tmp_path:
 def test_request_eval_enqueues_daemon_executable_patch_eval(tmp_path: Path):
     repo = tmp_path
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    original_codex = (repo / "CODEX.md").read_bytes()
     fake_llmff = _write_fake_audit_llmff(repo / "fake-llmff")
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
@@ -2153,6 +2157,7 @@ llmff:
     ]
 
     request = tugboat_request_eval(repo, str(candidate_id), "all")
+    assert (repo / "CODEX.md").read_bytes() == original_codex
     eval_result = run_daemon_once(
         repo,
         DaemonRunConfig(
@@ -2165,6 +2170,7 @@ llmff:
     assert request["kind"] == "eval"
     assert eval_result["processed"] is True
     assert eval_result["final_state"] == "waiting_review"
+    assert (repo / "CODEX.md").read_bytes() == original_codex
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
     assert eval_report["candidate_id"] == candidate_id
