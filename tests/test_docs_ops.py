@@ -290,6 +290,32 @@ DOC_CONTRACTS = {
             "No silent mutation",
         ],
     },
+    "docs/roadmaps/2026-05-27-next-roadmap-proposals.md": {
+        "sections": [
+            "## Purpose",
+            "## Selection Criteria",
+            "## Proposal 1: Robust Auto-Update",
+            "## Proposal 2: Real-World Trace Adapter Hardening",
+            "## Proposal 3: Provider-Backed llmff Manifest Expansion",
+            "## Proposal 4: Operator Review UX",
+            "## Proposal 5: Longitudinal Metrics And Local Dashboard",
+            "## Proposal 6: Team Workflow And PR Integration",
+            "## Proposal 7: Harness Health And Cleanup Agents",
+            "## Proposal 8: Zaxy Memory Bridge",
+            "## Recommended Next Roadmap Shape",
+        ],
+        "required_text": [
+            "auto-update defaults off",
+            "Class A only by default",
+            "no runtime CLI override for safety thresholds",
+            "read-only kill switch",
+            "VCS commit or draft PR",
+            "one-command rollback is mandatory",
+            "provider-backed execution requires `llmff.allow_network: true`",
+            "Tugboat remains locally functional without Zaxy",
+            "from governed proposals to governed maintenance",
+        ],
+    },
     "docs/troubleshooting.md": {
         "sections": [
             "## First Checks",

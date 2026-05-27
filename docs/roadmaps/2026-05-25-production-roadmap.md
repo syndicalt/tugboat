@@ -52,9 +52,11 @@ Tugboat should optimize the harness, not merely rewrite prose.
 - Process exit code is the success/failure authority.
 - Long jobs use checkpoints and resume only when manifest hashes match.
 
-## Current State
+## Release Status
 
-The committed MVP provides:
+Status as of the production release candidate: Phases 0 through 10 are implemented for the local, proposal-first product surface. The remaining work is no longer baseline production readiness; it is post-release expansion, hardening, and operator experience.
+
+The committed product provides:
 
 - `tugboat doctor`
 - `tugboat index --repo PATH`
@@ -76,7 +78,7 @@ The committed MVP provides:
 - rejected-edit memory and validation baseline memory
 - Auto-apply remains disabled by default, provider-backed runs require explicit policy, and direct instruction mutation is still outside the default proposal loop.
 
-The MVP is intentionally not yet the full vision:
+The release is intentionally not yet the full vision:
 
 - bundled `llmff` manifests and provider-backed pipelines are still policy-gated and fixture-backed by default;
 - apply and rollback are review-oriented VCS workflows, not autonomous instruction mutation;
@@ -100,7 +102,7 @@ The MVP is intentionally not yet the full vision:
    - Must use the same policy gates and audit ledger as CLI mode.
 
 3. **Sidecar daemon mode**
-   - Deferred until CLI and MCP are stable.
+   - Local, bounded integration surface over the same service layer.
    - Watches trace directories and worktree-local run directories.
    - Listens only on Unix socket or `127.0.0.1`.
    - Uses the CLI/service layer for all operations.
@@ -146,7 +148,7 @@ agent runtime
   -> reports, MCP tools, CI outputs
 ```
 
-Core modules to add or mature:
+Core modules now present and continuing to mature:
 
 - `supervisor`: `llmff run` orchestration, event streaming, checkpoint/resume, exit-code handling.
 - `manifests`: bundled manifest templates, hash pinning, schema tests.
@@ -161,6 +163,8 @@ Core modules to add or mature:
 - `harness`: repo knowledge-map checks, doc freshness, structural lints, recurring cleanup proposals.
 
 ## Roadmap
+
+The phase list below records the production-release implementation baseline. Future work should be tracked in a follow-on roadmap rather than reopening these baseline phases.
 
 ### Phase 0: Production Baseline Hardening
 
@@ -521,9 +525,10 @@ Goal: support a very small automatic lane only after evidence proves safety.
 
 Prerequisites:
 
-- At least 30 days proposal-only burn-in.
-- Low historical rejection rate.
-- Low rollback rate.
+- At least 14 days proposal-only burn-in by default.
+- Historical rejection rate at or below the policy threshold; default maximum is 10%.
+- Historical rollback rate at or below the policy threshold; default maximum is 2%.
+- Maximum changed-line budget at or below the policy threshold; default maximum is 30 changed lines.
 - Repo allowlist.
 - Class A only.
 - Held-out eval pass.
@@ -661,34 +666,40 @@ Tugboat fulfills the vision when all of these are true:
 
 ## Near-Term Implementation Order
 
-The next five implementation plans should be:
+The original near-term order has been delivered for the production candidate:
 
 1. **llmff supervisor and manifest contracts**
-   - Add real `llmff run` support, file-backed events/traces/checkpoints, manifest registry, and typed output validation.
+   - Delivered as policy-gated `llmff` inspect/run handling, file-backed events/traces/checkpoints, manifest registry, and typed output validation.
 
 2. **episode audit pipeline**
-   - Replace fixed audit output with `episode-audit.yaml`, canonical trace inputs, evidence refs, and instruction refs.
+   - Delivered through canonical trace inputs, evidence refs, instruction refs, and audit artifacts.
 
 3. **patch proposal pipeline**
-   - Replace canned candidate diffs with `patch-propose.yaml`, bounded edit operations, style constraints, rejected-edit memory, and deterministic patch parsing.
+   - Delivered through bounded candidate artifacts, style and policy constraints, rejected-edit memory, and deterministic patch validation.
 
 4. **evaluation harness**
-   - Add incident replay, held-out suites, governance regression, and adversarial fixtures.
+   - Delivered through incident replay, held-out validation, governance regression checks, and adversarial fixtures.
 
 5. **VCS-gated apply/rollback**
-   - Add branch/local commit/revert mechanics while preserving proposal-only default.
+   - Delivered through proposal, branch, commit, PR, and rollback workflows while preserving proposal-only default.
 
-MCP should start after item 2 or 3, when Tugboat can answer useful read-only questions from real audit artifacts.
+MCP, daemon operations, auto-apply, and Phase 10 production docs/ops were also delivered for the release candidate.
 
-## Open Decisions
+## Resolved Decisions
 
-- Which trace adapters ship first: Codex-only, Codex plus Claude, or generic-first?
-- Whether Tugboat owns bundled `llmff` manifests or references a manifest package.
-- Whether accepted/rejected optimizer memory stays local SQLite only or also exports summaries to Zaxy.
-- Whether MCP is packaged as a separate command or installed as part of `tugboat`.
-- Whether daemon queue state and CLI state share one SQLite DB or separate operational DBs.
+- Trace adapters ship as a multi-format surface: Codex, Claude, generic JSONL, CI, and MCP traces.
+- Tugboat owns the default fixture-backed `llmff` integration and manifest contracts for the local release surface; provider-backed expansion remains policy-gated.
+- Accepted/rejected optimizer memory stays local SQLite for the release product.
+- MCP is packaged as part of the `tugboat` CLI through `tugboat mcp stdio`.
+- Daemon queue state uses `.sidecar/daemon.sqlite`; durable audit and decision state use `.sidecar/db.sqlite`.
+- Auto-apply thresholds are policy-owned and checked against ledger-derived metrics. Runtime CLI parameters confirm intent; they do not override burn-in, rejection-rate, rollback-rate, or changed-line thresholds.
+
+## Remaining Open Decisions
+
 - What minimum validation lift is required for acceptance: strict score improvement, confidence interval, or policy-specific threshold.
 - How to represent conflicting instruction precedence across global, repo, user, and skill scopes.
+- Whether post-release optimizer summaries should export to Zaxy as an optional operator memory bridge.
+- Whether provider-backed `llmff` manifests should remain bundled in Tugboat or move into a separate manifest package after real-world usage.
 
 ## Non-Negotiable Invariants
 
