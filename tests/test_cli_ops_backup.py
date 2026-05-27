@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
+import tarfile
+from contextlib import closing
 from pathlib import Path
 
 from tugboat.artifacts import ArtifactValidationError
 from tugboat.cli import _write_ops_command_bundle, main
 from tugboat.paths import sidecar_dir
+
+
+def _create_sidecar_db(path: Path) -> None:
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("CREATE TABLE item(id INTEGER)")
+        connection.commit()
 
 
 def test_ops_backup_writes_non_executing_sidecar_backup_plan(
@@ -30,6 +40,36 @@ def test_ops_backup_writes_non_executing_sidecar_backup_plan(
     }
     assert payload["bundle"]["commands"][1]["stdout_path"] == str(archive.resolve()) + ".sha256"
     assert not archive.exists()
+
+
+def test_ops_backup_execute_creates_verified_archive_and_checksum(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    archive = repo / "sidecar-backup.tgz"
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+    _create_sidecar_db(sidecar / "db.sqlite")
+    (sidecar / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    assert (
+        main(["ops", "backup", "--repo", str(repo), "--archive", str(archive), "--execute"])
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert f"backup archive: {archive.resolve()}" in output
+    assert archive.exists()
+    checksum_path = Path(f"{archive.resolve()}.sha256")
+    assert checksum_path.exists()
+    digest, filename = checksum_path.read_text(encoding="utf-8").strip().split("  ")
+    assert digest == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert filename == str(archive.resolve())
+    with tarfile.open(archive, "r:gz") as tar:
+        names = set(tar.getnames())
+    assert ".sidecar/db.sqlite" in names
+    assert ".sidecar/policy.yaml" in names
 
 
 def test_ops_backup_blocks_archive_inside_sidecar_without_writing_plan(
@@ -104,6 +144,92 @@ def test_ops_restore_writes_non_executing_sidecar_restore_plan(
         str(repo.resolve()),
     ]
     assert not staging.exists()
+
+
+def test_ops_restore_execute_verifies_archive_and_replaces_sidecar(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    archive = repo / "sidecar-backup.tgz"
+    staging = repo / "restore-check"
+    pre_restore = repo / ".sidecar.pre-restore"
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+    _create_sidecar_db(sidecar / "db.sqlite")
+    (sidecar / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+    assert (
+        main(["ops", "backup", "--repo", str(repo), "--archive", str(archive), "--execute"])
+        == 0
+    )
+    (sidecar / "policy.yaml").write_text("version: 2\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "ops",
+                "restore",
+                "--repo",
+                str(repo),
+                "--archive",
+                str(archive),
+                "--staging",
+                str(staging),
+                "--pre-restore",
+                str(pre_restore),
+                "--execute",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert f"restored sidecar: {sidecar.resolve()}" in output
+    assert (sidecar / "policy.yaml").read_text(encoding="utf-8") == "version: 1\n"
+    assert (pre_restore / "policy.yaml").read_text(encoding="utf-8") == "version: 2\n"
+    assert not staging.exists()
+
+
+def test_ops_restore_execute_is_blocked_by_read_only_kill_switch(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    archive = repo / "sidecar-backup.tgz"
+    staging = repo / "restore-check"
+    pre_restore = repo / ".sidecar.pre-restore"
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+    _create_sidecar_db(sidecar / "db.sqlite")
+    (sidecar / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+    assert (
+        main(["ops", "backup", "--repo", str(repo), "--archive", str(archive), "--execute"])
+        == 0
+    )
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "ops",
+                "restore",
+                "--repo",
+                str(repo),
+                "--archive",
+                str(archive),
+                "--staging",
+                str(staging),
+                "--pre-restore",
+                str(pre_restore),
+                "--execute",
+            ]
+        )
+        == 1
+    )
+
+    assert "restore blocked: read-only kill switch is enabled" in capsys.readouterr().out
+    assert (sidecar / "read-only.kill").exists()
+    assert not pre_restore.exists()
 
 
 def test_ops_restore_blocks_staging_and_pre_restore_inside_sidecar_without_writing_plan(

@@ -17,6 +17,12 @@ tugboat ops backup --repo . --archive "$backup"
 
 This writes `.sidecar/ops/backup-plan.json` with the archive, checksum, integrity-check, and status commands. Tugboat does not execute the plan; the operator remains responsible for running the approved commands in the target environment.
 
+When local execution is approved, Tugboat can create the archive, write the checksum, verify it, and check SQLite integrity:
+
+```bash
+tugboat ops backup --repo . --archive "$backup" --execute
+```
+
 Create a timestamped archive from the repository root:
 
 ```bash
@@ -51,6 +57,14 @@ sqlite3 "$staging/.sidecar/db.sqlite" "PRAGMA integrity_check;"
 ```
 
 This writes `.sidecar/ops/restore-plan.json` with the staging, integrity-check, sidecar move, status, and harness-check commands. Review the plan before replacing the current `.sidecar`.
+
+When local restore execution is approved, Tugboat verifies the archive checksum when present, extracts into the clean staging path, checks the staged SQLite database, moves the current sidecar to the pre-restore path, restores the staged sidecar, and removes staging:
+
+```bash
+tugboat ops restore --repo . --archive "$backup" --staging "$staging" --pre-restore "$pre_restore" --execute
+```
+
+Restore execution is blocked while `.sidecar/read-only.kill` exists.
 
 When the staging check passes, replace the current sidecar:
 

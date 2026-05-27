@@ -68,7 +68,12 @@ from tugboat.manifests import (
     validate_manifest_contracts,
 )
 from tugboat.mcp import run_stdio_server
-from tugboat.ops.backup import build_sidecar_backup_bundle, build_sidecar_restore_bundle
+from tugboat.ops.backup import (
+    build_sidecar_backup_bundle,
+    build_sidecar_restore_bundle,
+    execute_sidecar_backup,
+    execute_sidecar_restore,
+)
 from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy
@@ -301,6 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_backup = ops_subcommands.add_parser("backup")
     ops_backup.add_argument("--repo", required=True)
     ops_backup.add_argument("--archive", required=True)
+    ops_backup.add_argument("--execute", action="store_true")
     ops_migrate = ops_subcommands.add_parser("migrate")
     ops_migrate.add_argument("--repo", required=True)
     ops_migrate.add_argument("--apply", action="store_true")
@@ -325,6 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_restore.add_argument("--archive", required=True)
     ops_restore.add_argument("--staging", required=True)
     ops_restore.add_argument("--pre-restore", required=True)
+    ops_restore.add_argument("--execute", action="store_true")
     return parser
 
 
@@ -949,16 +956,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         try:
             bundle = build_sidecar_backup_bundle(repo=repo, archive_path=Path(args.archive))
+            archive_path = (
+                execute_sidecar_backup(repo=repo, archive_path=Path(args.archive))
+                if args.execute
+                else None
+            )
         except ValueError as error:
-            print(f"backup plan blocked: {error}")
+            print(f"backup blocked: {error}" if args.execute else f"backup plan blocked: {error}")
             return 1
         path = sidecar_dir(repo) / "ops" / "backup-plan.json"
         _write_ops_command_bundle(path, bundle.to_dict())
-        print(f"backup plan: {path}")
+        if archive_path is not None:
+            print(f"backup archive: {archive_path}")
+        else:
+            print(f"backup plan: {path}")
         return 0
 
     if args.command == "ops" and args.ops_command == "restore":
         repo = Path(args.repo)
+        if args.execute and _write_blocked_by_read_only(repo, "restore"):
+            return 1
         try:
             bundle = build_sidecar_restore_bundle(
                 repo=repo,
@@ -966,12 +983,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 staging_path=Path(args.staging),
                 pre_restore_path=Path(args.pre_restore),
             )
+            restored_path = (
+                execute_sidecar_restore(
+                    repo=repo,
+                    archive_path=Path(args.archive),
+                    staging_path=Path(args.staging),
+                    pre_restore_path=Path(args.pre_restore),
+                )
+                if args.execute
+                else None
+            )
         except ValueError as error:
-            print(f"restore plan blocked: {error}")
+            print(f"restore blocked: {error}" if args.execute else f"restore plan blocked: {error}")
             return 1
         path = sidecar_dir(repo) / "ops" / "restore-plan.json"
         _write_ops_command_bundle(path, bundle.to_dict())
-        print(f"restore plan: {path}")
+        if restored_path is not None:
+            print(f"restored sidecar: {restored_path}")
+        else:
+            print(f"restore plan: {path}")
         return 0
 
     parser.error(f"unknown command: {args.command}")
