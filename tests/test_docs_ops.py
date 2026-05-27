@@ -241,11 +241,12 @@ DOC_CONTRACTS = {
             "## Decision",
         ],
         "required_text": [
-            "Build/code artifact commit",
+            "exact release commit",
             "production release candidate",
             "proposal-only",
             "auto-apply remains disabled",
             "1099 tests and 90.02% coverage",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
             "approved_proposal_only",
             ".sidecar/ops/release-artifact-manifest.json",
         ],
@@ -258,10 +259,12 @@ DOC_CONTRACTS = {
             "## Decision",
         ],
         "required_text": [
-            "Build/code artifact commit reviewed",
+            "Build/code artifact reviewed",
+            "exact release commit",
             "proposal_only",
             "auto_apply: disabled",
             "1099 tests and 90.02% coverage",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
             "No open critical or high findings",
             "Not approved",
         ],
@@ -341,30 +344,29 @@ def test_dated_security_review_matches_release_evidence_commit() -> None:
     assert "local://release-smoke/2026-05-26 --approver" not in combined
 
 
-def test_production_release_candidate_evidence_matches_current_tree() -> None:
+def test_production_release_candidate_uses_current_head_manifest_shape() -> None:
     release_notes_path = REPO_ROOT / "docs/releases/production-candidate.md"
     security_review_path = REPO_ROOT / "docs/ops/security-review-production-candidate.md"
     release_notes = release_notes_path.read_text(encoding="utf-8")
     security_review = security_review_path.read_text(encoding="utf-8")
 
-    evidence_commit = _single_match(
-        r"Build/code artifact commit: `([0-9a-f]{7,40})`\.",
-        release_notes,
-    )
-    assert f"Build/code artifact commit reviewed: `{evidence_commit}`." in security_review
-    assert f"--commit {evidence_commit}" in release_notes
-    assert f"--commit {evidence_commit}" in security_review
+    assert '--commit "$(git rev-parse HEAD)"' in release_notes
+    assert '--commit "$(git rev-parse HEAD)"' in security_review
+    assert "$(git rev-parse --short HEAD)" in release_notes
+    assert "$(git rev-parse --short HEAD)" in security_review
     assert "PYTHONPATH=src python -m tugboat ci --repo .` passed with `ci: ok`" in release_notes
     assert "1099 tests and 90.02% coverage" in release_notes
     assert "1099 tests and 90.02% coverage" in security_review
+    assert "python -m pytest --cov=src --cov-report=term-missing -q" in release_notes
+    assert "python -m pytest --cov=src --cov-report=term-missing -q" in security_review
     assert ".sidecar/ops/release-artifact-manifest.json" in release_notes
     assert "Open Release Work" not in release_notes
     assert "auto_apply: disabled" in security_review
     assert "proposal_only" in security_review
-    assert evidence_commit != "c462115265a3bb0c0965b62d99757a48c7097f14"
-    assert _git("merge-base", "--is-ancestor", evidence_commit, "HEAD") == ""
-    recent_commits = _git("log", "--format=%H", "-12").splitlines()
-    assert evidence_commit in recent_commits
+    combined = f"{release_notes}\n{security_review}"
+    assert "1531caf0ee99d7c879b20f0b3e9b52d53010099f" not in combined
+    assert "e02fc0527c0dbac1fea04251579ba62a85fbe309" not in combined
+    assert "--cov=src/tugboat" not in combined
 
 
 def test_github_actions_ci_workflow_enforces_proposal_only_release_gates() -> None:
