@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import yaml
+
 from tugboat.artifacts import (
     ArtifactValidationError,
     SCHEMA_VERSION,
@@ -31,7 +33,7 @@ from tugboat.auto_apply import (
     VcsProof,
     evaluate_auto_apply,
 )
-from tugboat.config import load_policy
+from tugboat.config import DEFAULT_INSTRUCTION_FILES, load_policy
 from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.runner import (
     DaemonLoopConfig,
@@ -102,10 +104,55 @@ def _write_secret_scanned_json_artifact(path: Path, artifact_name: str, payload:
     path.write_text(text, encoding="utf-8")
 
 
+def _initialize_repo_policy(repo: Path) -> Path:
+    sidecar = sidecar_dir(repo)
+    policy_path = sidecar / "policy.yaml"
+    if policy_path.exists():
+        raise FileExistsError(".sidecar/policy.yaml already exists")
+    sidecar.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "version": 1,
+        "mode": "proposal_only",
+        "instruction_files": [
+            {
+                "path": item.path,
+                "kind": item.kind,
+                "precedence": item.precedence,
+                "protected": item.protected,
+            }
+            for item in DEFAULT_INSTRUCTION_FILES
+        ],
+        "auto_apply": {"enabled": False},
+        "llmff": {
+            "binary": "llmff",
+            "require_inspect": True,
+            "allow_network": False,
+        },
+        "mcp": {"allowed_repositories": [str(repo)]},
+    }
+    text = yaml.safe_dump(payload, sort_keys=False)
+    findings = scan_text(policy_path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
+    policy_path.write_text(text, encoding="utf-8")
+    (sidecar / ".gitignore").write_text(
+        "*\n"
+        "!.gitignore\n"
+        "!policy.yaml\n"
+        "!manifests/\n"
+        "!manifests/**\n",
+        encoding="utf-8",
+    )
+    return policy_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("doctor")
+
+    init = subcommands.add_parser("init")
+    init.add_argument("--repo", required=True)
 
     status = subcommands.add_parser("status")
     status.add_argument("--repo", required=True)
@@ -281,6 +328,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("tugboat: ok")
         print("mode: proposal_only")
         print("auto_apply: disabled")
+        return 0
+
+    if args.command == "init":
+        repo = Path(args.repo).resolve()
+        try:
+            policy_path = _initialize_repo_policy(repo)
+        except FileExistsError as error:
+            print(f"init blocked: {error}")
+            return 1
+        print(f"initialized: {policy_path.relative_to(repo).as_posix()}")
         return 0
 
     if args.command == "status":

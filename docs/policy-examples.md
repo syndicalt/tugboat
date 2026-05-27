@@ -2,6 +2,14 @@
 
 ## Proposal Only
 
+Create a proposal-only starter policy with:
+
+```bash
+tugboat init --repo .
+```
+
+The generated policy is intentionally conservative and does not overwrite existing policy files.
+
 `.sidecar/policy.yaml`:
 
 ```yaml

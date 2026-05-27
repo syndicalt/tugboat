@@ -29,9 +29,10 @@ The default posture should be proposal-only with auto-apply disabled.
 
 ## Initialize
 
-Index the current instruction corpus:
+Bootstrap proposal-only local policy, then index the current instruction corpus:
 
 ```bash
+tugboat init --repo .
 tugboat index --repo .
 ```
 
@@ -106,7 +107,7 @@ Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimizatio
 
 ## Read-Only MCP
 
-After allowlisting the repo in `.sidecar/policy.yaml`, attach MCP clients with the read-only profile:
+After `tugboat init --repo .`, attach MCP clients with the read-only profile:
 
 ```bash
 tugboat mcp stdio --repo . --read-only

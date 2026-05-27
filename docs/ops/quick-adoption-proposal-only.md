@@ -18,11 +18,12 @@ From the target repository root:
 
 ```bash
 tugboat doctor
+tugboat init --repo .
 tugboat index --repo .
 tugboat harness check --repo .
 ```
 
-If `tugboat doctor` does not report `proposal_only` and disabled auto-apply, stop and review policy before continuing.
+If `tugboat doctor` does not report `proposal_only` and disabled auto-apply, stop and review policy before continuing. `tugboat init --repo .` refuses to overwrite an existing `.sidecar/policy.yaml`; review any existing policy before continuing.
 
 ## No-Credentials Proposal Loop
 
