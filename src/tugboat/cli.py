@@ -65,7 +65,7 @@ from tugboat.optimization import (
     EpisodeOutcome,
     build_success_failure_minibatch,
 )
-from tugboat.paths import latest_run_dir, runs_dir, sidecar_dir
+from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
@@ -2409,7 +2409,9 @@ def _write_optimization_summary(repo: Path, run_dir: Path, *, suite_id: str) -> 
                 held_out_score=held_out_score,
             )
 
-    (run_dir / "optimization-summary.json").write_text(summary_text, encoding="utf-8")
+    optimization_summary_path = run_dir / "optimization-summary.json"
+    optimization_summary_path.write_text(summary_text, encoding="utf-8")
+    mark_private_file(optimization_summary_path)
     print(f"optimization: {decision}")
     return 0 if decision == "needs_review" else 1
 

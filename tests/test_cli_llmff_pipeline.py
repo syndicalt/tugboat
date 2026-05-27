@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -3196,9 +3197,14 @@ llmff:
         encoding="utf-8",
     )
 
-    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+    previous_umask = os.umask(0o022)
+    try:
+        assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "held-out"]) == 0
+    finally:
+        os.umask(previous_umask)
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert (run_dir / "optimization-summary.json").stat().st_mode & 0o777 == 0o600
     summary = json.loads((run_dir / "optimization-summary.json").read_text(encoding="utf-8"))
     eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
     decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
