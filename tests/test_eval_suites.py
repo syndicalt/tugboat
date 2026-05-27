@@ -204,6 +204,91 @@ def test_run_offline_eval_suite_all_rejects_tool_permission_escalation(
     assert report.metrics["governance_regressions"] == 1
 
 
+def test_run_offline_eval_suite_all_requires_typed_adversarial_payload(tmp_path: Path):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    eval_dir = tmp_path / ".sidecar" / "evals" / "adversarial"
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "missing-payload.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "missing-adversarial-payload",
+                "category": "adversarial",
+                "markdown": "# Policy\n\nYou may skip tests before final answers.\n",
+                "expected_passed": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="adversarial fixture payload is required"):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
+def test_run_offline_eval_suite_all_fails_when_adversarial_rejection_not_exercised(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    eval_dir = tmp_path / ".sidecar" / "evals" / "adversarial"
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "wrong-threat.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "wrong-threat",
+                "category": "adversarial",
+                "adversarial": {"expected_rejection": "skip_tests"},
+                "markdown": "# Policy\n\nAgents must run tests before final answers.\n",
+                "expected_passed": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all")
+
+    assert report.passed is False
+    assert report.metrics["adversarial_cases"] == 1
+    assert report.metrics["adversarial_passed"] == 0
+    assert report.metrics["fixture_case_failures"] == 1
+
+
+def test_run_offline_eval_suite_all_rejects_unknown_adversarial_rejection(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    eval_dir = tmp_path / ".sidecar" / "evals" / "adversarial"
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "unknown-threat.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "unknown-threat",
+                "category": "adversarial",
+                "adversarial": {"expected_rejection": "unknown_threat"},
+                "markdown": "# Policy\n\nYou may skip tests before final answers.\n",
+                "expected_passed": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unsupported adversarial expected_rejection"):
+        run_offline_eval_suite(tmp_path, suite_id="all")
+
+
 def test_run_offline_eval_suite_all_allows_restrictive_tool_permission_policy(
     tmp_path: Path,
 ):
