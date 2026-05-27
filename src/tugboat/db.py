@@ -395,6 +395,14 @@ class Store:
         if row is None:
             raise ValueError(f"{context} run_id does not reference runs")
 
+    def _require_episode(self, episode_id: int, *, context: str) -> None:
+        row = self.connection.execute(
+            "SELECT 1 FROM episodes WHERE id = ?",
+            (episode_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{context} episode_id does not reference episodes")
+
     def _require_candidate(self, candidate_id: int, *, context: str) -> None:
         row = self.connection.execute(
             "SELECT 1 FROM candidates WHERE id = ?",
@@ -493,6 +501,8 @@ class Store:
         run_dir: Path,
         episode_id: int | None = None,
     ) -> None:
+        if episode_id is not None:
+            self._require_episode(episode_id, context="run")
         now = _now()
         event = self.append_audit_event(
             "run.recorded",

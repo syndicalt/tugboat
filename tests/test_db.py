@@ -704,6 +704,27 @@ def test_insert_run_stores_audit_event_sequence(tmp_path: Path):
     assert payload == {"run_id": "run-1", "stage": "audit", "status": "completed"}
 
 
+def test_insert_run_rejects_missing_episode_parent_without_audit_event(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        with pytest.raises(ValueError, match="run episode_id does not reference episodes"):
+            store.insert_run(
+                run_id="run-1",
+                episode_id=999,
+                stage="audit",
+                manifest_hash="abc123",
+                status="running",
+                run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+            )
+
+        assert store.connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+        assert (
+            store.connection.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE event_type = 'run.recorded'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
 def test_insert_run_status_update_appends_new_event_without_overwriting_created_at(
     tmp_path: Path,
 ):
