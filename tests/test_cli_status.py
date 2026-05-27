@@ -273,7 +273,13 @@ def test_status_reports_unknown_exit_code_for_legacy_llmff_jobs(
             )
             """
         )
-        cursor = connection.execute(
+        connection.execute(
+            """
+            INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+            VALUES ('run.recorded', '{"run_id":"run-1","stage":"propose","status":"failed"}', '', 'legacy-run-hash')
+            """
+        )
+        llmff_cursor = connection.execute(
             """
             INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
             VALUES ('llmff_job.recorded', '{"run_id":"run-1"}', '', 'legacy-hash')
@@ -290,7 +296,7 @@ def test_status_reports_unknown_exit_code_for_legacy_llmff_jobs(
             INSERT INTO llmff_jobs(run_id, manifest_name, manifest_hash, status, audit_event_sequence)
             VALUES ('run-1', 'patch-propose.yaml', 'abc', 'failed', ?)
             """,
-            (cursor.lastrowid,),
+            (llmff_cursor.lastrowid,),
         )
         connection.commit()
 

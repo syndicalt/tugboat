@@ -46,6 +46,23 @@ def test_core_decision_tables_require_audit_event_sequence(tmp_path: Path):
             ), table
 
 
+def test_runs_require_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        columns = {
+            row[1]: row
+            for row in store.connection.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        foreign_keys = store.connection.execute("PRAGMA foreign_key_list(runs)").fetchall()
+
+        assert columns["audit_event_sequence"][3] == 1
+        assert any(
+            row[2] == "audit_events"
+            and row[3] == "audit_event_sequence"
+            and row[4] == "sequence"
+            for row in foreign_keys
+        )
+
+
 def test_store_initializes_roadmap_extension_tables(tmp_path: Path):
     with Store.open(tmp_path / "db.sqlite") as store:
         tables = store.table_names()
@@ -267,6 +284,87 @@ def test_store_rejects_legacy_orphan_audit_event_sequence(tmp_path: Path):
         Store.open(db_path)
 
 
+def test_store_backfills_legacy_runs_audit_event_sequence(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    with Store.open(db_path) as store:
+        event = store.append_audit_event(
+            "run.recorded",
+            {"run_id": "run-1", "stage": "audit", "status": "completed"},
+        )
+        store.connection.execute("ALTER TABLE runs RENAME TO runs_legacy")
+        store.connection.execute(
+            """
+            CREATE TABLE runs (
+              id TEXT PRIMARY KEY,
+              episode_id INTEGER,
+              stage TEXT NOT NULL,
+              manifest_hash TEXT NOT NULL,
+              status TEXT NOT NULL,
+              run_dir TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        store.connection.execute(
+            """
+            INSERT INTO runs(
+              id, episode_id, stage, manifest_hash, status, run_dir, created_at, updated_at
+            )
+            VALUES ('run-1', NULL, 'audit', 'abc123', 'completed', '.sidecar/runs/run-1',
+                    '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:01+00:00')
+            """
+        )
+        store.connection.execute("DROP TABLE runs_legacy")
+        store.connection.commit()
+
+    with Store.open(db_path) as store:
+        row = store.connection.execute(
+            """
+            SELECT runs.audit_event_sequence, audit_events.event_type
+            FROM runs
+            JOIN audit_events ON audit_events.sequence = runs.audit_event_sequence
+            WHERE runs.id = 'run-1'
+            """
+        ).fetchone()
+
+    assert row == (event.sequence, "run.recorded")
+
+
+def test_store_rejects_legacy_runs_without_reachable_record_event(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    with Store.open(db_path) as store:
+        store.connection.execute("ALTER TABLE runs RENAME TO runs_legacy")
+        store.connection.execute(
+            """
+            CREATE TABLE runs (
+              id TEXT PRIMARY KEY,
+              episode_id INTEGER,
+              stage TEXT NOT NULL,
+              manifest_hash TEXT NOT NULL,
+              status TEXT NOT NULL,
+              run_dir TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        store.connection.execute(
+            """
+            INSERT INTO runs(
+              id, episode_id, stage, manifest_hash, status, run_dir, created_at, updated_at
+            )
+            VALUES ('run-1', NULL, 'audit', 'abc123', 'completed', '.sidecar/runs/run-1',
+                    '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:01+00:00')
+            """
+        )
+        store.connection.execute("DROP TABLE runs_legacy")
+        store.connection.commit()
+
+    with pytest.raises(ValueError, match="runs.audit_event_sequence contains NULL"):
+        Store.open(db_path)
+
+
 def test_insert_core_decision_rows_without_provenance_backfill(tmp_path: Path):
     candidate = CandidatePatch(
         audit_id=1,
@@ -347,6 +445,81 @@ def test_insert_core_decision_rows_without_provenance_backfill(tmp_path: Path):
         "rollback.recorded",
     ]
     assert all(row[0] is not None for row in rows)
+
+
+def test_insert_run_stores_audit_event_sequence(tmp_path: Path):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="audit",
+            manifest_hash="abc123",
+            status="completed",
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+        )
+        row = store.connection.execute(
+            """
+            SELECT runs.audit_event_sequence, audit_events.event_type, audit_events.payload_json
+            FROM runs
+            JOIN audit_events ON audit_events.sequence = runs.audit_event_sequence
+            WHERE runs.id = 'run-1'
+            """
+        ).fetchone()
+
+    payload = json.loads(row[2])
+    assert row[0] is not None
+    assert row[1] == "run.recorded"
+    assert payload == {"run_id": "run-1", "stage": "audit", "status": "completed"}
+
+
+def test_insert_run_status_update_appends_new_event_without_overwriting_created_at(
+    tmp_path: Path,
+):
+    with Store.open(tmp_path / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="audit",
+            manifest_hash="abc123",
+            status="running",
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+        )
+        first = store.connection.execute(
+            """
+            SELECT created_at, audit_event_sequence
+            FROM runs
+            WHERE id = 'run-1'
+            """
+        ).fetchone()
+
+        store.insert_run(
+            run_id="run-1",
+            stage="audit",
+            manifest_hash="abc123",
+            status="completed",
+            run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
+        )
+        second = store.connection.execute(
+            """
+            SELECT created_at, status, audit_event_sequence
+            FROM runs
+            WHERE id = 'run-1'
+            """
+        ).fetchone()
+        events = store.connection.execute(
+            """
+            SELECT sequence, event_type, json_extract(payload_json, '$.status')
+            FROM audit_events
+            WHERE event_type = 'run.recorded'
+            ORDER BY sequence
+            """
+        ).fetchall()
+
+    assert second[0] == first[0]
+    assert second[1] == "completed"
+    assert second[2] != first[1]
+    assert events == [
+        (first[1], "run.recorded", "running"),
+        (second[2], "run.recorded", "completed"),
+    ]
 
 
 def test_update_candidate_state_moves_row_audit_link_to_state_update_event(tmp_path: Path):

@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS runs (
   status TEXT NOT NULL,
   run_dir TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  audit_event_sequence INTEGER NOT NULL REFERENCES audit_events(sequence)
 );
 CREATE TABLE IF NOT EXISTS audits (
   id INTEGER PRIMARY KEY,
@@ -299,7 +300,11 @@ ROADMAP_EXTENSION_TABLES: tuple[str, ...] = (
 )
 
 
-AUDITED_PROVENANCE_TABLES: tuple[str, ...] = (*CORE_DECISION_TABLES, *ROADMAP_EXTENSION_TABLES)
+AUDITED_PROVENANCE_TABLES: tuple[str, ...] = (
+    "runs",
+    *CORE_DECISION_TABLES,
+    *ROADMAP_EXTENSION_TABLES,
+)
 
 
 @dataclass(frozen=True)
@@ -346,6 +351,7 @@ class Store:
             )
             for table in AUDITED_PROVENANCE_TABLES:
                 _ensure_column(connection, table, "audit_event_sequence", "INTEGER")
+            _backfill_runs_audit_event_sequence(connection)
             connection.commit()
             _repair_audit_event_constraints(connection)
             connection.commit()
@@ -419,15 +425,55 @@ class Store:
         episode_id: int | None = None,
     ) -> None:
         now = _now()
-        self.connection.execute(
-            """
-            INSERT OR REPLACE INTO runs(id, episode_id, stage, manifest_hash, status, run_dir, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM runs WHERE id = ?), ?), ?)
-            """,
-            (run_id, episode_id, stage, manifest_hash, status, str(run_dir), run_id, now, now),
+        event = self.append_audit_event(
+            "run.recorded",
+            {"run_id": run_id, "stage": stage, "status": status},
         )
+        existing = self.connection.execute(
+            "SELECT created_at FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if existing is None:
+            self.connection.execute(
+                """
+                INSERT INTO runs(
+                  id, episode_id, stage, manifest_hash, status, run_dir,
+                  created_at, updated_at, audit_event_sequence
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    episode_id,
+                    stage,
+                    manifest_hash,
+                    status,
+                    str(run_dir),
+                    now,
+                    now,
+                    event.sequence,
+                ),
+            )
+        else:
+            self.connection.execute(
+                """
+                UPDATE runs
+                SET episode_id = ?, stage = ?, manifest_hash = ?, status = ?,
+                    run_dir = ?, updated_at = ?, audit_event_sequence = ?
+                WHERE id = ?
+                """,
+                (
+                    episode_id,
+                    stage,
+                    manifest_hash,
+                    status,
+                    str(run_dir),
+                    now,
+                    event.sequence,
+                    run_id,
+                ),
+            )
         self.connection.commit()
-        self.append_audit_event("run.recorded", {"run_id": run_id, "stage": stage, "status": status})
 
     def record_llmff_run(
         self,
@@ -1327,6 +1373,47 @@ def _requires_audit_event_constraint_repair(connection: sqlite3.Connection, tabl
         and str(row[4]) == "sequence"
         for row in connection.execute(f"PRAGMA foreign_key_list({_quote_identifier(table)})").fetchall()
     )
+
+
+def _backfill_runs_audit_event_sequence(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    if "audit_event_sequence" not in columns:
+        return
+    rows = connection.execute(
+        """
+        SELECT id, stage, status
+        FROM runs
+        WHERE audit_event_sequence IS NULL
+        ORDER BY created_at, id
+        """
+    ).fetchall()
+    for row in rows:
+        event = connection.execute(
+            """
+            SELECT sequence
+            FROM audit_events
+            WHERE event_type = 'run.recorded'
+              AND json_extract(payload_json, '$.run_id') = ?
+              AND json_extract(payload_json, '$.stage') = ?
+              AND json_extract(payload_json, '$.status') = ?
+            ORDER BY sequence DESC
+            LIMIT 1
+            """,
+            (str(row[0]), str(row[1]), str(row[2])),
+        ).fetchone()
+        if event is None:
+            continue
+        connection.execute(
+            """
+            UPDATE runs
+            SET audit_event_sequence = ?
+            WHERE id = ?
+            """,
+            (int(event[0]), str(row[0])),
+        )
 
 
 def _validate_audit_event_reachability(connection: sqlite3.Connection, table: str) -> None:
