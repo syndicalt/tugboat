@@ -1453,8 +1453,9 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
     assert "rationale" not in serialized_payload
 
 
-def test_auto_apply_rejects_class_a_candidate_touching_forbidden_policy_domain(
+def test_auto_apply_blocks_underclassified_class_a_candidate_touching_policy_domain(
     tmp_path: Path,
+    capsys,
 ):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A")
@@ -1504,20 +1505,7 @@ def test_auto_apply_rejects_class_a_candidate_touching_forbidden_policy_domain(
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     assert not (run_dir / "apply-plan.json").exists()
     assert not (run_dir / "auto-apply-approval.json").exists()
-    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
-        event = connection.execute(
-            """
-            SELECT payload_json FROM audit_events
-            WHERE event_type = 'auto_apply.decided'
-            ORDER BY sequence DESC
-            LIMIT 1
-            """
-        ).fetchone()
-
-    assert event is not None
-    event_payload = json.loads(event[0])
-    assert event_payload["eligible"] is False
-    assert "forbidden_category:provider_routing" in event_payload["reasons"]
+    assert "apply blocked: Class C candidates require explicit human review" in capsys.readouterr().out
 
 
 def test_auto_apply_respects_policy_allowed_risk_classes(tmp_path: Path):

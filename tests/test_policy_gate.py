@@ -384,6 +384,106 @@ def test_policy_gate_rejects_class_b_over_risk_specific_changed_line_budget(
     assert "risk_class_changed_lines_exceeded" in decision.reasons
 
 
+def test_policy_gate_escalates_underclassified_network_section_to_class_c_review(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Network\n\nUse local fixtures.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Network\n"
+            " \n"
+            " Use local fixtures.\n"
+            "+Clarify local-only expectations.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Network",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is True
+    assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+    assert decision.auto_apply_eligible is False
+
+
+def test_policy_gate_escalates_normative_deletion_to_class_c_review(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Notes\n\nKeep local wording.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,2 @@\n"
+            " # Notes\n"
+            " \n"
+            "-Keep local wording.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "delete",
+                "file": "CODEX.md",
+                "section": "Notes",
+                "changed_lines": 1,
+                "normative_changes": 1,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is True
+    assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+    assert decision.auto_apply_eligible is False
+
+
+def test_policy_gate_keeps_class_a_typo_candidate_auto_apply_eligible(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Notes\n\nUse local fixture.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,3 @@\n"
+            " # Notes\n"
+            " \n"
+            "-Use local fixture.\n"
+            "+Use local fixtures.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "replace",
+                "file": "CODEX.md",
+                "section": "Typo Fix",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is True
+    assert decision.review_required_reasons == ()
+    assert decision.auto_apply_eligible is True
+
+
 def test_policy_gate_rejects_markdown_candidates_with_invalid_control_chars(
     tmp_path: Path,
 ):

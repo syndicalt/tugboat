@@ -104,6 +104,26 @@ GOVERNANCE_TERMS = frozenset(
         "permission",
     }
 )
+RESTRICTED_POLICY_DOMAIN_TERMS = frozenset(
+    {
+        "approval",
+        "credential",
+        "deploy",
+        "deployment",
+        "memory",
+        "model",
+        "network",
+        "permission",
+        "permissions",
+        "policy",
+        "provider",
+        "sandbox",
+        "secret",
+        "secrets",
+        "security",
+        "sidecar",
+    }
+)
 PROTECTED_HEADING_TERMS = frozenset(
     {
         "approval",
@@ -235,7 +255,10 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("missing_trusted_source")
     if len(candidate.sources) == 1 and not candidate.sources[0].trusted:
         found_reasons.add("single_untrusted_source")
-    risk_class = _risk_class_key(candidate.risk_class)
+    risk_class = _stronger_risk_class_key(
+        _risk_class_key(candidate.risk_class),
+        _derived_risk_class_key(candidate),
+    )
     risk_class_budget = _risk_class_changed_line_budget(policy, risk_class)
     if risk_class_budget is not None and changed_line_count > risk_class_budget:
         found_reasons.add("risk_class_changed_lines_exceeded")
@@ -265,6 +288,65 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
 def _risk_class_key(risk_class: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", risk_class.strip().lower()).strip("_")
     return RISK_CLASS_ALIASES.get(normalized, normalized)
+
+
+def _stronger_risk_class_key(candidate_class: str, derived_class: str) -> str:
+    if _risk_class_rank(derived_class) > _risk_class_rank(candidate_class):
+        return derived_class
+    return candidate_class
+
+
+def _risk_class_rank(risk_class: str) -> int:
+    if risk_class in PROHIBITED_RISK_CLASSES:
+        return 4
+    if risk_class in RESTRICTED_RISK_CLASSES:
+        return 3
+    if risk_class in {"b", "class_b"}:
+        return 2
+    if risk_class in {"a", "class_a"}:
+        return 1
+    return 0
+
+
+def _derived_risk_class_key(candidate: CandidatePatch) -> str:
+    derived = ""
+    if _metadata_touches_restricted_policy_domain(candidate):
+        derived = _stronger_risk_class_key(derived, "class_c")
+    if _metadata_deletes_normative_instruction(candidate):
+        derived = _stronger_risk_class_key(derived, "class_c")
+    return derived
+
+
+def _metadata_touches_restricted_policy_domain(candidate: CandidatePatch) -> bool:
+    for metadata in candidate.bounded_edit_metadata:
+        values = (
+            candidate.base_file,
+            str(metadata.get("file", "")),
+            str(metadata.get("section", "")),
+        )
+        if any(_has_restricted_policy_domain(value) for value in values):
+            return True
+    return False
+
+
+def _has_restricted_policy_domain(value: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.lower())
+    terms = set(normalized.split())
+    return bool(terms & RESTRICTED_POLICY_DOMAIN_TERMS)
+
+
+def _metadata_deletes_normative_instruction(candidate: CandidatePatch) -> bool:
+    for metadata in candidate.bounded_edit_metadata:
+        operator = str(metadata.get("operator", "")).strip().lower()
+        if operator not in {"delete", "remove"}:
+            continue
+        try:
+            normative_changes = int(metadata.get("normative_changes", 0))
+        except (TypeError, ValueError):
+            normative_changes = 0
+        if normative_changes > 0:
+            return True
+    return False
 
 
 def _risk_class_changed_line_budget(policy: Policy, risk_class: str) -> int | None:
