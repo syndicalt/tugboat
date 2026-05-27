@@ -3641,8 +3641,12 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
     rollback_plan = _relative_repo_path(repo, path)
     _write_secret_scanned_json_artifact(path, "rollback-plan.json", payload)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rollback_decision_id = _latest_decision_id_for_candidate(
+            store,
+            candidate_id=int(apply_plan["candidate_id"]),
+        )
         store.record_rollback(
-            decision_id=str(apply_plan["decision_id"]),
+            decision_id=str(rollback_decision_id),
             candidate_id=int(apply_plan["candidate_id"]),
             reason=f"rollback decision {apply_plan['decision_id']}",
             revert_commit=revert_commit,
@@ -3684,6 +3688,22 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                 target_state=JobState.ROLLED_BACK,
             )
     return path
+
+
+def _latest_decision_id_for_candidate(store: Store, *, candidate_id: int) -> int:
+    row = store.connection.execute(
+        """
+        SELECT id
+        FROM decisions
+        WHERE candidate_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (candidate_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"candidate has no decision: {candidate_id}")
+    return int(row[0])
 
 
 def _transition_originating_daemon_job(

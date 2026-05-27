@@ -1248,8 +1248,32 @@ def test_rollback_execute_reverts_applied_commit_and_audits_change(tmp_path: Pat
     assert rollback["pre_hashes"] == apply_plan["pre_hashes"]
     assert rollback["post_rollback_hashes"] == {"CODEX.md": _hash(repo / "CODEX.md")}
     assert rollback["restored_pre_hashes"] is True
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
+    decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    assert decision_trace["decision"]["decision"] == "applied"
+    assert decision_trace["decision"]["applied_commit"] == apply_plan["applied_commit"]
+    assert decision_trace["decision"]["rollback_ref"] == json.dumps(
+        apply_plan["rollback_command"],
+        sort_keys=True,
+    )
+    assert decision_trace["artifacts"]["apply_plan"] == (
+        ".sidecar/runs/20260525T000000000000Z/apply-plan.json"
+    )
+    assert decision_trace["artifacts"]["provenance_bundle"] == (
+        ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json"
+    )
+    assert decision_trace["artifacts"]["rollback_plan"] == (
+        ".sidecar/runs/20260525T000000000000Z/rollback-plan.json"
+    )
+    assert decision_trace["rollbacks"][0]["executed"] is True
+    assert decision_trace["rollbacks"][0]["revert_commit"] == rollback["revert_commit"]
+    assert decision_trace["rollbacks"][0]["post_rollback_eval_result"] == {
+        "executed": True,
+        "restored_pre_hashes": True,
+        "target_files": ["CODEX.md"],
+    }
     assert rollback_row == (
-        "20260525T000000000000Z",
+        str(decision_trace["decision"]["decision_id"]),
         7,
         "rollback decision 20260525T000000000000Z",
         rollback["revert_commit"],
