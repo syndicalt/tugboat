@@ -5293,6 +5293,11 @@ llmff:
         audit_collection["reports"][0]["source_refs"][0],
         audit_collection["reports"][1]["evidence_refs"][0],
     ]
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", run_dir.name]) == 0
+    decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    assert decision_trace["artifacts"]["batch_audit_reports"] == (
+        f".sidecar/runs/{run_dir.name}/batch-audit-reports.json"
+    )
     assert batch == {
         "schema_version": 1,
         "held_out_suite": "held-out",

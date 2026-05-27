@@ -365,6 +365,7 @@ def _artifact_refs(repo: Path, run_dir: Path) -> dict[str, str]:
         ("audit_report", run_dir / "audit.json"),
         ("audit_raw", run_dir / "audit.raw.json"),
         ("evidence_ids_raw", run_dir / "evidence-ids.raw.json"),
+        ("batch_audit_reports", run_dir / "batch-audit-reports.json"),
         ("instruction_index_raw", run_dir / "instruction-index.raw.json"),
         ("drift_raw", run_dir / "drift.raw.json"),
         ("optimizer_notes_raw", run_dir / "optimizer-notes.raw.json"),
