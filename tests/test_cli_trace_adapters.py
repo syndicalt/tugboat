@@ -9,6 +9,8 @@ from pathlib import Path
 from tugboat.audit.pipeline import detect_trace_format
 from tugboat.cli import main
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
 
 def _event_rows(repo: Path) -> list[tuple[str, str]]:
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
@@ -374,6 +376,66 @@ def test_audit_cli_auto_detects_codex_response_item_trace(tmp_path: Path):
     ]
     assert json.loads(rows[1][1])["tool"] == "exec_command"
     assert json.loads(rows[2][1])["tool"] == "exec_command"
+
+
+def test_audit_cli_ingests_codex_local_session_export_fixture(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    original = "# Rules\n\nUse tests.\n"
+    (repo / "CODEX.md").write_text(original, encoding="utf-8")
+    trace = FIXTURES / "traces" / "codex-local-session-export.jsonl"
+
+    assert detect_trace_format(trace) == "codex"
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    rows = _event_rows(repo)
+    assert [event_type for event_type, _ in rows] == [
+        "instruction_snapshot",
+        "user_request",
+        "tool_call",
+        "tool_result",
+        "test_result",
+        "tool_call",
+        "diff",
+        "tool_result",
+        "final_answer",
+    ]
+    assert json.loads(rows[0][1]) == {
+        "type": "instruction_snapshot",
+        "source": "CODEX.md",
+        "text": original,
+    }
+    assert json.loads(rows[4][1]) == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "command": "pytest tests/test_harness.py -q",
+        "source_tool": "exec_command",
+        "call_id": "call_test_1",
+        "derived_from": "call_test_1",
+    }
+    assert json.loads(rows[6][1])["path"] == "CODEX.md"
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    evidence_ids = {event["evidence_id"] for event in canonical["events"]}
+    assert set(audit["evidence_refs"]).issubset(evidence_ids)
+    assert canonical["request"] == "Fix the regression and keep the harness guidance test-backed."
+    assert canonical["final_answer"] == "Implemented the harness guidance change and verified the focused test."
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
 
 
 def test_audit_cli_ingests_codex_custom_tool_response_items(tmp_path: Path):
