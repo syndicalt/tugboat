@@ -22,6 +22,7 @@ from tugboat.optimization import (
     OptimizationMemory,
     budget_reasons_for_bounded_edit_metadata,
 )
+from tugboat.patches import apply_unified_diff
 from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.propose.service import write_candidate
@@ -196,7 +197,6 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         run.output_paths["candidate_patch"],
         "candidate.raw.json",
     )
-    validate_json_artifact("candidate.raw.json", payload)
     audit_evidence_refs = _audit_evidence_refs(run_dir)
     if "proposal_rationale" in run.output_paths:
         rationale_payload = load_json_object_artifact(
@@ -208,6 +208,8 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
             audit_evidence_refs,
             rationale_payload,
         )
+    payload = _select_candidate_payload(repo, run_dir, payload)
+    validate_json_artifact("candidate.raw.json", payload)
     _validate_reflections_from_payload(payload)
     _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
     candidate = _candidate_from_payload(payload, audit_id=audit_id)
@@ -217,6 +219,172 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         canonical_evidence_trusts=_canonical_evidence_trusts(run_dir),
     )
     return candidate
+
+
+def _select_candidate_payload(repo: Path, run_dir: Path, payload: dict[str, object]) -> dict[str, object]:
+    if "candidates" not in payload:
+        return payload
+    validate_json_artifact("candidate-set.raw.json", payload)
+    candidate_set_path = run_dir / "candidate-set.raw.json"
+    _write_private_json_artifact(candidate_set_path, "candidate-set.raw.json", payload)
+    raw_candidates = payload["candidates"]
+    if not isinstance(raw_candidates, list):
+        raise ValueError("candidate-set.raw.json candidates must be a JSON list")
+    selected_payload, ranking = _rank_and_merge_candidate_payloads(repo, raw_candidates)
+    _write_private_json_artifact(run_dir / "candidate-ranking.json", "candidate-ranking.json", ranking)
+    _write_private_json_artifact(run_dir / "candidate.raw.json", "candidate.raw.json", selected_payload)
+    return selected_payload
+
+
+def _rank_and_merge_candidate_payloads(
+    repo: Path,
+    raw_candidates: list[object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    candidates = [
+        candidate for candidate in raw_candidates if isinstance(candidate, dict)
+    ]
+    if not candidates:
+        raise ValueError("candidate-set.raw.json candidates must contain JSON objects")
+    selected: list[dict[str, object]] = []
+    rejected: list[dict[str, object]] = []
+    for candidate in candidates:
+        candidate_id = str(candidate.get("candidate_id", f"candidate-{len(selected) + len(rejected) + 1}"))
+        candidate_reasons = _candidate_set_merge_rejection_reasons(repo, selected, candidate)
+        if candidate_reasons:
+            rejected.append({"candidate_id": candidate_id, "reasons": candidate_reasons})
+            continue
+        selected.append(candidate)
+    if not selected:
+        selected = [candidates[0]]
+        rejected = [
+            {"candidate_id": str(candidate.get("candidate_id", f"candidate-{index}")), "reasons": ["not_selected"]}
+            for index, candidate in enumerate(candidates[1:], start=2)
+        ]
+    merged_payload = _merged_candidate_payload(repo, selected)
+    ranking = {
+        "schema_version": SCHEMA_VERSION,
+        "selected_candidate_ids": [
+            str(candidate.get("candidate_id", f"candidate-{index}"))
+            for index, candidate in enumerate(selected, start=1)
+        ],
+        "merged": len(selected) > 1,
+        "rejected_candidates": rejected,
+    }
+    return merged_payload, ranking
+
+
+def _candidate_set_merge_rejection_reasons(
+    repo: Path,
+    selected: list[dict[str, object]],
+    candidate: dict[str, object],
+) -> list[str]:
+    if not selected:
+        return []
+    first = selected[0]
+    reasons: list[str] = []
+    if candidate.get("base_file") != first.get("base_file"):
+        reasons.append("base_file_mismatch")
+    if candidate.get("base_hash") != first.get("base_hash"):
+        reasons.append("base_hash_mismatch")
+    existing_sections = {
+        (str(item.get("file")), str(item.get("section")))
+        for selected_candidate in selected
+        for item in selected_candidate.get("bounded_edit_metadata", [])
+        if isinstance(item, dict)
+    }
+    candidate_sections = {
+        (str(item.get("file")), str(item.get("section")))
+        for item in candidate.get("bounded_edit_metadata", [])
+        if isinstance(item, dict)
+    }
+    if existing_sections & candidate_sections:
+        reasons.append("incompatible_bounded_edit")
+    if not reasons and _combined_diff_applies(repo, [*selected, candidate]) is None:
+        reasons.append("diffs_do_not_compose")
+    return reasons
+
+
+def _merged_candidate_payload(repo: Path, candidates: list[dict[str, object]]) -> dict[str, object]:
+    if len(candidates) == 1:
+        payload = dict(candidates[0])
+        payload.pop("candidate_id", None)
+        return payload
+    combined_diff = _combined_diff_applies(repo, candidates)
+    if combined_diff is None:
+        raise ValueError("candidate-set.raw.json selected diffs do not compose")
+    first = candidates[0]
+    return {
+        "base_file": str(first["base_file"]),
+        "base_hash": str(first["base_hash"]),
+        "diff": combined_diff,
+        "risk_class": str(first["risk_class"]),
+        "rationale": " ".join(str(candidate["rationale"]) for candidate in candidates),
+        "expected_behavior_change": " ".join(
+            str(candidate["expected_behavior_change"]) for candidate in candidates
+        ),
+        "evals_required": _unique_json_strings(
+            item for candidate in candidates for item in candidate.get("evals_required", [])
+        ),
+        "rollback_plan": list(first.get("rollback_plan", [])),
+        "sources": _unique_sources(candidates),
+        "reflections": [
+            reflection
+            for candidate in candidates
+            for reflection in candidate.get("reflections", [])
+            if isinstance(reflection, dict)
+        ],
+        "bounded_edit_metadata": [
+            item
+            for candidate in candidates
+            for item in candidate.get("bounded_edit_metadata", [])
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _combined_diff_applies(repo: Path, candidates: list[dict[str, object]]) -> str | None:
+    if not candidates:
+        return None
+    base_file = str(candidates[0].get("base_file", ""))
+    base_path = repo / base_file
+    if not base_path.exists():
+        return None
+    base_text = base_path.read_text(encoding="utf-8")
+    combined_diff = _combine_unified_diffs(base_file, [str(candidate.get("diff", "")) for candidate in candidates])
+    return combined_diff if apply_unified_diff(base_text, combined_diff) is not None else None
+
+
+def _combine_unified_diffs(base_file: str, diffs: list[str]) -> str:
+    body: list[str] = []
+    for diff in diffs:
+        for line in diff.splitlines():
+            if line.startswith(("---", "+++")):
+                continue
+            body.append(line)
+    return f"--- a/{base_file}\n+++ b/{base_file}\n" + "\n".join(body) + "\n"
+
+
+def _unique_json_strings(items) -> list[str]:
+    result: list[str] = []
+    for item in items:
+        value = str(item)
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _unique_sources(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    seen: set[tuple[str, bool]] = set()
+    for candidate in candidates:
+        for source in candidate.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            key = (str(source.get("source_id", "")), bool(source.get("trusted", False)))
+            if key not in seen:
+                seen.add(key)
+                result.append({"source_id": key[0], "trusted": key[1]})
+    return result
 
 
 def _audit_evidence_refs(run_dir: Path) -> set[str]:

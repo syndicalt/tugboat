@@ -371,6 +371,123 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "candidate-set.raw.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["candidates"],
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "candidate_id",
+                        "base_file",
+                        "base_hash",
+                        "diff",
+                        "risk_class",
+                        "rationale",
+                        "expected_behavior_change",
+                        "evals_required",
+                        "rollback_plan",
+                        "sources",
+                        "bounded_edit_metadata",
+                    ],
+                    "properties": {
+                        "candidate_id": {"type": "string"},
+                        "base_file": {"type": "string"},
+                        "base_hash": {"type": "string"},
+                        "diff": {"type": "string"},
+                        "risk_class": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "expected_behavior_change": {"type": "string"},
+                        "evals_required": {"type": "array", "items": {"type": "string"}},
+                        "rollback_plan": {"type": "array", "items": {"type": "string"}},
+                        "sources": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "required": ["source_id", "trusted"],
+                                "properties": {
+                                    "source_id": {"type": "string"},
+                                    "trusted": {"type": "boolean"},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                        "reflections": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["source_ref", "summary"],
+                                "properties": {
+                                    "source_ref": {"type": "string"},
+                                    "summary": {"type": "string"},
+                                    "recurring_failure_patterns": {"type": "array", "items": {"type": "string"}},
+                                    "preserved_success_patterns": {"type": "array", "items": {"type": "string"}},
+                                    "affected_instruction_chunks": {"type": "array", "items": {"type": "string"}},
+                                    "proposed_root_cause": {"type": "string"},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                        "bounded_edit_metadata": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [
+                                    "operator",
+                                    "file",
+                                    "section",
+                                    "changed_lines",
+                                    "normative_changes",
+                                ],
+                                "properties": {
+                                    "operator": {"type": "string", "enum": list(BOUNDED_EDIT_OPERATORS)},
+                                    "file": {"type": "string"},
+                                    "section": {"type": "string"},
+                                    "changed_lines": {"type": "integer"},
+                                    "normative_changes": {"type": "integer"},
+                                },
+                            },
+                        },
+                        "pending_audit_eval_definition_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    },
+    "candidate-ranking.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "selected_candidate_ids", "merged", "rejected_candidates"],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "selected_candidate_ids": {"type": "array", "items": {"type": "string"}},
+            "merged": {"type": "boolean"},
+            "rejected_candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["candidate_id", "reasons"],
+                    "properties": {
+                        "candidate_id": {"type": "string"},
+                        "reasons": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    },
     "drift.raw.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",

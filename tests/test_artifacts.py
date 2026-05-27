@@ -339,6 +339,51 @@ def test_validate_candidate_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_candidate_set_raw_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "candidate-set.raw.json",
+        {
+            "candidates": [
+                {
+                    "candidate_id": "testing",
+                    "base_file": "CODEX.md",
+                    "base_hash": "abc123",
+                    "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use tests.\n",
+                    "risk_class": "instruction_clarification",
+                    "rationale": "Preserve regression guidance.",
+                    "expected_behavior_change": "Agents keep regression guidance during bug fixes.",
+                    "evals_required": ["governance-regression"],
+                    "rollback_plan": ["revert generated diff"],
+                    "sources": [{"source_id": "ev_fake", "trusted": True}],
+                    "bounded_edit_metadata": [
+                        {
+                            "operator": "add",
+                            "file": "CODEX.md",
+                            "section": "Testing",
+                            "changed_lines": 1,
+                            "normative_changes": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+
+def test_validate_candidate_ranking_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "candidate-ranking.json",
+        {
+            "schema_version": 1,
+            "selected_candidate_ids": ["testing", "review"],
+            "merged": True,
+            "rejected_candidates": [
+                {"candidate_id": "approval", "reasons": ["incompatible_bounded_edit"]}
+            ],
+        },
+    )
+
+
 def test_validate_candidate_raw_artifact_rejects_empty_sources():
     with pytest.raises(ArtifactValidationError, match="sources"):
         validate_json_artifact(

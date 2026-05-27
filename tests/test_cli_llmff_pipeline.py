@@ -22,6 +22,7 @@ def _write_fake_llmff(
     sources: object | None = None,
     bounded_edit_metadata: object | None = None,
     candidate_overrides: dict[str, object] | None = None,
+    candidate_set: object | None = None,
     audit_report: object | None = None,
     evidence_ids: object | None = None,
     instruction_index: object | None = None,
@@ -137,6 +138,7 @@ FAIL_MANIFEST = __FAIL_MANIFEST__
 SOURCES = __SOURCES__
 BOUNDED_EDIT_METADATA = __BOUNDED_EDIT_METADATA__
 CANDIDATE_OVERRIDES = __CANDIDATE_OVERRIDES__
+CANDIDATE_SET = __CANDIDATE_SET__
 AUDIT_REPORT = __AUDIT_REPORT__
 EVIDENCE_IDS = __EVIDENCE_IDS__
 INSTRUCTION_INDEX = __INSTRUCTION_INDEX__
@@ -227,6 +229,7 @@ if args[:1] == ["run"]:
                 DRIFT_CLUSTERS = bind_default_evidence_ids(DRIFT_CLUSTERS)
                 OPTIMIZER_NOTES = bind_default_evidence_ids(OPTIMIZER_NOTES)
                 PROPOSAL_RATIONALE = bind_default_evidence_ids(PROPOSAL_RATIONALE)
+                CANDIDATE_SET = bind_default_evidence_ids(CANDIDATE_SET)
                 REFLECTIONS = bind_default_evidence_ids(REFLECTIONS)
                 SOURCES = bind_default_evidence_ids(SOURCES)
     trace.write_text('{"event":"step","name":"episode-audit"}\\n', encoding="utf-8")
@@ -287,6 +290,9 @@ if args[:1] == ["run"]:
         if INVALID_JSON_OUTPUT == "candidate_patch":
             outputs["candidate_patch"].write_text("{not json\\n", encoding="utf-8")
             raise SystemExit(0)
+        if CANDIDATE_SET is not None:
+            outputs["candidate_patch"].write_text(json.dumps(CANDIDATE_SET) + "\\n", encoding="utf-8")
+            raise SystemExit(0)
         candidate_patch = {
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
@@ -335,6 +341,8 @@ raise SystemExit(64)
             "__BOUNDED_EDIT_METADATA__", repr(bounded_edit_metadata)
         ).replace(
             "__CANDIDATE_OVERRIDES__", repr(candidate_overrides)
+        ).replace(
+            "__CANDIDATE_SET__", repr(candidate_set)
         ).replace("__AUDIT_REPORT__", repr(audit_report)).replace(
             "__EVIDENCE_IDS__", repr(evidence_ids)
         ).replace(
@@ -1350,6 +1358,190 @@ llmff:
         candidate_edit[4],
     )
     assert candidate_edit[4] is not None
+
+
+def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    candidate_set = {
+        "candidates": [
+            {
+                "candidate_id": "testing",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add regression test guidance.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Testing guidance is missing.",
+                "expected_behavior_change": "Agents add regression tests.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Testing",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+            {
+                "candidate_id": "review",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add review checklist guidance.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Review guidance is missing.",
+                "expected_behavior_change": "Agents preserve review checklists.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": "ev_fake", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Review",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+        ]
+    }
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", candidate_set=candidate_set)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    ranking = json.loads((run_dir / "candidate-ranking.json").read_text(encoding="utf-8"))
+    diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
+
+    assert "Add regression test guidance." in diff
+    assert "Add review checklist guidance." in diff
+    assert candidate["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Testing",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        },
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Review",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        },
+    ]
+    assert ranking == {
+        "schema_version": 1,
+        "selected_candidate_ids": ["testing", "review"],
+        "merged": True,
+        "rejected_candidates": [],
+    }
+
+
+def test_propose_candidate_set_rejects_incompatible_bounded_edit(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    base_candidate = {
+        "base_file": "CODEX.md",
+        "base_hash": base_hash,
+        "risk_class": "instruction_clarification",
+        "expected_behavior_change": "Agents add regression tests.",
+        "evals_required": ["governance-regression"],
+        "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+        "sources": [{"source_id": "ev_fake", "trusted": True}],
+    }
+    candidate_set = {
+        "candidates": [
+            {
+                **base_candidate,
+                "candidate_id": "testing-a",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add regression test guidance.\n",
+                "rationale": "Testing guidance is missing.",
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Testing",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+            {
+                **base_candidate,
+                "candidate_id": "testing-b",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add duplicate testing guidance.\n",
+                "rationale": "Testing guidance should be duplicated.",
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "annotate",
+                        "file": "CODEX.md",
+                        "section": "Testing",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+        ]
+    }
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", candidate_set=candidate_set)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    ranking = json.loads((run_dir / "candidate-ranking.json").read_text(encoding="utf-8"))
+    diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
+
+    assert "Add regression test guidance." in diff
+    assert "Add duplicate testing guidance." not in diff
+    assert ranking == {
+        "schema_version": 1,
+        "selected_candidate_ids": ["testing-a"],
+        "merged": False,
+        "rejected_candidates": [
+            {"candidate_id": "testing-b", "reasons": ["incompatible_bounded_edit"]}
+        ],
+    }
 
 
 def test_propose_does_not_publish_needs_review_state_before_policy_artifact_is_durable(
