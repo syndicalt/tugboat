@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar
 
+from tugboat import __version__
 from tugboat.artifacts import validate_json_artifact
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
@@ -705,10 +706,28 @@ def list_mcp_tools() -> list[dict[str, Any]]:
     ]
 
 
-def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any]:
+def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any] | None:
     request_id = request.get("id")
     method = request.get("method")
     try:
+        if method == "initialize":
+            params = request.get("params", {})
+            protocol_version = (
+                str(params.get("protocolVersion"))
+                if isinstance(params, dict) and params.get("protocolVersion")
+                else "2024-11-05"
+            )
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "protocolVersion": protocol_version,
+                    "capabilities": {"tools": {"listChanged": False}},
+                    "serverInfo": {"name": "tugboat", "version": __version__},
+                },
+            }
+        if method == "notifications/initialized":
+            return None
         if method == "tools/list":
             return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": list_mcp_tools()}}
         if method == "tools/call":
@@ -777,8 +796,9 @@ def run_stdio_server(input_stream, output_stream) -> int:
                 response = _jsonrpc_error(None, -32600, "request must be an object")
             else:
                 response = handle_jsonrpc_request(request)
-        output_stream.write(json.dumps(response, sort_keys=True) + "\n")
-        output_stream.flush()
+        if response is not None:
+            output_stream.write(json.dumps(response, sort_keys=True) + "\n")
+            output_stream.flush()
     return 0
 
 

@@ -2551,6 +2551,55 @@ def test_mcp_jsonrpc_redacts_secret_bearing_tool_results(
     assert serialized.count("[REDACTED:openai_api_key]") == 2
 
 
+def test_mcp_stdio_supports_initialize_handshake_and_initialized_notification():
+    output = io.StringIO()
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "codex", "version": "test"},
+        },
+    }
+    initialized = {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {},
+    }
+    tools_list = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+
+    assert (
+        run_stdio_server(
+            io.StringIO(
+                json.dumps(initialize)
+                + "\n"
+                + json.dumps(initialized)
+                + "\n"
+                + json.dumps(tools_list)
+                + "\n"
+            ),
+            output,
+        )
+        == 0
+    )
+
+    responses = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert responses == [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "tugboat", "version": "0.1.0"},
+            },
+        },
+        {"jsonrpc": "2.0", "id": 2, "result": {"tools": list_mcp_tools()}},
+    ]
+
+
 def test_mcp_stdio_returns_parse_error_for_malformed_json():
     output = io.StringIO()
 
