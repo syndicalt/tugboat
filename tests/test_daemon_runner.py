@@ -19,6 +19,8 @@ from tugboat.daemon.runner import (
     run_daemon_loop,
     write_worktree_profile,
 )
+from tugboat.db import Store
+from tugboat.paths import sidecar_dir
 from tugboat.security.secrets import SecretScanError
 
 
@@ -698,6 +700,117 @@ def test_run_daemon_cycle_fails_corrupt_queue_payload_without_crashing(
             "SELECT state, attempts, lease_owner, lease_expires_at FROM daemon_jobs WHERE id = 1"
         ).fetchone()
     assert tuple(row) == (JobState.FAILED.value, 0, None, None)
+
+
+def test_run_daemon_cycle_audits_requeued_stale_leases_even_when_not_processed(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+        leased = queue.acquire_next(
+            lease_owner="worker-a",
+            lease_duration=timedelta(seconds=5),
+            now=_at(10),
+        )
+    assert leased is not None
+    with Store.open(sidecar_dir(tmp_path) / "db.sqlite") as store:
+        store.record_daemon_job(
+            job_id=str(job.id),
+            repo_path=tmp_path,
+            state=leased.state.value,
+            payload=leased.payload,
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-b",
+            max_jobs_per_cycle=0,
+            concurrency_limit=0,
+            lease_duration=timedelta(seconds=30),
+            now=_at(20),
+        ),
+    )
+
+    assert result["processed_jobs"] == []
+    assert result["recovered_jobs"] == [job.id]
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.QUEUED  # type: ignore[union-attr]
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT state, audit_event_sequence
+            FROM daemon_jobs
+            WHERE job_id = ?
+            """,
+            (str(job.id),),
+        ).fetchone()
+        event = connection.execute(
+            """
+            SELECT event_type, json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE sequence = ?
+            """,
+            (row[1],),
+        ).fetchone()
+    assert row[0] == "queued"
+    assert event == ("daemon_job.state_changed", "queued")
+
+
+def test_run_daemon_cycle_audits_failed_stale_leases_after_max_attempts(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+        leased = queue.acquire_next(
+            lease_owner="worker-a",
+            lease_duration=timedelta(seconds=5),
+            now=_at(10),
+        )
+    assert leased is not None
+    with Store.open(sidecar_dir(tmp_path) / "db.sqlite") as store:
+        store.record_daemon_job(
+            job_id=str(job.id),
+            repo_path=tmp_path,
+            state=leased.state.value,
+            payload=leased.payload,
+        )
+
+    result = run_daemon_cycle(
+        tmp_path,
+        DaemonLoopConfig(
+            worker_id="worker-b",
+            max_jobs_per_cycle=0,
+            concurrency_limit=0,
+            lease_duration=timedelta(seconds=30),
+            now=_at(20),
+            max_attempts=1,
+        ),
+    )
+
+    assert result["processed_jobs"] == []
+    assert result["recovered_jobs"] == [job.id]
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT state, audit_event_sequence
+            FROM daemon_jobs
+            WHERE job_id = ?
+            """,
+            (str(job.id),),
+        ).fetchone()
+        event = connection.execute(
+            """
+            SELECT event_type, json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE sequence = ?
+            """,
+            (row[1],),
+        ).fetchone()
+    assert row[0] == "failed"
+    assert event == ("daemon_job.state_changed", "failed")
 
 
 def test_run_daemon_cycle_leases_checkpoint_resume_when_manifest_hash_matches(tmp_path: Path):

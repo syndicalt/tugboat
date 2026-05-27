@@ -486,6 +486,56 @@ def test_run_daemon_once_read_only_kill_switch_blocks_stale_lease_recovery(
         assert leased.lease_owner == "worker-a"
 
 
+def test_run_daemon_once_audits_recovered_stale_lease_before_acquire(
+    tmp_path: Path,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+        leased = queue.acquire_next(
+            lease_owner="worker-a",
+            lease_duration=timedelta(seconds=5),
+            now=_at(10),
+        )
+    assert leased is not None
+    with Store.open(sidecar_dir(tmp_path) / "db.sqlite") as store:
+        store.record_daemon_job(
+            job_id=str(job.id),
+            repo_path=tmp_path,
+            state=leased.state.value,
+            payload=leased.payload,
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-b",
+            lease_duration=timedelta(seconds=30),
+            now=_at(20),
+        ),
+    )
+
+    assert result["processed"] is True
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "waiting_review"
+    assert result["recovered_jobs"] == [job.id]
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        transition_states = connection.execute(
+            """
+            SELECT json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence
+            """
+        ).fetchall()
+
+    assert [state for (state,) in transition_states] == [
+        "queued",
+        "inspecting",
+        "running",
+        "waiting_review",
+    ]
+
+
 def test_run_daemon_once_fails_corrupt_queue_payload_without_crashing(tmp_path: Path):
     with DaemonQueue.open_sidecar(tmp_path) as queue:
         queue.connection.execute(

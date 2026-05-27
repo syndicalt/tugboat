@@ -80,6 +80,7 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
             now=config.now,
             max_attempts=config.max_attempts,
         )
+        record_recovered_job_states(repo, queue, recovered)
         try:
             job = queue.acquire_next(
                 lease_owner=config.worker_id,
@@ -288,3 +289,10 @@ def _record_job_state(
             state=state.value,
             payload=payload,
         )
+
+
+def record_recovered_job_states(repo: Path, queue: DaemonQueue, job_ids: tuple[int, ...]) -> None:
+    for job_id in job_ids:
+        job = queue.get_job(job_id)
+        if job is not None:
+            _record_job_state(repo, job.id, job.state, payload=job.payload)

@@ -18,7 +18,7 @@ from tugboat.daemon.queue import (
     KillSwitch,
     QueuePayloadError,
 )
-from tugboat.daemon.service import process_daemon_job
+from tugboat.daemon.service import process_daemon_job, record_recovered_job_states
 from tugboat.db import Store
 from tugboat.llmff.runner import run_manifest as run_llmff_manifest
 from tugboat.paths import ensure_private_dir, mark_private_file, sidecar_dir
@@ -125,6 +125,7 @@ def run_daemon_cycle(repo: Path, config: DaemonLoopConfig) -> dict[str, Any]:
             now=config.now,
             max_attempts=config.max_attempts,
         )
+        record_recovered_job_states(repo, queue, recovered)
         slots = max(0, min(config.max_jobs_per_cycle, config.concurrency_limit))
         for _ in range(slots):
             try:
