@@ -1410,8 +1410,23 @@ def _finalize_governed_candidate_evaluation(
                         forced_rejection_reason=unseen_failure,
                         unseen_suite_results=unseen_suite_results,
                     )
+            eval_reports_path = (
+                _write_eval_report_collection(
+                    repo,
+                    run_dir,
+                    primary_suite=suite_id,
+                    unseen_suite_results=unseen_suite_results,
+                )
+                if unseen_suite_results is not None
+                else run_dir / "eval-report.json"
+            )
             try:
-                _run_acceptance_summary(repo, run_dir, load_policy(repo))
+                _run_acceptance_summary(
+                    repo,
+                    run_dir,
+                    load_policy(repo),
+                    eval_reports_path=eval_reports_path,
+                )
             except (RuntimeError, ValueError) as error:
                 print(str(error))
                 return 1
@@ -1506,7 +1521,57 @@ def _unseen_suite_result(eval_report: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, object]:
+def _write_eval_report_collection(
+    repo: Path,
+    run_dir: Path,
+    *,
+    primary_suite: str,
+    unseen_suite_results: list[dict[str, object]],
+) -> Path:
+    primary_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    validate_json_artifact("eval-report.json", primary_report)
+    reports = [
+        {
+            **_unseen_suite_result(primary_report),
+            "role": "held_out",
+            "path": _relative_repo_path(repo, run_dir / "eval-report.json"),
+        }
+    ]
+    reports.extend(
+        {
+            **result,
+            "role": "unseen",
+            "path": _relative_repo_path(
+                repo,
+                run_dir
+                / "unseen-evals"
+                / _artifact_safe_suite_id(str(result["suite_id"]))
+                / "eval-report.json",
+            ),
+        }
+        for result in unseen_suite_results
+    )
+    path = run_dir / "eval-report-collection.json"
+    _write_secret_scanned_json_artifact(
+        path,
+        "eval-report-collection.json",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "primary_suite": primary_suite,
+            "reports": reports,
+        },
+    )
+    mark_private_file(path)
+    return path
+
+
+def _run_acceptance_summary(
+    repo: Path,
+    run_dir: Path,
+    policy,
+    *,
+    eval_reports_path: Path | None = None,
+) -> dict[str, object]:
     manifests = materialize_manifests(repo)
     if not manifests_are_allowed_by_policy(manifests, policy):
         raise RuntimeError("manifest hash is not allowed by policy")
@@ -1524,7 +1589,7 @@ def _run_acceptance_summary(repo: Path, run_dir: Path, policy) -> dict[str, obje
             "audit_report": run_dir / "audit.raw.json",
             "candidate_patch": run_dir / "candidate.raw.json",
             "policy_gate": run_dir / "policy-gate.json",
-            "eval_reports": run_dir / "eval-report.json",
+            "eval_reports": eval_reports_path or run_dir / "eval-report.json",
             "proposal_rationale": run_dir / "proposal-rationale.raw.json",
             "risk_class": run_dir / "candidate.json",
         },

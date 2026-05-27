@@ -4615,6 +4615,101 @@ llmff:
     assert eval_rows == [("held-out", 1), ("governance", 1)]
 
 
+def test_optimize_passes_unseen_eval_collection_to_acceptance_summary(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        eval_reports_by_suite={
+            "governance": {
+                "passed": True,
+                "trigger_score": 0.8,
+                "held_out_score": 0.95,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "metrics": {"governance_regressions": 0, "held_out_cases": 5},
+                "validation_splits": {
+                    "trigger": ["trigger:regression"],
+                    "held_out": ["held-out:no-regression"],
+                    "governance": ["governance:policy"],
+                },
+            }
+        },
+        policy_decisions_by_suite={"governance": {"allowed": True, "reasons": []}},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--suite",
+                "held-out",
+                "--unseen-suite",
+                "governance",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    inputs_by_manifest = [
+        json.loads(line)
+        for line in (run_dir / "llmff-inputs-by-manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    acceptance_inputs = next(
+        item["inputs"] for item in inputs_by_manifest if item["manifest"] == "acceptance-summary"
+    )
+    collection = json.loads((run_dir / "eval-report-collection.json").read_text(encoding="utf-8"))
+
+    assert Path(acceptance_inputs["eval_reports"]) == run_dir / "eval-report-collection.json"
+    assert collection == {
+        "schema_version": 1,
+        "primary_suite": "held-out",
+        "reports": [
+            {
+                "suite_id": "held-out",
+                "role": "held_out",
+                "path": f".sidecar/runs/{run_dir.name}/eval-report.json",
+                "passed": True,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "held_out_score": 0.9,
+                "trigger_score": 0.7,
+            },
+            {
+                "suite_id": "governance",
+                "role": "unseen",
+                "path": f".sidecar/runs/{run_dir.name}/unseen-evals/governance/eval-report.json",
+                "passed": True,
+                "governance_passed": True,
+                "recommendation": "accept",
+                "held_out_score": 0.95,
+                "trigger_score": 0.8,
+            },
+        ],
+    }
+
+
 def test_optimize_rejects_candidate_when_unseen_suite_fails(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()

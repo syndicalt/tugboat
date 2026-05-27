@@ -108,6 +108,57 @@ def test_validate_eval_report_artifact_accepts_current_schema():
     )
 
 
+def test_validate_unseen_eval_reports_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "unseen-eval-reports.json",
+        {
+            "schema_version": 1,
+            "reports": [
+                {
+                    "suite_id": "governance",
+                    "passed": True,
+                    "governance_passed": True,
+                    "recommendation": "accept",
+                    "held_out_score": 0.95,
+                    "trigger_score": 0.8,
+                }
+            ],
+        },
+    )
+
+
+def test_validate_eval_report_collection_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "eval-report-collection.json",
+        {
+            "schema_version": 1,
+            "primary_suite": "held-out",
+            "reports": [
+                {
+                    "suite_id": "held-out",
+                    "role": "held_out",
+                    "path": ".sidecar/runs/run-1/eval-report.json",
+                    "passed": True,
+                    "governance_passed": True,
+                    "recommendation": "accept",
+                    "held_out_score": 0.9,
+                    "trigger_score": 0.7,
+                },
+                {
+                    "suite_id": "governance",
+                    "role": "unseen",
+                    "path": ".sidecar/runs/run-1/unseen-evals/governance/eval-report.json",
+                    "passed": True,
+                    "governance_passed": True,
+                    "recommendation": "accept",
+                    "held_out_score": 0.95,
+                    "trigger_score": 0.8,
+                },
+            ],
+        },
+    )
+
+
 def test_validate_policy_gate_artifact_accepts_current_schema():
     validate_json_artifact(
         "policy-gate.json",
