@@ -232,6 +232,39 @@ DOC_CONTRACTS = {
             "direct apply",
         ],
     },
+    "docs/releases/production-candidate.md": {
+        "sections": [
+            "## Summary",
+            "## Scope",
+            "## Verification",
+            "## Open Release Work",
+            "## Decision",
+        ],
+        "required_text": [
+            "Build/code artifact commit",
+            "production release candidate",
+            "proposal-only",
+            "auto-apply remains disabled",
+            "1097 tests and 90.02% coverage",
+            "approved_proposal_only",
+        ],
+    },
+    "docs/ops/security-review-production-candidate.md": {
+        "sections": [
+            "## Scope",
+            "## Commands",
+            "## Findings",
+            "## Decision",
+        ],
+        "required_text": [
+            "Build/code artifact commit reviewed",
+            "proposal_only",
+            "auto_apply: disabled",
+            "1097 tests and 90.02% coverage",
+            "No open critical or high findings",
+            "Not approved",
+        ],
+    },
     "docs/ci/github-actions-template.yml": {
         "sections": [],
         "required_text": [
@@ -307,6 +340,30 @@ def test_dated_security_review_matches_release_evidence_commit() -> None:
     assert "local://release-smoke/2026-05-26 --approver" not in combined
 
 
+def test_production_release_candidate_evidence_matches_current_tree() -> None:
+    release_notes_path = REPO_ROOT / "docs/releases/production-candidate.md"
+    security_review_path = REPO_ROOT / "docs/ops/security-review-production-candidate.md"
+    release_notes = release_notes_path.read_text(encoding="utf-8")
+    security_review = security_review_path.read_text(encoding="utf-8")
+
+    evidence_commit = _single_match(
+        r"Build/code artifact commit: `([0-9a-f]{7,40})`\.",
+        release_notes,
+    )
+    assert f"Build/code artifact commit reviewed: `{evidence_commit}`." in security_review
+    assert f"--commit {evidence_commit}" in release_notes
+    assert f"--commit {evidence_commit}" in security_review
+    assert "PYTHONPATH=src python -m tugboat ci --repo .` passed with `ci: ok`" in release_notes
+    assert "1097 tests and 90.02% coverage" in release_notes
+    assert "1097 tests and 90.02% coverage" in security_review
+    assert "auto_apply: disabled" in security_review
+    assert "proposal_only" in security_review
+    assert evidence_commit != "c462115265a3bb0c0965b62d99757a48c7097f14"
+    assert _git("merge-base", "--is-ancestor", evidence_commit, "HEAD") == ""
+    recent_commits = _git("log", "--format=%H", "-12").splitlines()
+    assert evidence_commit in recent_commits
+
+
 def test_github_actions_ci_workflow_enforces_proposal_only_release_gates() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
@@ -338,6 +395,20 @@ def _single_match(pattern: str, content: str) -> str:
     matches = re.findall(pattern, content)
     assert len(matches) == 1
     return matches[0]
+
+
+def _git(*args: str) -> str:
+    import subprocess
+
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return completed.stdout.strip()
 
 
 def _markdown_body(content: str) -> str:

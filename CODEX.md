@@ -15,7 +15,7 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 - Use [docs/threat-model.md](docs/threat-model.md) before changing trust boundaries, redaction, secrets handling, MCP, daemon, apply, or rollback behavior.
 - Use [docs/ops/operating-runbook.md](docs/ops/operating-runbook.md), [docs/ops/security-review.md](docs/ops/security-review.md), [docs/ops/sidecar-backup-restore.md](docs/ops/sidecar-backup-restore.md), and [docs/ops/artifact-retention-redaction.md](docs/ops/artifact-retention-redaction.md) for production operations.
 - Use [docs/ops/quick-adoption-proposal-only.md](docs/ops/quick-adoption-proposal-only.md) for credential-free existing-repo rollout.
-- Release evidence lives in [docs/releases/0.1.0.md](docs/releases/0.1.0.md) and [docs/ops/security-review-2026-05-26.md](docs/ops/security-review-2026-05-26.md).
+- Release evidence lives in [docs/releases/0.1.0.md](docs/releases/0.1.0.md), [docs/ops/security-review-2026-05-26.md](docs/ops/security-review-2026-05-26.md), [docs/releases/production-candidate.md](docs/releases/production-candidate.md), and [docs/ops/security-review-production-candidate.md](docs/ops/security-review-production-candidate.md).
 - Roadmap and historical planning live in [docs/roadmaps/2026-05-25-production-roadmap.md](docs/roadmaps/2026-05-25-production-roadmap.md) and [docs/superpowers/plans/2026-05-25-agent-instruction-sidecar-mvp.md](docs/superpowers/plans/2026-05-25-agent-instruction-sidecar-mvp.md).
 - Announcement copy lives in [docs/announcements/tugboat-mvp-announcement.md](docs/announcements/tugboat-mvp-announcement.md) and [docs/announcements/tugboat-x-announcement.md](docs/announcements/tugboat-x-announcement.md).
 
