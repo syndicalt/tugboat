@@ -4315,6 +4315,76 @@ llmff:
     assert rejected_memory[3] is not None
 
 
+def test_rejected_optimization_memory_suppresses_next_matching_proposal(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "governance-regression"]) == 1
+    fingerprint = hashlib.sha256(b"add\nCODEX.md\nRules").hexdigest()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rejected_row = store.connection.execute(
+            """
+            SELECT key, payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'rejected_edit'
+            """
+        ).fetchone()
+
+    assert rejected_row is not None
+    assert rejected_row[0] == fingerprint
+    assert json.loads(rejected_row[1])["future_proposal_suppression_signal"] == (
+        "suppress_matching_bounded_edit_fingerprint"
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        latest_candidate = store.connection.execute(
+            """
+            SELECT c.state, d.decision, d.reason
+            FROM candidates c
+            JOIN decisions d ON d.candidate_id = c.id
+            ORDER BY c.id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": False,
+        "reasons": ["suppressed_by_rejected_edit_memory"],
+    }
+    assert decision["decision"] == "rejected"
+    assert decision["policy_reasons"] == ["suppressed_by_rejected_edit_memory"]
+    assert latest_candidate == (
+        "rejected",
+        "rejected",
+        "suppressed_by_rejected_edit_memory",
+    )
+
+
 @pytest.mark.parametrize("held_out_score", [0.9, 0.8])
 def test_eval_rejects_accept_recommendation_without_held_out_improvement(
     tmp_path: Path,
