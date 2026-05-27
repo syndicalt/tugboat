@@ -69,7 +69,10 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
     budget_reasons = _learning_rate_budget_policy_reasons(policy, candidate)
     decision_allowed = decision.allowed and not memory_reasons and not budget_reasons
     decision_reasons = [*decision.reasons, *memory_reasons, *budget_reasons]
-    artifacts = write_candidate(repo, run_dir.name, candidate)
+    try:
+        artifacts = write_candidate(repo, run_dir.name, candidate)
+    except ValueError as error:
+        return ProposePipelineResult(1, run_dir, str(error))
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         candidate_id = store.insert_candidate(
             audit_id=int(audit["audit_id"]),

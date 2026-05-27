@@ -99,7 +99,11 @@ def _write_candidate_preview(
     if CandidatePatch.hash_file(base_path) != candidate.base_hash:
         raise ValueError("candidate base_hash does not match current file")
 
-    preview_text = apply_unified_diff(base_path.read_text(encoding="utf-8"), candidate.diff)
+    preview_text = apply_unified_diff(
+        base_path.read_text(encoding="utf-8"),
+        candidate.diff,
+        expected_path=candidate.base_file,
+    )
     if preview_text is None:
         raise ValueError("candidate diff cannot be applied to base file")
     preview_path = (run_dir / "candidate-preview" / candidate.base_file).resolve()

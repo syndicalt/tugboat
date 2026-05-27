@@ -310,7 +310,7 @@ if args[:1] == ["run"]:
         candidate_patch = {
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
-            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add llmff proposed regression guidance.\\n",
+            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@ -1,0 +1,1 @@\\n+Add llmff proposed regression guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
             "expected_behavior_change": "Agents add regression guidance before closing similar fixes.",
@@ -1453,6 +1453,52 @@ llmff:
     assert not (run_dir / "candidate.diff").exists()
 
 
+def test_propose_rejects_candidate_patch_wrapped_in_model_prose(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        candidate_overrides={
+            "diff": (
+                "Here is the patch:\n"
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -1,0 +1,1 @@\n"
+                "+Add regression test guidance.\n"
+            )
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "candidate diff cannot be applied to base file" in output
+    assert (run_dir / "candidate.raw.json").exists()
+    assert not (run_dir / "candidate.diff").exists()
+
+
 def test_propose_consumes_real_llmff_file_backed_candidate_output(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1570,7 +1616,7 @@ def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: P
                 "candidate_id": "testing",
                 "base_file": "CODEX.md",
                 "base_hash": base_hash,
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add regression test guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add regression test guidance.\n",
                 "risk_class": "instruction_clarification",
                 "rationale": "Testing guidance is missing.",
                 "expected_behavior_change": "Agents add regression tests.",
@@ -1591,7 +1637,7 @@ def test_propose_merges_compatible_candidate_set_and_records_ranking(tmp_path: P
                 "candidate_id": "review",
                 "base_file": "CODEX.md",
                 "base_hash": base_hash,
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add review checklist guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add review checklist guidance.\n",
                 "risk_class": "instruction_clarification",
                 "rationale": "Review guidance is missing.",
                 "expected_behavior_change": "Agents preserve review checklists.",
@@ -1679,7 +1725,7 @@ def test_propose_candidate_set_rejects_incompatible_bounded_edit(tmp_path: Path)
             {
                 **base_candidate,
                 "candidate_id": "testing-a",
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add regression test guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add regression test guidance.\n",
                 "rationale": "Testing guidance is missing.",
                 "bounded_edit_metadata": [
                     {
@@ -1694,7 +1740,7 @@ def test_propose_candidate_set_rejects_incompatible_bounded_edit(tmp_path: Path)
             {
                 **base_candidate,
                 "candidate_id": "testing-b",
-                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Add duplicate testing guidance.\n",
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Add duplicate testing guidance.\n",
                 "rationale": "Testing guidance should be duplicated.",
                 "bounded_edit_metadata": [
                     {
@@ -3563,7 +3609,7 @@ def test_eval_preserves_pending_eval_definition_paths_when_regating_candidate(
             "diff": (
                 "--- a/tests/fixtures/evals/regression.json\n"
                 "+++ b/tests/fixtures/evals/regression.json\n"
-                "@@\n"
+                "@@ -1,1 +1,1 @@\n"
                 '-{\"suite\": \"regression\"}\n'
                 '+{\"suite\": \"easier-regression\"}\n'
             ),

@@ -104,7 +104,7 @@ if args[:1] == ["run"]:
         outputs["candidate_patch"].write_text(json.dumps({
             "base_file": "CODEX.md",
             "base_hash": hashlib.sha256(base.read_bytes()).hexdigest(),
-            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@\\n+Add regression-test guidance.\\n",
+            "diff": "--- a/CODEX.md\\n+++ b/CODEX.md\\n@@ -1,0 +1,1 @@\\n+Add regression-test guidance.\\n",
             "risk_class": "instruction_clarification",
             "rationale": "llmff proposed this from audited evidence",
             "expected_behavior_change": "Agents add regression-test guidance before closing fixes.",

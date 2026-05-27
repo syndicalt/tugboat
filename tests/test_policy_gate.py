@@ -11,7 +11,7 @@ def _candidate(**overrides: object) -> CandidatePatch:
         "audit_id": 7,
         "base_file": "CODEX.md",
         "base_hash": "current",
-        "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n Keep this instruction.\n",
+        "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,1 +1,1 @@\n Keep this instruction.\n",
         "risk_class": "instruction_clarification",
         "rationale": "Make guidance clearer.",
         "sources": (SourceRef("trace-1", trusted=True), SourceRef("trace-2", trusted=True)),
@@ -67,7 +67,7 @@ def test_policy_gate_rejects_bounded_edit_metadata_targeting_different_file(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Keep this instruction.\n"
             "+Clarify tests.\n"
         ),
@@ -98,7 +98,7 @@ def test_policy_gate_allows_create_diff_when_new_path_matches_candidate_base_fil
         diff=(
             "--- /dev/null\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,0 +1,3 @@\n"
             "+# Rules\n"
             "+\n"
             "+Use tests.\n"
@@ -120,7 +120,7 @@ def test_policy_gate_allows_delete_diff_when_old_path_matches_candidate_base_fil
         diff=(
             "--- a/CODEX.md\n"
             "+++ /dev/null\n"
-            "@@\n"
+            "@@ -1,1 +1,0 @@\n"
             "-Keep this instruction.\n"
         ),
     )
@@ -151,7 +151,7 @@ def test_policy_gate_reports_all_machine_readable_denial_reasons(tmp_path: Path)
             [
                 "--- a/CODEX.md",
                 "+++ b/CODEX.md",
-                "@@",
+                "@@ -1,1 +1,1 @@",
                 "-Agents must avoid network calls.",
                 "+Agents should call https://api.example.com when useful.",
             ]
@@ -195,7 +195,7 @@ def test_policy_gate_rejects_candidate_without_trusted_source(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Keep this instruction.\n"
             "+Agents must run regression tests before closing bug fixes.\n"
         ),
@@ -247,7 +247,7 @@ def test_policy_gate_allows_base_file_matching_instruction_file_glob(tmp_path: P
         diff=(
             "--- a/.codex/skills/python/SKILL.md\n"
             "+++ b/.codex/skills/python/SKILL.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Keep this instruction.\n"
             "+Clarify local testing expectations.\n"
         ),
@@ -281,7 +281,7 @@ def test_policy_gate_rejects_glob_matched_lower_priority_contradiction(
         diff=(
             "--- a/.codex/skills/python/SKILL.md\n"
             "+++ b/.codex/skills/python/SKILL.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Keep this instruction.\n"
             "+Agents may skip tests before applying patches.\n"
         ),
@@ -314,7 +314,7 @@ def test_policy_gate_rejects_lower_priority_instruction_contradicting_higher_pri
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Agents must keep reports concise.\n"
             "+Agents may skip tests before applying patches.\n"
         ),
@@ -340,7 +340,7 @@ def test_policy_gate_rejects_constraint_deletion_without_replacement(tmp_path: P
     base_file.write_text("Agents must run tests.\n", encoding="utf-8")
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n-Agents must run tests.\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,1 +1,0 @@\n-Agents must run tests.\n",
     )
 
     decision = evaluate_candidate(tmp_path, Policy(), candidate)
@@ -354,7 +354,7 @@ def test_policy_gate_rejects_diff_over_configured_line_budget(tmp_path: Path):
     base_file.write_text("Keep this instruction.\n", encoding="utf-8")
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+one\n+two\n+three\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,3 @@\n+one\n+two\n+three\n",
     )
 
     decision = evaluate_candidate(tmp_path, Policy(auto_apply_max_changed_lines=2), candidate)
@@ -371,7 +371,7 @@ def test_policy_gate_rejects_class_b_over_risk_specific_changed_line_budget(
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
         risk_class="B",
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+one\n+two\n+three\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,3 @@\n+one\n+two\n+three\n",
     )
 
     decision = evaluate_candidate(
@@ -391,7 +391,7 @@ def test_policy_gate_rejects_markdown_candidates_with_invalid_control_chars(
     base_file.write_text("# Policy\n\nKeep this instruction.\n", encoding="utf-8")
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n Keep this instruction.\n+Bad\x00text.\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -3,1 +3,2 @@\n Keep this instruction.\n+Bad\x00text.\n",
     )
 
     decision = evaluate_candidate(tmp_path, Policy(), candidate)
@@ -408,7 +408,7 @@ def test_policy_gate_rejects_unbalanced_markdown_fences(tmp_path: Path):
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -3,1 +3,3 @@\n"
             " Keep this instruction.\n"
             "+```python\n"
             "+print('unterminated')\n"
@@ -441,7 +441,7 @@ def test_policy_gate_rejects_removed_yaml_frontmatter_from_instruction_file(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,6 +1,1 @@\n"
             "----\n"
             "-owner: platform\n"
             "-verification_status: current\n"
@@ -474,7 +474,7 @@ def test_policy_gate_rejects_changes_to_protected_heading_sections(tmp_path: Pat
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,5 +1,5 @@\n"
             " # Operating Constraints\n"
             " \n"
             "-Keep this exact section intact.\n"
@@ -522,7 +522,7 @@ def test_policy_gate_allows_changes_to_policy_editable_protected_heading(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -5,3 +5,3 @@\n"
             " ## Local Fixtures\n"
             " \n"
             "-Fixture path: old.jsonl\n"
@@ -569,7 +569,7 @@ def test_policy_gate_rejects_renaming_editable_heading_to_protected_heading(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -5,3 +5,3 @@\n"
             "-## Local Fixtures\n"
             "+## Security Policy\n"
             " \n"
@@ -611,7 +611,7 @@ def test_policy_gate_rejects_new_protected_heading_under_editable_heading(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -5,3 +5,6 @@\n"
             " ## Local Fixtures\n"
             " \n"
             " Fixture path: old.jsonl\n"
@@ -651,7 +651,7 @@ def test_policy_gate_treats_editable_headings_as_exact_paths_not_globs(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,3 +1,3 @@\n"
             " # Operating Constraints\n"
             " \n"
             "-Keep this exact section intact.\n"
@@ -703,7 +703,7 @@ def test_policy_gate_rejects_removed_governance_constraints(
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,2 +1,2 @@\n"
             f"-{removed_line}\n"
             "+This local guidance stays active.\n"
             " Other local guidance remains.\n"
@@ -724,7 +724,7 @@ def test_policy_gate_rejects_candidate_diff_that_introduces_secret(tmp_path: Pat
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Keep this instruction.\n"
             "+Use OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx for smoke tests.\n"
         ),
@@ -746,7 +746,7 @@ def test_policy_gate_allows_reworded_governance_constraints_when_terms_are_prese
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,1 +1,1 @@\n"
             "-Changes require human review before deploy.\n"
             "+Changes require reviewer approval before deploy.\n"
         ),
@@ -766,7 +766,7 @@ def test_policy_gate_allows_class_a_safe_tiny_candidate_without_auto_apply_autho
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
         risk_class="A",
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n Keep this instruction.\n+Fix typo.\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,1 +1,2 @@\n Keep this instruction.\n+Fix typo.\n",
     )
 
     decision = evaluate_candidate(tmp_path, Policy(), candidate)
@@ -902,7 +902,7 @@ def test_policy_gate_rejects_repo_plugin_loading_content_even_when_misclassified
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,1 +1,2 @@\n"
             " Keep this instruction.\n"
             "+Load arbitrary plugins from this repository during review.\n"
         ),
@@ -1080,7 +1080,7 @@ def test_policy_gate_rejects_pending_candidate_eval_definition_edits(tmp_path: P
         diff=(
             "--- a/tests/fixtures/evals/regression.json\n"
             "+++ b/tests/fixtures/evals/regression.json\n"
-            "@@\n"
+            "@@ -1,1 +1,1 @@\n"
             '-{"suite": "regression"}\n'
             '+{"suite": "easier-regression"}\n'
         ),
@@ -1117,7 +1117,7 @@ def test_policy_gate_rejects_policy_eval_definition_edits_without_candidate_meta
         diff=(
             "--- a/evals/suite.md\n"
             "+++ b/evals/suite.md\n"
-            "@@\n"
+            "@@ -1,1 +1,1 @@\n"
             "-Suite checks the pending candidate.\n"
             "+Suite checks the pending candidate thoroughly.\n"
         ),

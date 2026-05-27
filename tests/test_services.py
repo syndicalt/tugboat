@@ -15,7 +15,7 @@ from tugboat.security.secrets import SecretScanError
 def _candidate(
     *,
     base_hash: str = "abc123",
-    diff: str = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+    diff: str = "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Clarify this.\n",
 ) -> CandidatePatch:
     return CandidatePatch(
         audit_id=2,
@@ -33,7 +33,7 @@ def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Pat
     base_file.write_text("# Rules\n", encoding="utf-8")
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n # Rules\n+Clarify this.\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,1 +1,2 @@\n # Rules\n+Clarify this.\n",
     )
 
     artifacts = write_candidate(tmp_path, "run-1", candidate)
@@ -63,7 +63,7 @@ def test_write_candidate_preserves_bounded_edit_operator_metadata(tmp_path: Path
         audit_id=2,
         base_file="CODEX.md",
         base_hash=CandidatePatch.hash_file(base_file),
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n # Rules\n+Clarify this.\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,1 +1,2 @@\n # Rules\n+Clarify this.\n",
         risk_class="instruction_clarification",
         rationale="Clarify ambiguous guidance.",
         sources=(SourceRef("trace-1", trusted=True),),
@@ -105,7 +105,7 @@ def test_write_candidate_writes_candidate_preview_artifacts(tmp_path: Path):
         diff=(
             "--- a/CODEX.md\n"
             "+++ b/CODEX.md\n"
-            "@@\n"
+            "@@ -1,3 +1,3 @@\n"
             " # Policy\n"
             " \n"
             "-You must run tests before final answers.\n"
@@ -148,7 +148,7 @@ def test_write_candidate_marks_generated_artifacts_private_under_permissive_umas
     base_file.write_text("# Rules\n", encoding="utf-8")
     candidate = _candidate(
         base_hash=CandidatePatch.hash_file(base_file),
-        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n # Rules\n+Clarify this.\n",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,1 +1,2 @@\n # Rules\n+Clarify this.\n",
     )
 
     previous_umask = os.umask(0o022)
