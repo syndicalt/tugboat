@@ -26,6 +26,7 @@ jobs:
       - run: tugboat ci --repo .
       - run: tugboat index --repo . --check
       - run: tugboat harness check --repo .
+      - run: python -m pytest tests/test_packaging_smoke.py -q
       - run: python -m pytest --cov=src --cov-report=term-missing -q
       - uses: actions/upload-artifact@v4
         if: always()
