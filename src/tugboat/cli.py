@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tomllib
@@ -1927,7 +1928,12 @@ def _write_apply_plan(
     candidate_id = int(candidate_meta["candidate_id"])
     target_files = (candidate.base_file,)
     policy = load_policy(repo)
-    decision = evaluate_candidate(repo, policy, candidate)
+    decision = evaluate_candidate(
+        repo,
+        policy,
+        candidate,
+        rejected_edit_fingerprints=_load_rejected_edit_fingerprints(repo),
+    )
     if not decision.allowed:
         raise ValueError(f"policy gate rejected candidate: {', '.join(decision.reasons)}")
     policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
@@ -2692,6 +2698,27 @@ def _repo_memory_path(repo: Path) -> str:
 def _load_validation_baseline_score(repo: Path, *, suite_id: str) -> float | None:
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         return _read_validation_baseline_score(store, repo=repo, suite_id=suite_id)
+
+
+def _load_rejected_edit_fingerprints(repo: Path) -> tuple[str, ...]:
+    db_path = sidecar_dir(repo) / "db.sqlite"
+    if not db_path.exists():
+        return ()
+    try:
+        with Store.open(db_path) as store:
+            rows = store.connection.execute(
+                """
+                SELECT key
+                FROM optimizer_memory
+                WHERE repo_path = ?
+                  AND memory_type = 'rejected_edit'
+                ORDER BY id
+                """,
+                (_repo_memory_path(repo),),
+            ).fetchall()
+    except sqlite3.DatabaseError:
+        return ()
+    return tuple(str(row[0]) for row in rows)
 
 
 def _read_validation_baseline_score(store: Store, *, repo: Path, suite_id: str) -> float | None:

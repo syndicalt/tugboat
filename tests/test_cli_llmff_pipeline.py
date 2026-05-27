@@ -3560,6 +3560,65 @@ llmff:
     assert rejected_memory[3] is not None
 
 
+@pytest.mark.parametrize("held_out_score", [0.9, 0.8])
+def test_eval_rejects_accept_recommendation_without_held_out_improvement(
+    tmp_path: Path,
+    capsys,
+    held_out_score: float,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        eval_passed=True,
+        eval_report={
+            "passed": True,
+            "trigger_score": 0.9,
+            "held_out_score": held_out_score,
+            "governance_passed": True,
+            "recommendation": "accept",
+            "metrics": {"governance_regressions": 0, "held_out_cases": 3},
+            "validation_splits": {
+                "trigger": ["trigger:regression"],
+                "held_out": ["held-out:no-regression"],
+                "governance": ["governance:policy"],
+            },
+        },
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    capsys.readouterr()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert "eval rejected: held-out eval score did not improve" in output
+    assert eval_report["passed"] is False
+    assert eval_report["trigger_score"] == 0.9
+    assert eval_report["held_out_score"] == held_out_score
+    assert eval_report["governance_passed"] is True
+    assert eval_report["recommendation"] == "reject"
+    assert not (run_dir / "acceptance-summary.raw.json").exists()
+
+
 def test_eval_recomputes_policy_gate_instead_of_trusting_llmff_policy_decision(
     tmp_path: Path,
 ):

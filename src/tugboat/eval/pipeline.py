@@ -151,6 +151,10 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
                 governance_passed = False
                 recommendation = "reject"
                 eval_failure_message = f"eval rejected: {split_failure}"
+            if passed and recommendation == "accept" and held_out_score <= trigger_score:
+                passed = False
+                recommendation = "reject"
+                eval_failure_message = "eval rejected: held-out eval score did not improve"
         except ValueError as error:
             return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
         except LlmffRunFailed as error:

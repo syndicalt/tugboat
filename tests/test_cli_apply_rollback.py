@@ -485,6 +485,35 @@ def test_apply_rejects_prohibited_risk_class(tmp_path: Path):
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_candidate_matching_prior_rejected_edit_memory(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, bounded_section="Repeated Direction")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    fingerprint = hashlib.sha256(b"add\nCODEX.md\nRepeated Direction").hexdigest()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo.resolve()),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                "semantic_fingerprint": fingerprint,
+                "rejection_reason": "held_out_not_improved",
+                "source_refs": ["audit:1"],
+            },
+        )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: policy gate rejected candidate: suppressed_by_rejected_edit_memory" in output
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_rejects_sidecar_policy_self_apply_even_when_stored_gate_passed(
     tmp_path: Path,
 ):

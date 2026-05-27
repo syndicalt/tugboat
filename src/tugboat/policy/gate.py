@@ -34,6 +34,7 @@ DENIAL_REASON_ORDER = (
     "new_external_endpoint",
     "missing_trusted_source",
     "single_untrusted_source",
+    "suppressed_by_rejected_edit_memory",
     "prohibited_risk_class",
 )
 PROHIBITED_RISK_CLASSES = frozenset(
@@ -209,7 +210,13 @@ class PolicyDecision:
     auto_apply_eligible: bool = False
 
 
-def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) -> PolicyDecision:
+def evaluate_candidate(
+    repo: Path,
+    policy: Policy,
+    candidate: CandidatePatch,
+    *,
+    rejected_edit_fingerprints: tuple[str, ...] = (),
+) -> PolicyDecision:
     found_reasons: set[str] = set()
     review_required_reasons: set[str] = set()
     repo_root = repo.resolve()
@@ -255,6 +262,8 @@ def evaluate_candidate(repo: Path, policy: Policy, candidate: CandidatePatch) ->
         found_reasons.add("missing_trusted_source")
     if len(candidate.sources) == 1 and not candidate.sources[0].trusted:
         found_reasons.add("single_untrusted_source")
+    if _matches_rejected_edit_memory(candidate, rejected_edit_fingerprints):
+        found_reasons.add("suppressed_by_rejected_edit_memory")
     risk_class = _stronger_risk_class_key(
         _risk_class_key(candidate.risk_class),
         _derived_risk_class_key(candidate),
@@ -347,6 +356,26 @@ def _metadata_deletes_normative_instruction(candidate: CandidatePatch) -> bool:
         if normative_changes > 0:
             return True
     return False
+
+
+def _matches_rejected_edit_memory(
+    candidate: CandidatePatch,
+    rejected_edit_fingerprints: tuple[str, ...],
+) -> bool:
+    rejected = set(rejected_edit_fingerprints)
+    if not rejected:
+        return False
+    for metadata in candidate.bounded_edit_metadata:
+        operator = str(metadata.get("operator", ""))
+        target_file = str(metadata.get("file", candidate.base_file))
+        section = str(metadata.get("section", ""))
+        if _bounded_edit_fingerprint(operator, target_file, section) in rejected:
+            return True
+    return False
+
+
+def _bounded_edit_fingerprint(operator: str, target_file: str, section: str) -> str:
+    return hashlib.sha256(f"{operator}\n{target_file}\n{section}".encode("utf-8")).hexdigest()
 
 
 def _risk_class_changed_line_budget(policy: Policy, risk_class: str) -> int | None:

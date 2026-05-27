@@ -484,6 +484,47 @@ def test_policy_gate_keeps_class_a_typo_candidate_auto_apply_eligible(tmp_path: 
     assert decision.auto_apply_eligible is True
 
 
+def test_policy_gate_rejects_candidate_matching_prior_rejected_edit_fingerprint(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Notes\n\nUse local fixture.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Notes\n"
+            " \n"
+            " Use local fixture.\n"
+            "+Add a rejected direction again.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Repeated Direction",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+    rejected_fingerprint = CandidatePatch.hash_text("add\nCODEX.md\nRepeated Direction")
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(auto_apply_enabled=True),
+        candidate,
+        rejected_edit_fingerprints=(rejected_fingerprint,),
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("suppressed_by_rejected_edit_memory",)
+    assert decision.auto_apply_eligible is False
+
+
 def test_policy_gate_rejects_markdown_candidates_with_invalid_control_chars(
     tmp_path: Path,
 ):
