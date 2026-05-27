@@ -134,10 +134,27 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["path", "obligations"],
+                    "required": ["path", "obligations", "chunks"],
                     "properties": {
                         "path": {"type": "string"},
                         "obligations": {"type": "array", "items": {"type": "string"}},
+                        "chunks": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["ref", "heading_path", "anchor"],
+                                "properties": {
+                                    "ref": {"type": "string"},
+                                    "heading_path": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "anchor": {"type": "string"},
+                                },
+                            },
+                        },
                     },
                 },
             },

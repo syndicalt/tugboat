@@ -71,7 +71,15 @@ if args[:1] == ["run"]:
     checkpoint.write_text('{"manifest_hash":"fake"}\\n', encoding="utf-8")
     if manifest == "instruction-index":
         outputs["instruction_index"].write_text(json.dumps({
-            "documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]
+            "documents": [{
+                "path": "CODEX.md",
+                "obligations": ["Use tests."],
+                "chunks": [{
+                    "ref": "CODEX.md#rules",
+                    "anchor": "rules",
+                    "heading_path": ["Rules"],
+                }],
+            }]
         }) + "\\n", encoding="utf-8")
     elif manifest == "episode-audit":
         outputs["audit_report"].write_text(json.dumps({

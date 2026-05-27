@@ -254,8 +254,30 @@ def test_validate_audit_raw_artifact_requires_instruction_refs():
 def test_validate_instruction_index_raw_artifact_accepts_current_schema():
     validate_json_artifact(
         "instruction-index.raw.json",
-        {"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]},
+        {
+            "documents": [
+                {
+                    "path": "CODEX.md",
+                    "obligations": ["Use tests."],
+                    "chunks": [
+                        {
+                            "ref": "CODEX.md#rules",
+                            "anchor": "rules",
+                            "heading_path": ["Rules"],
+                        }
+                    ],
+                }
+            ]
+        },
     )
+
+
+def test_validate_instruction_index_raw_artifact_requires_citeable_chunks():
+    with pytest.raises(ArtifactValidationError, match="documents\\[0\\].chunks"):
+        validate_json_artifact(
+            "instruction-index.raw.json",
+            {"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]},
+        )
 
 
 def test_validate_canonical_episode_artifact_accepts_current_schema():

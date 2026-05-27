@@ -94,7 +94,21 @@ def _write_fake_llmff(
     if evidence_ids is None:
         evidence_ids = {"evidence_ids": ["ev_fake"]}
     if instruction_index is None:
-        instruction_index = {"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]}
+        instruction_index = {
+            "documents": [
+                {
+                    "path": "CODEX.md",
+                    "obligations": ["Use tests."],
+                    "chunks": [
+                        {
+                            "ref": "CODEX.md#rules",
+                            "anchor": "rules",
+                            "heading_path": ["Rules"],
+                        }
+                    ],
+                }
+            ]
+        }
     if drift_clusters is None:
         drift_clusters = {"clusters": [{"cluster_id": "drift-1", "evidence_refs": ["ev_fake"]}]}
     if optimizer_notes is None:
@@ -947,7 +961,21 @@ def test_audit_rejects_malformed_llmff_instruction_index_raw_output(
     trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
     fake_llmff = _write_fake_llmff(
         tmp_path / "fake-llmff",
-        instruction_index={"documents": [{"path": 7, "obligations": ["Use tests."]}]},
+        instruction_index={
+            "documents": [
+                {
+                    "path": 7,
+                    "obligations": ["Use tests."],
+                    "chunks": [
+                        {
+                            "ref": "CODEX.md#rules",
+                            "anchor": "rules",
+                            "heading_path": ["Rules"],
+                        }
+                    ],
+                }
+            ]
+        },
     )
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
@@ -970,6 +998,44 @@ llmff:
         "instruction index rejected: instruction-index.raw.json field has wrong type: documents[0].path"
         in output
     )
+    assert (run_dir / "instruction-index.raw.json").exists()
+    assert not (run_dir / "audit.raw.json").exists()
+    assert not (run_dir / "audit.json").exists()
+
+
+def test_audit_rejects_instruction_index_raw_output_without_citeable_chunks(
+    tmp_path: Path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        instruction_index={"documents": [{"path": "CODEX.md", "obligations": ["Use tests."]}]},
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert (
+        "instruction index rejected: instruction-index.raw.json missing required field: "
+        "documents[0].chunks"
+    ) in output
     assert (run_dir / "instruction-index.raw.json").exists()
     assert not (run_dir / "audit.raw.json").exists()
     assert not (run_dir / "audit.json").exists()
