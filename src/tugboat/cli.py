@@ -1019,8 +1019,9 @@ def _write_release_artifact_manifest(
             )
             raise ValueError(f"retained evidence contains secret: {findings}") from error
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
-    if not any("pytest-coverage" in Path(entry["path"]).name for entry in retained_evidence):
-        raise ValueError("pytest coverage evidence is required")
+    missing_release_evidence = _missing_release_evidence(retained_evidence)
+    if missing_release_evidence is not None:
+        raise ValueError(f"{missing_release_evidence} evidence is required")
     preflight_findings = scan_text(
         "release-artifact-manifest.json",
         json.dumps(
@@ -1056,6 +1057,10 @@ def _write_release_artifact_manifest(
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
             "python -m pytest --cov=src --cov-report=term-missing -q",
+            "python -m build --wheel",
+            "python -m twine check dist/<wheel>.whl",
+            "clean venv install from built wheel",
+            "installed tugboat doctor",
         ],
         "retained_evidence": retained_evidence,
     }
@@ -1078,6 +1083,23 @@ def _write_release_artifact_manifest(
             },
         )
     return output_path
+
+
+def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) -> str | None:
+    required = (
+        ("pytest-coverage", "pytest coverage"),
+        ("doctor", "doctor output"),
+        ("index-check", "index check"),
+        ("harness", "harness check"),
+        ("build-wheel", "wheel build"),
+        ("twine-check", "twine check"),
+        ("install-smoke", "install smoke"),
+    )
+    evidence_names = {Path(str(entry["path"])).name for entry in retained_evidence}
+    for required_token, label in required:
+        if not any(required_token in name for name in evidence_names):
+            return label
+    return None
 
 
 def _current_git_head(repo: Path) -> str:
