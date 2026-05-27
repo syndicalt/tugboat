@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from tugboat.artifacts import (
     write_json_artifact,
     write_text_artifact,
 )
+from tugboat.security.secrets import SecretScanError
 
 
 def test_write_json_artifact_creates_parent_and_sorts_keys(tmp_path: Path):
@@ -21,11 +23,37 @@ def test_write_json_artifact_creates_parent_and_sorts_keys(tmp_path: Path):
     assert path.read_text(encoding="utf-8") == '{\n  "a": 2,\n  "z": 1\n}\n'
 
 
+def test_write_json_artifact_is_secret_scanned_and_owner_only(tmp_path: Path):
+    previous_umask = os.umask(0o022)
+    try:
+        path = write_json_artifact(tmp_path / "run" / "status-report.json", {"schema_version": 1})
+    finally:
+        os.umask(previous_umask)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(SecretScanError):
+        write_json_artifact(tmp_path / "run" / "leaked.json", {"token": "sk-" + "a" * 20})
+    assert not (tmp_path / "run" / "leaked.json").exists()
+
+
 def test_write_text_artifact_creates_parent(tmp_path: Path):
     path = write_text_artifact(tmp_path / "run" / "candidate.diff", "diff")
 
     assert path == tmp_path / "run" / "candidate.diff"
     assert path.read_text(encoding="utf-8") == "diff"
+
+
+def test_write_text_artifact_is_secret_scanned_and_owner_only(tmp_path: Path):
+    previous_umask = os.umask(0o022)
+    try:
+        path = write_text_artifact(tmp_path / "run" / "candidate.diff", "diff")
+    finally:
+        os.umask(previous_umask)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(SecretScanError):
+        write_text_artifact(tmp_path / "run" / "leaked.diff", "sk-" + "a" * 20)
+    assert not (tmp_path / "run" / "leaked.diff").exists()
 
 
 def test_validate_audit_artifact_requires_schema_version():

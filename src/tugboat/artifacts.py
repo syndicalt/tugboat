@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tugboat.paths import mark_private_file
+from tugboat.security.secrets import SecretScanError, scan_text
+
 
 SCHEMA_VERSION = 1
 
@@ -2024,12 +2027,21 @@ def _validate_schema_value(
 
 
 def write_json_artifact(path: Path, payload: dict[str, Any]) -> Path:
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
+    mark_private_file(path)
     return path
 
 
 def write_text_artifact(path: Path, text: str) -> Path:
+    findings = scan_text(path.as_posix(), text)
+    if findings:
+        raise SecretScanError(findings)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    mark_private_file(path)
     return path
