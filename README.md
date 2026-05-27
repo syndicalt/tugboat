@@ -6,7 +6,7 @@ The default posture is proposal-only. Tugboat creates evidence-backed review art
 
 ## Quickstart
 
-Start with [docs/quickstart.md](docs/quickstart.md).
+Start with [docs/quickstart.md](docs/quickstart.md), then use
+[docs/cli-reference.md](docs/cli-reference.md) for the full command surface.
 
 For release and production checks, see [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
-

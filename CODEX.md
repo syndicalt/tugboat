@@ -7,10 +7,15 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 ## Project Map
 
 - Start with [docs/quickstart.md](docs/quickstart.md) for the CLI workflow and release smoke commands.
+- Use [docs/cli-reference.md](docs/cli-reference.md) for the full command surface.
 - Use [docs/architecture.md](docs/architecture.md) for Tugboat's sidecar, policy, storage, and `llmff` boundaries.
 - Before promoting a build, follow [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
 - Use [docs/ci/ci-guide.md](docs/ci/ci-guide.md) and [docs/ci/github-actions-template.yml](docs/ci/github-actions-template.yml) for CI adoption.
 - Use [docs/mcp-guide.md](docs/mcp-guide.md) for MCP setup and authority boundaries.
+- Use [docs/apply-rollback.md](docs/apply-rollback.md) for review, apply, PR, and rollback workflows.
+- Use [docs/auto-apply.md](docs/auto-apply.md) before touching the narrow auto-apply lane.
+- Use [docs/daemon-guide.md](docs/daemon-guide.md) for queue, cycle, socket, profile, and read-only kill-switch operations.
+- Use [docs/troubleshooting.md](docs/troubleshooting.md) for common blocked commands and incident triage.
 - Use [docs/policy-examples.md](docs/policy-examples.md) for proposal-only, provider-backed, MCP, and auto-apply policy examples.
 - Use [docs/threat-model.md](docs/threat-model.md) before changing trust boundaries, redaction, secrets handling, MCP, daemon, apply, or rollback behavior.
 - Use [docs/ops/operating-runbook.md](docs/ops/operating-runbook.md), [docs/ops/security-review.md](docs/ops/security-review.md), [docs/ops/sidecar-backup-restore.md](docs/ops/sidecar-backup-restore.md), and [docs/ops/artifact-retention-redaction.md](docs/ops/artifact-retention-redaction.md) for production operations.

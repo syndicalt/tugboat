@@ -107,6 +107,8 @@ python -m pytest -q
 
 Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
 
+For the complete command surface, see [docs/cli-reference.md](cli-reference.md). For reviewed mutation workflows, see [docs/apply-rollback.md](apply-rollback.md). For auto-apply, daemon, and troubleshooting operations, see [docs/auto-apply.md](auto-apply.md), [docs/daemon-guide.md](daemon-guide.md), and [docs/troubleshooting.md](troubleshooting.md).
+
 ## Read-Only MCP
 
 After `tugboat init --repo .`, attach MCP clients with the read-only profile:
