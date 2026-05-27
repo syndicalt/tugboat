@@ -31,6 +31,13 @@ def test_ingest_codex_session_maps_tool_events_to_canonical_episode(tmp_path: Pa
     assert episode.request == "Fix bug"
     assert episode.tool_calls[0].payload["tool"] == "pytest"
     assert episode.command_outputs[0].payload["exit_code"] == 1
+    assert episode.test_results[0].payload == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "command": "pytest -q",
+        "source_tool": "pytest",
+    }
     assert episode.final_answer == "Done"
 
 
@@ -101,7 +108,55 @@ def test_ingest_codex_session_maps_response_item_envelopes(tmp_path: Path):
         "call_id": "call-1",
         "output": "1 failed",
     }
+    assert episode.test_results == ()
     assert episode.final_answer == "Done"
+
+
+def test_ingest_codex_session_derives_test_result_from_process_exit_status(
+    tmp_path: Path,
+):
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-1",
+                            "output": "==================\\nProcess exited with code 1",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    episode = ingest_codex_session(session)
+
+    assert episode.test_results[0].payload == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "command": "pytest -q",
+        "source_tool": "exec_command",
+        "call_id": "call-1",
+        "derived_from": "call-1",
+    }
 
 
 def test_ingest_codex_session_maps_custom_tool_response_items(tmp_path: Path):
@@ -319,6 +374,15 @@ def test_ingest_claude_transcript_maps_jsonl_content_blocks(tmp_path: Path):
         "call_id": "toolu_1",
         "output": "1 failed",
         "is_error": True,
+    }
+    assert episode.test_results[0].payload == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "command": "pytest -q",
+        "source_tool": "Bash",
+        "call_id": "toolu_1",
+        "derived_from": "toolu_1",
     }
 
 

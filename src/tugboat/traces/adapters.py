@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,7 @@ def ingest_codex_session_bundle(path: Path) -> TraceBundle:
                 events.append(event)
         elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
             events.extend(_normalize_codex_response_item(row["payload"], tool_names_by_call_id))
-    return _bundle_from_payloads(path, events)
+    return _bundle_from_payloads(path, _derive_test_results(events))
 
 
 def ingest_claude_transcript(path: Path) -> CanonicalEpisode:
@@ -43,7 +44,7 @@ def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
         for row in _read_jsonl(path):
             if isinstance(row.get("message"), dict):
                 events.extend(_normalize_claude_message(row["message"], tool_names_by_id))
-        return _bundle_from_payloads(path, events)
+        return _bundle_from_payloads(path, _derive_test_results(events))
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     messages = payload.get("messages", [])
@@ -65,7 +66,7 @@ def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
                     "summary": message.get("content", ""),
                 }
             )
-    return _bundle_from_payloads(path, events)
+    return _bundle_from_payloads(path, _derive_test_results(events))
 
 
 def ingest_ci_failure(path: Path) -> CanonicalEpisode:
@@ -348,6 +349,152 @@ def _codex_content_text(content: object) -> str:
 
 def _compact_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _derive_test_results(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    calls_by_id: dict[str, dict[str, Any]] = {}
+    pending_calls_by_tool: dict[str, dict[str, Any]] = {}
+    existing_test_keys = _existing_test_keys(events)
+
+    for event in events:
+        result.append(event)
+        event_type = event.get("type")
+        if event_type == "tool_call":
+            call_id = str(event.get("call_id", ""))
+            if call_id:
+                calls_by_id[call_id] = event
+            pending_calls_by_tool[str(event.get("tool", ""))] = event
+        elif event_type == "tool_result":
+            derived = _test_result_from_tool_result(event, calls_by_id, pending_calls_by_tool)
+            if derived is not None and _test_key(derived) not in existing_test_keys:
+                result.append(derived)
+                existing_test_keys.add(_test_key(derived))
+    return result
+
+
+def _existing_test_keys(events: list[dict[str, Any]]) -> set[tuple[str, str]]:
+    return {
+        _test_key(event)
+        for event in events
+        if event.get("type") == "test_result"
+    }
+
+
+def _test_key(event: dict[str, Any]) -> tuple[str, str]:
+    call_id = str(event.get("call_id", ""))
+    command = str(event.get("command", ""))
+    return (call_id, command)
+
+
+def _test_result_from_tool_result(
+    result: dict[str, Any],
+    calls_by_id: dict[str, dict[str, Any]],
+    pending_calls_by_tool: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    call_id = str(result.get("call_id", ""))
+    tool = str(result.get("tool", ""))
+    call = calls_by_id.get(call_id) if call_id else pending_calls_by_tool.get(tool)
+    command = _test_command_from_call(call, result)
+    if command is None:
+        return None
+    passed = _test_status_from_result(result)
+    if passed is None:
+        return None
+    event = {
+        "type": "test_result",
+        "suite": _test_suite_from_command(command),
+        "passed": passed,
+        "command": command,
+        "source_tool": tool,
+    }
+    if call_id:
+        event["call_id"] = call_id
+        event["derived_from"] = call_id
+    return event
+
+
+def _test_command_from_call(
+    call: dict[str, Any] | None,
+    result: dict[str, Any],
+) -> str | None:
+    candidates: list[str] = []
+    if call is not None:
+        candidates.extend(_command_candidates_from_call(call))
+    candidates.extend(_command_candidates_from_result(result))
+    for candidate in candidates:
+        command = _normalize_command(candidate)
+        if _is_test_command(command):
+            return command
+    return None
+
+
+def _command_candidates_from_call(call: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    args = call.get("args")
+    if isinstance(args, list):
+        candidates.append(" ".join([str(call.get("tool", "")), *[str(arg) for arg in args]]))
+    arguments = call.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ("cmd", "command"):
+                if key in parsed:
+                    candidates.append(str(parsed[key]))
+        candidates.append(arguments)
+    elif isinstance(arguments, dict):
+        for key in ("cmd", "command"):
+            if key in arguments:
+                candidates.append(str(arguments[key]))
+    candidates.append(str(call.get("tool", "")))
+    return candidates
+
+
+def _command_candidates_from_result(result: dict[str, Any]) -> list[str]:
+    candidates = [str(result.get("tool", ""))]
+    if "command" in result:
+        candidates.append(str(result["command"]))
+    return candidates
+
+
+def _normalize_command(command: str) -> str:
+    return " ".join(command.strip().split())
+
+
+def _is_test_command(command: str) -> bool:
+    if not command:
+        return False
+    first_words = " ".join(command.split()[:2]).lower()
+    first_word = command.split()[0].lower()
+    return (
+        first_word in {"pytest", "tox"}
+        or first_words in {"npm test", "pnpm test", "yarn test", "go test", "cargo test"}
+    )
+
+
+def _test_status_from_result(result: dict[str, Any]) -> bool | None:
+    if "exit_code" in result:
+        try:
+            return int(result["exit_code"]) == 0
+        except (TypeError, ValueError):
+            return None
+    if "is_error" in result:
+        return not bool(result["is_error"])
+    output = str(result.get("output", ""))
+    match = re.search(r"Process exited with code (-?\d+)", output)
+    if match is not None:
+        return int(match.group(1)) == 0
+    return None
+
+
+def _test_suite_from_command(command: str) -> str:
+    first_words = " ".join(command.split()[:2]).lower()
+    if first_words in {"npm test", "pnpm test", "yarn test", "go test", "cargo test"}:
+        return first_words
+    return command.split()[0].lower()
 
 
 def _codex_apply_patch_diff_event(patch: str, *, call_id: str) -> dict[str, Any] | None:

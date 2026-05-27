@@ -156,9 +156,19 @@ def test_audit_cli_ingests_claude_jsonl_content_blocks(tmp_path: Path):
         "final_answer",
         "tool_call",
         "tool_result",
+        "test_result",
     ]
     assert json.loads(rows[2][1])["tool"] == "Bash"
     assert json.loads(rows[3][1])["output"] == "1 failed"
+    assert json.loads(rows[4][1]) == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "command": "pytest -q",
+        "source_tool": "Bash",
+        "call_id": "toolu_1",
+        "derived_from": "toolu_1",
+    }
 
 
 def test_audit_cli_ingests_codex_trace_format_without_collapsing_tool_events(tmp_path: Path):
@@ -200,11 +210,19 @@ def test_audit_cli_ingests_codex_trace_format_without_collapsing_tool_events(tmp
         "user_request",
         "tool_call",
         "tool_result",
+        "test_result",
         "final_answer",
     ]
     assert json.loads(rows[1][1])["tool"] == "pytest"
     assert json.loads(rows[2][1])["exit_code"] == 0
     assert json.loads(rows[2][1])["output"] == "2 passed"
+    assert json.loads(rows[3][1]) == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": True,
+        "command": "pytest -q",
+        "source_tool": "pytest",
+    }
 
 
 def test_audit_cli_ingests_codex_response_item_envelopes(tmp_path: Path):

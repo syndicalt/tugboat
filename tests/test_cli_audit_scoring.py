@@ -33,6 +33,74 @@ def test_mock_audit_uses_scoring_outcomes_for_failed_tests(tmp_path: Path):
     ]
 
 
+def test_mock_audit_scores_codex_test_command_failures(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nRun tests before final.\n", encoding="utf-8")
+    trace = tmp_path / "codex.jsonl"
+    trace.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-1",
+                            "output": "Process exited with code 1",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "codex",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 0
+    )
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    canonical_episode = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+
+    assert audit["failure_class"] == "agent_ignored_instruction"
+    assert audit["scoring"][0]["label"] == "failed-tests"
+    assert canonical_episode["test_results"][0]["payload"] == {
+        "type": "test_result",
+        "suite": "pytest",
+        "passed": False,
+        "command": "pytest -q",
+        "source_tool": "exec_command",
+        "call_id": "call-1",
+        "derived_from": "call-1",
+    }
+
+
 def test_mock_audit_prioritizes_policy_violations_over_failed_tests(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
