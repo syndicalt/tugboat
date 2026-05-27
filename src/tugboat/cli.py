@@ -186,7 +186,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     mcp = subcommands.add_parser("mcp")
     mcp_subcommands = mcp.add_subparsers(dest="mcp_command", required=True)
-    mcp_subcommands.add_parser("stdio")
+    mcp_stdio = mcp_subcommands.add_parser("stdio")
+    mcp_stdio.add_argument("--repo")
+    mcp_stdio.add_argument("--read-only", action="store_true")
 
     daemon = subcommands.add_parser("daemon")
     daemon_subcommands = daemon.add_subparsers(dest="daemon_command", required=True)
@@ -599,7 +601,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "mcp" and args.mcp_command == "stdio":
-        return run_stdio_server(sys.stdin, sys.stdout)
+        return run_stdio_server(
+            sys.stdin,
+            sys.stdout,
+            repo=Path(args.repo) if args.repo else None,
+            read_only=args.read_only,
+        )
 
     if args.command == "daemon" and args.daemon_command == "status":
         repo = Path(args.repo)

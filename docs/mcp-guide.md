@@ -2,13 +2,19 @@
 
 ## Transport
 
-Run MCP over stdio:
+For read-only agent attachment, bind the stdio server to the current repo:
+
+```bash
+tugboat mcp stdio --repo . --read-only
+```
+
+In this profile Tugboat injects the bound repo for read tool calls, rejects repo overrides, and does not advertise write-intent tools. MCP is a local-only adapter surface. It does not replace the CLI and must obey the repo allowlist and per-tool policy.
+
+Unbound stdio remains available for clients that pass a `repo` argument with each tool call:
 
 ```bash
 tugboat mcp stdio
 ```
-
-MCP is local-only adapter surface. It does not replace the CLI and must obey repo allowlist and per-tool policy.
 
 ## Read Tools
 
@@ -24,4 +30,4 @@ These tools require an explicit `allow` entry in `mcp.tool_policy` before they c
 
 ## Security Policy
 
-Configure a repo allowlist and per-tool policy in `.sidecar/policy.yaml`. A repo allowlist is mandatory for all MCP tools. Read tools may run with no per-tool entry unless denied; write-intent tools require explicit `allow`. The direct apply, rollback, policy change, provider credential management, and daemon control actions are not exposed through MCP tools.
+Configure a repo allowlist and per-tool policy in `.sidecar/policy.yaml`. A repo allowlist is mandatory for all MCP tools, including bound read-only stdio. Read tools may run with no per-tool entry unless denied; write-intent tools require explicit `allow`. The direct apply, rollback, policy change, provider credential management, and daemon control actions are not exposed through MCP tools.

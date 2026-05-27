@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -694,19 +695,44 @@ def tugboat_request_eval(repo: str | Path, candidate_id: str, suite: str) -> dic
     )
 
 
-def list_mcp_tools() -> list[dict[str, Any]]:
+def list_mcp_tools(*, bound_repo: Path | None = None, read_only: bool = False) -> list[dict[str, Any]]:
+    tool_names = sorted(MCP_TOOLS)
+    if read_only:
+        tool_names = [name for name in tool_names if name not in WRITE_INTENT_TOOLS]
     return [
         {
-            "inputSchema": MCP_TOOL_INPUT_SCHEMAS[name],
+            "inputSchema": _mcp_display_schema(
+                MCP_TOOL_INPUT_SCHEMAS[name],
+                bound_repo=bound_repo,
+            ),
             "name": name,
             "mutates_instructions": False,
             "write_intent": name in WRITE_INTENT_TOOLS,
         }
-        for name in sorted(MCP_TOOLS)
+        for name in tool_names
     ]
 
 
-def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any] | None:
+def _mcp_display_schema(schema: dict[str, Any], *, bound_repo: Path | None) -> dict[str, Any]:
+    if bound_repo is None:
+        return schema
+    bound_schema = deepcopy(schema)
+    properties = bound_schema.get("properties")
+    if isinstance(properties, dict):
+        properties.pop("repo", None)
+    required = bound_schema.get("required")
+    if isinstance(required, list):
+        bound_schema["required"] = [name for name in required if name != "repo"]
+    return bound_schema
+
+
+def handle_jsonrpc_request(
+    request: dict[str, Any],
+    *,
+    repo: Path | None = None,
+    read_only: bool = False,
+) -> dict[str, Any] | None:
+    bound_repo = repo.expanduser().resolve() if repo is not None else None
     request_id = request.get("id")
     method = request.get("method")
     try:
@@ -729,7 +755,13 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any] | None:
         if method == "notifications/initialized":
             return None
         if method == "tools/list":
-            return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": list_mcp_tools()}}
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": list_mcp_tools(bound_repo=bound_repo, read_only=read_only)
+                },
+            }
         if method == "tools/call":
             params = request.get("params", {})
             if not isinstance(params, dict):
@@ -745,6 +777,18 @@ def handle_jsonrpc_request(request: dict[str, Any]) -> dict[str, Any] | None:
             tool = MCP_TOOLS.get(name)
             if tool is None:
                 return _jsonrpc_error(request_id, -32601, f"unknown MCP tool: {name}")
+            if read_only and name in WRITE_INTENT_TOOLS:
+                reason = f"bound read-only MCP session does not expose write-intent tool: {name}"
+                if bound_repo is not None:
+                    _audit_bound_mcp_denial(bound_repo, name, arguments, reason)
+                return _jsonrpc_error(request_id, -32000, reason)
+            bound_error = _apply_bound_mcp_repo(
+                bound_repo,
+                name,
+                arguments,
+            )
+            if bound_error is not None:
+                return _jsonrpc_error(request_id, -32000, bound_error)
             invalid_params = _validate_tool_arguments(name, arguments)
             if invalid_params is not None:
                 _audit_jsonrpc_validation_failure(name, arguments, invalid_params)
@@ -783,7 +827,59 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
 }
 
 
-def run_stdio_server(input_stream, output_stream) -> int:
+def _apply_bound_mcp_repo(
+    bound_repo: Path | None,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> str | None:
+    if bound_repo is None:
+        return None
+    raw_repo = arguments.get("repo")
+    if raw_repo is None:
+        arguments["repo"] = bound_repo.as_posix()
+        return None
+    if not isinstance(raw_repo, str):
+        reason = "bound MCP session repo argument must be string"
+        _audit_bound_mcp_denial(bound_repo, tool_name, arguments, reason)
+        return reason
+    requested_repo = Path(raw_repo).expanduser().resolve()
+    if requested_repo != bound_repo:
+        reason = "bound MCP session does not allow repo override"
+        _audit_bound_mcp_denial(bound_repo, tool_name, arguments, reason)
+        return reason
+    arguments["repo"] = bound_repo.as_posix()
+    return None
+
+
+def _audit_bound_mcp_denial(
+    repo: Path,
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+) -> None:
+    payload = {
+        "tool": tool_name,
+        "repo": repo.as_posix(),
+        "arguments": redact_payload(arguments),
+        "status": "failed",
+        "reason": redact_text(reason),
+    }
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_mcp_call(
+            tool_name=tool_name,
+            repo_path=repo,
+            status="failed",
+            payload=payload,
+        )
+
+
+def run_stdio_server(
+    input_stream,
+    output_stream,
+    *,
+    repo: Path | None = None,
+    read_only: bool = False,
+) -> int:
     for line in input_stream:
         if not line.strip():
             continue
@@ -795,7 +891,7 @@ def run_stdio_server(input_stream, output_stream) -> int:
             if not isinstance(request, dict):
                 response = _jsonrpc_error(None, -32600, "request must be an object")
             else:
-                response = handle_jsonrpc_request(request)
+                response = handle_jsonrpc_request(request, repo=repo, read_only=read_only)
         if response is not None:
             output_stream.write(json.dumps(response, sort_keys=True) + "\n")
             output_stream.flush()

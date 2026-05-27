@@ -103,3 +103,13 @@ python -m pytest -q
 ```
 
 Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
+
+## Read-Only MCP
+
+After allowlisting the repo in `.sidecar/policy.yaml`, attach MCP clients with the read-only profile:
+
+```bash
+tugboat mcp stdio --repo . --read-only
+```
+
+This profile exposes read tools such as status, instruction graph, latest runs, harness findings, and candidate reports. It does not advertise write-intent tools and rejects repo overrides.

@@ -229,6 +229,22 @@ mcp:
     )
 
 
+def _mcp_stdio_responses(
+    requests: list[dict[str, object]],
+    *,
+    repo: Path | None = None,
+    read_only: bool = False,
+) -> list[dict[str, object]]:
+    output = io.StringIO()
+    run_stdio_server(
+        io.StringIO("".join(json.dumps(request) + "\n" for request in requests)),
+        output,
+        repo=repo,
+        read_only=read_only,
+    )
+    return [json.loads(line) for line in output.getvalue().splitlines()]
+
+
 def test_mcp_write_intent_defaults_denied_without_explicit_tool_allow(tmp_path: Path):
     repo = tmp_path
     sidecar = repo / ".sidecar"
@@ -2598,6 +2614,77 @@ def test_mcp_stdio_supports_initialize_handshake_and_initialized_notification():
         },
         {"jsonrpc": "2.0", "id": 2, "result": {"tools": list_mcp_tools()}},
     ]
+
+
+def test_bound_read_only_mcp_stdio_lists_only_read_tools(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
+
+    responses = _mcp_stdio_responses(
+        [{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    tools = responses[0]["result"]["tools"]
+    tool_names = {tool["name"] for tool in tools}
+    assert "tugboat_status" in tool_names
+    assert "tugboat_index_summary" in tool_names
+    assert not (tool_names & mcp_contracts.WRITE_INTENT_TOOLS)
+    assert all(tool["write_intent"] is False for tool in tools)
+    assert all(tool["mutates_instructions"] is False for tool in tools)
+    assert all("repo" not in tool["inputSchema"]["required"] for tool in tools)
+
+
+def test_bound_read_only_mcp_stdio_injects_repo_for_read_tool_calls(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "tugboat_status", "arguments": {}},
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    assert responses[0]["id"] == 2
+    assert responses[0]["result"]["content"][0]["json"]["mode"] == "proposal_only"
+    assert _mcp_events(tmp_path)[-1]["tool"] == "tugboat_status"
+
+
+def test_bound_read_only_mcp_stdio_rejects_repo_override(tmp_path: Path):
+    repo = tmp_path / "repo"
+    other = tmp_path / "other"
+    repo.mkdir()
+    other.mkdir()
+    _allow_mcp_repo(repo)
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "tugboat_status",
+                    "arguments": {"repo": str(other)},
+                },
+            }
+        ],
+        repo=repo,
+        read_only=True,
+    )
+
+    assert responses[0]["id"] == 3
+    assert responses[0]["error"]["code"] == -32000
+    assert "bound MCP session does not allow repo override" in responses[0]["error"]["message"]
+    event = _mcp_events(repo)[-1]
+    assert event["tool"] == "tugboat_status"
+    assert event["status"] == "failed"
 
 
 def test_mcp_stdio_returns_parse_error_for_malformed_json():
