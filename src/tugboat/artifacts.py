@@ -1445,7 +1445,8 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     "mcp-request.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
-        "required": ["request_id", "kind", "state", "write_intent", "repo_policy"],
+        "additionalProperties": False,
+        "required": ["request_id", "kind", "state", "write_intent", "repo_policy", "execution"],
         "properties": {
             "request_id": {"type": "string"},
             "kind": {"type": "string", "enum": ["audit", "proposal", "eval"]},
@@ -1461,6 +1462,25 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "hash": {"type": ["string", "null"]},
                 },
             },
+            "execution": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["kind", "payload"],
+                "properties": {
+                    "kind": {"type": "string", "enum": ["trace_audit", "proposal", "eval"]},
+                    "payload": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": ["string", "integer", "number", "boolean", "null"],
+                        },
+                    },
+                },
+            },
+            "trace_id": {"type": "string"},
+            "trace_format": {"type": "string"},
+            "audit_id": {"type": "string"},
+            "candidate_id": {"type": "string"},
+            "suite": {"type": "string"},
         },
     },
     "daemon-discovered-traces.json": {

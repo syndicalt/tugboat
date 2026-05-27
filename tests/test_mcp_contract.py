@@ -2007,6 +2007,14 @@ mcp:
         "write_intent": True,
         "trace_id": episode["trace_id"],
         "trace_format": "generic-jsonl",
+        "execution": {
+            "kind": "trace_audit",
+            "payload": {
+                "trace_path": str(repo / episode["artifact_ref"]),
+                "trace_artifact_ref": episode["artifact_ref"],
+                "trace_format": "generic-jsonl",
+            },
+        },
         "repo_policy": {
             "path": ".sidecar/policy.yaml",
             "version": 7,

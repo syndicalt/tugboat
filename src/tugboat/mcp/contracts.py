@@ -654,6 +654,12 @@ def _read_episode_trace_format(trace_path: Path) -> str:
 def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
     trace_path = sidecar_dir(repo_path) / "mcp" / "episodes" / f"{trace_id}.jsonl"
+    trace_format = _read_episode_trace_format(trace_path)
+    queue_payload = {
+        "trace_path": str(trace_path),
+        "trace_artifact_ref": _relative_ref(repo_path, trace_path),
+        "trace_format": trace_format,
+    }
 
     def validate_trace() -> None:
         _validate_mcp_artifact_id("trace_id", trace_id)
@@ -664,12 +670,9 @@ def tugboat_request_audit(repo: str | Path, trace_id: str) -> dict[str, Any]:
         repo_path,
         tool="tugboat_request_audit",
         kind="audit",
-        payload={"trace_id": trace_id, "trace_format": _read_episode_trace_format(trace_path)},
+        payload={"trace_id": trace_id, "trace_format": trace_format},
         queue_kind="trace_audit",
-        queue_payload={
-            "trace_path": str(trace_path),
-            "trace_format": _read_episode_trace_format(trace_path),
-        },
+        queue_payload=queue_payload,
         preflight=validate_trace,
     )
 
@@ -1147,6 +1150,10 @@ def _write_request_artifact(
             "state": "queued",
             "write_intent": True,
             "repo_policy": repo_policy,
+            "execution": {
+                "kind": queue_kind or kind,
+                "payload": queue_payload or payload,
+            },
             **payload,
         }
         validate_json_artifact("mcp-request.json", artifact)

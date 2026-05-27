@@ -1233,6 +1233,13 @@ def test_validate_mcp_request_artifact_accepts_common_write_intent_shape():
                 "version": 1,
                 "hash": None,
             },
+            "execution": {
+                "kind": "trace_audit",
+                "payload": {
+                    "trace_artifact_ref": ".sidecar/mcp/episodes/mcp-trace-20260526T000000000000Z.jsonl",
+                    "trace_format": "generic-jsonl",
+                },
+            },
             "trace_id": "mcp-trace-20260526T000000000000Z",
         },
     )

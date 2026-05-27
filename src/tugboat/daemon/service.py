@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 from dataclasses import dataclass
@@ -7,7 +8,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from tugboat.artifacts import ArtifactValidationError, validate_json_artifact
 from tugboat.audit.pipeline import AuditPipelineResult, run_audit_pipeline
+from tugboat.config import load_policy
 from tugboat.daemon.queue import (
     DaemonQueue,
     FileKillSwitch,
@@ -19,6 +22,7 @@ from tugboat.db import Store
 from tugboat.eval.pipeline import EvalPipelineResult, run_eval_pipeline
 from tugboat.paths import ensure_private_dir, mark_private_file, sidecar_dir
 from tugboat.propose.pipeline import ProposePipelineResult, run_propose_pipeline
+from tugboat.security.secrets import scan_text
 
 
 class DaemonJobPayloadError(ValueError):
@@ -208,11 +212,20 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
     try:
         result: AuditPipelineResult | ProposePipelineResult | EvalPipelineResult | None = None
         if running.kind == "trace_audit":
-            result = _execute_trace_audit(repo, running.payload)
+            result = _execute_trace_audit(
+                repo,
+                _authoritative_execution_payload(repo, running.kind, running.payload),
+            )
         elif running.kind == "proposal":
-            result = _execute_proposal(repo, running.payload)
+            result = _execute_proposal(
+                repo,
+                _authoritative_execution_payload(repo, running.kind, running.payload),
+            )
         elif running.kind == "eval":
-            result = _execute_eval(repo, running.payload)
+            result = _execute_eval(
+                repo,
+                _authoritative_execution_payload(repo, running.kind, running.payload),
+            )
         elif running.kind == "audit":
             result = None
         else:
@@ -235,7 +248,13 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
 
 def _execute_trace_audit(repo: Path, payload: dict[str, Any]) -> AuditPipelineResult:
     repo_root = repo.resolve()
-    trace_path = Path(_required_payload_text(payload, "trace_path")).expanduser().resolve()
+    if "trace_artifact_ref" in payload:
+        trace_path = _repo_relative_artifact_path(
+            repo,
+            _required_payload_text(payload, "trace_artifact_ref"),
+        )
+    else:
+        trace_path = Path(_required_payload_text(payload, "trace_path")).expanduser().resolve()
     if not trace_path.is_relative_to(repo_root):
         raise DaemonJobPayloadError("trace_path must resolve inside repo")
     trace_format = str(payload.get("trace_format", "auto"))
@@ -273,6 +292,123 @@ def _required_payload_text(payload: Any, key: str) -> str:
     if not isinstance(value, str) or not value:
         raise DaemonJobPayloadError(f"daemon job payload missing {key}")
     return value
+
+
+def _authoritative_execution_payload(
+    repo: Path,
+    queue_kind: str,
+    queue_payload: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(queue_payload, dict):
+        raise DaemonJobPayloadError("daemon job payload must be a JSON object")
+    if "artifact_ref" not in queue_payload and "request_id" not in queue_payload:
+        return queue_payload
+    request = _load_mcp_request_artifact(repo, queue_kind, queue_payload)
+    execution = request.get("execution")
+    if not isinstance(execution, dict):
+        raise DaemonJobPayloadError("mcp request missing execution")
+    payload = execution.get("payload")
+    if not isinstance(payload, dict):
+        raise DaemonJobPayloadError("mcp request execution payload must be a JSON object")
+    return dict(payload)
+
+
+def _load_mcp_request_artifact(
+    repo: Path,
+    queue_kind: str,
+    queue_payload: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_ref = _required_payload_text(queue_payload, "artifact_ref")
+    artifact_path = _request_artifact_path(repo, artifact_ref)
+    try:
+        text = artifact_path.read_text(encoding="utf-8")
+        findings = scan_text(artifact_ref, text)
+        if findings:
+            raise DaemonJobPayloadError("mcp request artifact contains secrets")
+        artifact = json.loads(text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise DaemonJobPayloadError("mcp request artifact is unreadable") from exc
+    if not isinstance(artifact, dict):
+        raise DaemonJobPayloadError("mcp request artifact must be a JSON object")
+    try:
+        validate_json_artifact("mcp-request.json", artifact)
+    except ArtifactValidationError as exc:
+        raise DaemonJobPayloadError("mcp request artifact is invalid") from exc
+
+    request_id = _required_payload_text(queue_payload, "request_id")
+    if artifact.get("request_id") != request_id:
+        raise DaemonJobPayloadError("mcp request_id does not match queue payload")
+    expected_request_kind = {
+        "trace_audit": "audit",
+        "proposal": "proposal",
+        "eval": "eval",
+    }.get(queue_kind)
+    if artifact.get("kind") != expected_request_kind:
+        raise DaemonJobPayloadError("mcp request kind does not match queue job")
+    execution = artifact.get("execution")
+    if not isinstance(execution, dict) or execution.get("kind") != queue_kind:
+        raise DaemonJobPayloadError("mcp request execution kind does not match queue job")
+    execution_payload = execution.get("payload")
+    if not isinstance(execution_payload, dict):
+        raise DaemonJobPayloadError("mcp request execution payload must be a JSON object")
+    for key, value in execution_payload.items():
+        if queue_payload.get(key) != value:
+            raise DaemonJobPayloadError(f"mcp request queue payload mismatch: {key}")
+    _validate_request_policy_current(repo, artifact)
+    return artifact
+
+
+def _request_artifact_path(repo: Path, artifact_ref: str) -> Path:
+    if Path(artifact_ref).is_absolute():
+        raise DaemonJobPayloadError("mcp request artifact_ref must be repo-relative")
+    requests_root = sidecar_dir(repo) / "mcp" / "requests"
+    sidecar_root = sidecar_dir(repo).resolve()
+    resolved_requests_root = requests_root.resolve()
+    if not resolved_requests_root.is_relative_to(sidecar_root):
+        raise DaemonJobPayloadError("mcp request root must resolve inside sidecar")
+    artifact_path = (repo / artifact_ref).resolve()
+    if not artifact_path.is_relative_to(resolved_requests_root):
+        raise DaemonJobPayloadError("mcp request artifact_ref must resolve inside request root")
+    if artifact_path.suffix != ".json":
+        raise DaemonJobPayloadError("mcp request artifact must be JSON")
+    if not artifact_path.is_file():
+        raise DaemonJobPayloadError("mcp request artifact does not exist")
+    return artifact_path
+
+
+def _repo_relative_artifact_path(repo: Path, artifact_ref: str) -> Path:
+    if Path(artifact_ref).is_absolute():
+        raise DaemonJobPayloadError("artifact ref must be repo-relative")
+    repo_root = repo.resolve()
+    artifact_path = (repo / artifact_ref).resolve()
+    if not artifact_path.is_relative_to(repo_root):
+        raise DaemonJobPayloadError("artifact ref must resolve inside repo")
+    return artifact_path
+
+
+def _validate_request_policy_current(repo: Path, artifact: dict[str, Any]) -> None:
+    expected = artifact.get("repo_policy")
+    if not isinstance(expected, dict):
+        raise DaemonJobPayloadError("mcp request missing repo policy")
+    current = _current_repo_policy_ref(repo)
+    if expected != current:
+        raise DaemonJobPayloadError("mcp request repo policy is stale")
+
+
+def _current_repo_policy_ref(repo: Path) -> dict[str, Any]:
+    path = sidecar_dir(repo) / "policy.yaml"
+    policy = load_policy(repo)
+    if not path.exists():
+        return {
+            "path": ".sidecar/policy.yaml",
+            "version": policy.version,
+            "hash": None,
+        }
+    return {
+        "path": path.relative_to(repo).as_posix(),
+        "version": policy.version,
+        "hash": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
 
 
 def _record_job_state(

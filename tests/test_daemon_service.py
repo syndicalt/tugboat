@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import socket
 import sqlite3
@@ -9,6 +10,7 @@ import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +26,38 @@ from tugboat.db import Store
 from tugboat.eval.pipeline import EvalPipelineResult
 from tugboat.paths import sidecar_dir
 from tugboat.mcp import tugboat_daemon_status
+
+
+def _write_mcp_request_artifact(
+    repo: Path,
+    *,
+    request_id: str,
+    kind: str,
+    execution_kind: str,
+    execution_payload: dict[str, object],
+    repo_policy: dict[str, object] | None = None,
+) -> str:
+    request_dir = repo / ".sidecar" / "mcp" / "requests"
+    request_dir.mkdir(parents=True, exist_ok=True)
+    artifact_ref = f".sidecar/mcp/requests/{request_id}.json"
+    artifact = {
+        "request_id": request_id,
+        "kind": kind,
+        "state": "queued",
+        "write_intent": True,
+        "repo_policy": repo_policy
+        or {
+            "path": ".sidecar/policy.yaml",
+            "version": 1,
+            "hash": None,
+        },
+        "execution": {
+            "kind": execution_kind,
+            "payload": execution_payload,
+        },
+    }
+    (repo / artifact_ref).write_text(json.dumps(artifact), encoding="utf-8")
+    return artifact_ref
 
 
 def _write_fake_llmff(path: Path) -> Path:
@@ -668,6 +702,249 @@ def test_run_daemon_once_rejects_trace_audit_path_outside_repo_before_artifacts(
     assert not (repo / ".sidecar" / "runs").exists()
     with DaemonQueue.open_sidecar(repo) as queue:
         assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_once_rejects_mcp_proposal_queue_payload_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    artifact_ref = _write_mcp_request_artifact(
+        tmp_path,
+        request_id="mcp-proposal-20260527T000000000000Z",
+        kind="proposal",
+        execution_kind="proposal",
+        execution_payload={"audit_id": "1"},
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_propose(repo: Path, audit_id: str):
+        calls.append({"repo": repo, "audit_id": audit_id})
+        return SimpleNamespace(exit_code=0)
+
+    monkeypatch.setattr("tugboat.daemon.service.run_propose_pipeline", fake_propose)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="proposal",
+            payload={
+                "request_id": "mcp-proposal-20260527T000000000000Z",
+                "artifact_ref": artifact_ref,
+                "audit_id": "999",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "failed"
+    assert calls == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+def test_run_daemon_once_rejects_mcp_request_kind_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    artifact_ref = _write_mcp_request_artifact(
+        tmp_path,
+        request_id="mcp-proposal-20260527T000000000000Z",
+        kind="audit",
+        execution_kind="proposal",
+        execution_payload={"audit_id": "1"},
+    )
+    calls: list[str] = []
+
+    def fake_propose(repo: Path, audit_id: str):
+        calls.append(audit_id)
+        return SimpleNamespace(exit_code=0)
+
+    monkeypatch.setattr("tugboat.daemon.service.run_propose_pipeline", fake_propose)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="proposal",
+            payload={
+                "request_id": "mcp-proposal-20260527T000000000000Z",
+                "artifact_ref": artifact_ref,
+                "audit_id": "1",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "failed"
+    assert calls == []
+
+
+def test_run_daemon_once_rejects_stale_mcp_request_policy_before_pipeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    policy_path = tmp_path / ".sidecar" / "policy.yaml"
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text("version: 1\n", encoding="utf-8")
+    original_hash = hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    artifact_ref = _write_mcp_request_artifact(
+        tmp_path,
+        request_id="mcp-eval-20260527T000000000000Z",
+        kind="eval",
+        execution_kind="eval",
+        execution_payload={"candidate_id": "7", "suite": "all"},
+        repo_policy={
+            "path": ".sidecar/policy.yaml",
+            "version": 1,
+            "hash": original_hash,
+        },
+    )
+    policy_path.write_text("version: 1\nmode: proposal_only\n", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    def fake_eval(repo: Path, candidate_id: str, suite: str):
+        calls.append({"repo": repo, "candidate_id": candidate_id, "suite": suite})
+        return SimpleNamespace(exit_code=0)
+
+    monkeypatch.setattr("tugboat.daemon.service.run_eval_pipeline", fake_eval)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="eval",
+            payload={
+                "request_id": "mcp-eval-20260527T000000000000Z",
+                "artifact_ref": artifact_ref,
+                "candidate_id": "7",
+                "suite": "all",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "failed"
+    assert calls == []
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    ("artifact_ref", "artifact_text"),
+    [
+        (".sidecar/mcp/requests/missing.json", None),
+        (
+            ".sidecar/mcp/requests/malformed.json",
+            '{"request_id": "mcp-proposal-20260527T000000000000Z"',
+        ),
+        (
+            ".sidecar/mcp/requests/secret.json",
+            '{"request_id": "mcp-proposal-20260527T000000000000Z", "secret": "sk-abcdefghijklmnopqrstuvwxyz"}',
+        ),
+    ],
+)
+def test_run_daemon_once_rejects_invalid_mcp_request_artifacts(
+    tmp_path: Path,
+    artifact_ref: str,
+    artifact_text: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    if artifact_text is not None:
+        artifact_path = tmp_path / artifact_ref
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(artifact_text, encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_propose(repo: Path, audit_id: str):
+        calls.append(audit_id)
+        return SimpleNamespace(exit_code=0)
+
+    monkeypatch.setattr("tugboat.daemon.service.run_propose_pipeline", fake_propose)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="proposal",
+            payload={
+                "request_id": "mcp-proposal-20260527T000000000000Z",
+                "artifact_ref": artifact_ref,
+                "audit_id": "1",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "failed"
+    assert calls == []
+
+
+def test_run_daemon_once_rejects_symlink_escaped_mcp_request_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    outside = tmp_path / "outside-requests"
+    outside.mkdir()
+    request_root = tmp_path / ".sidecar" / "mcp" / "requests"
+    request_root.parent.mkdir(parents=True, exist_ok=True)
+    request_root.symlink_to(outside, target_is_directory=True)
+    artifact_ref = ".sidecar/mcp/requests/mcp-proposal-20260527T000000000000Z.json"
+    (outside / "mcp-proposal-20260527T000000000000Z.json").write_text("{}", encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_propose(repo: Path, audit_id: str):
+        calls.append(audit_id)
+        return SimpleNamespace(exit_code=0)
+
+    monkeypatch.setattr("tugboat.daemon.service.run_propose_pipeline", fake_propose)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(
+            kind="proposal",
+            payload={
+                "request_id": "mcp-proposal-20260527T000000000000Z",
+                "artifact_ref": artifact_ref,
+                "audit_id": "1",
+            },
+            now=_at(0),
+        )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result["job_id"] == job.id
+    assert result["final_state"] == "failed"
+    assert calls == []
 
 
 def test_run_daemon_once_fails_non_object_trace_audit_payload_without_crashing(
