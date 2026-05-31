@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
+from yaml import YAMLError
 
 from tugboat.artifacts import (
     ArtifactValidationError,
@@ -417,7 +418,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "doctor":
         repo = Path(args.repo).resolve()
-        _print_doctor_report(repo)
+        try:
+            _print_doctor_report(repo)
+        except (OSError, ValueError, YAMLError) as error:
+            print(f"doctor blocked: policy invalid: {error}")
+            print(f"recommendation: fix .sidecar/policy.yaml and rerun `tugboat doctor --repo {repo}`")
+            return 1
         return 0
 
     if args.command == "init":
