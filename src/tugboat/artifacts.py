@@ -2777,6 +2777,50 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "rollback-incident.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "decision_id",
+            "candidate_id",
+            "failure_kind",
+            "failure_message",
+            "commit_sha",
+            "target_files",
+            "rollback_plan_written",
+            "rollback_applied",
+            "source_artifacts",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "decision_id": {"type": "string"},
+            "candidate_id": {"type": "integer"},
+            "failure_kind": {"type": "string"},
+            "failure_message": {"type": "string"},
+            "commit_sha": {"type": "string"},
+            "target_files": {"type": "array", "items": {"type": "string"}},
+            "rollback_plan_written": {"type": "boolean"},
+            "rollback_applied": {"type": "boolean"},
+            "source_artifacts": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["apply_plan"],
+                "properties": {
+                    "apply_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    },
 }
 
 
@@ -2840,7 +2884,7 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
             ):
             if field not in payload:
                 raise ArtifactValidationError(f"{name} missing required field: {field}")
-    if name in {"provenance-bundle.json", "rollback-plan.json"}:
+    if name in {"provenance-bundle.json", "rollback-plan.json", "rollback-incident.json"}:
         source_artifacts = payload.get("source_artifacts", {})
         if isinstance(source_artifacts, dict):
             for artifact_name, artifact_ref in source_artifacts.items():

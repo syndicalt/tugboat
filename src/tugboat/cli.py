@@ -92,6 +92,7 @@ from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
 from tugboat.report.service import write_report
+from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 from tugboat.vcs import PullRequestResult, VcsAdapter, VcsStateError
 
@@ -4235,12 +4236,31 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
         files=target_files,
         reason=f"rollback decision {apply_plan['decision_id']}",
     )
+    source_artifacts = {
+        "apply_plan": {
+            "path": _relative_repo_path(repo, run_dir / "apply-plan.json"),
+            "sha256": CandidatePatch.hash_file(run_dir / "apply-plan.json"),
+        }
+    }
     revert_commit = ""
     if execute:
-        revert_commit = adapter.revert_commit(
-            branch_name=str(apply_plan["branch_name"]),
-            commit_sha=commit_sha,
-        )
+        try:
+            revert_commit = adapter.revert_commit(
+                branch_name=str(apply_plan["branch_name"]),
+                commit_sha=commit_sha,
+            )
+        except VcsStateError as error:
+            _write_rollback_incident(
+                repo,
+                run_dir,
+                apply_plan=apply_plan,
+                commit_sha=commit_sha,
+                target_files=target_files,
+                failure_kind="git_revert_failed",
+                failure_message=str(error),
+                source_artifacts=source_artifacts,
+            )
+            raise
     pre_hashes = apply_plan.get("pre_hashes", {})
     post_rollback_hashes = _target_file_hashes(repo, target_files=target_files) if execute else {}
     restored_pre_hashes = _rollback_restored_pre_hashes(
@@ -4253,12 +4273,6 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
         "executed": execute,
         "restored_pre_hashes": restored_pre_hashes,
         "target_files": list(target_files),
-    }
-    source_artifacts = {
-        "apply_plan": {
-            "path": _relative_repo_path(repo, run_dir / "apply-plan.json"),
-            "sha256": CandidatePatch.hash_file(run_dir / "apply-plan.json"),
-        }
     }
     provenance_bundle = apply_plan.get("provenance_bundle")
     if isinstance(provenance_bundle, str):
@@ -4331,6 +4345,57 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
                 target_state=JobState.ROLLED_BACK,
             )
     return path
+
+
+def _write_rollback_incident(
+    repo: Path,
+    run_dir: Path,
+    *,
+    apply_plan: dict[str, object],
+    commit_sha: str,
+    target_files: tuple[str, ...],
+    failure_kind: str,
+    failure_message: str,
+    source_artifacts: dict[str, object],
+) -> Path:
+    redacted_failure_message = _bounded_rollback_failure_message(failure_message)
+    payload: dict[str, object] = {
+        "schema_version": SCHEMA_VERSION,
+        "decision_id": str(apply_plan["decision_id"]),
+        "candidate_id": int(apply_plan["candidate_id"]),
+        "failure_kind": failure_kind,
+        "failure_message": redacted_failure_message,
+        "commit_sha": commit_sha,
+        "target_files": list(target_files),
+        "rollback_plan_written": False,
+        "rollback_applied": False,
+        "source_artifacts": source_artifacts,
+    }
+    path = run_dir / "rollback-incident.json"
+    incident = _relative_repo_path(repo, path)
+    _write_secret_scanned_json_artifact(path, "rollback-incident.json", payload)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "rollback.failed",
+            {
+                "candidate_id": int(apply_plan["candidate_id"]),
+                "commit_sha": commit_sha,
+                "decision_id": str(apply_plan["decision_id"]),
+                "failure_kind": failure_kind,
+                "incident": incident,
+                "rollback_applied": False,
+                "rollback_plan_written": False,
+                "target_files": list(target_files),
+            },
+        )
+    return path
+
+
+def _bounded_rollback_failure_message(message: str, *, limit: int = 2000) -> str:
+    redacted = redact_text(message)
+    if len(redacted) <= limit:
+        return redacted
+    return f"{redacted[:limit]}...[truncated]"
 
 
 def _latest_decision_id_for_candidate(store: Store, *, candidate_id: int) -> int:

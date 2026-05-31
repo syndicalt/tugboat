@@ -2255,6 +2255,53 @@ def test_validate_auto_apply_shadow_accepts_current_schema():
     )
 
 
+def test_validate_rollback_incident_accepts_current_schema():
+    validate_json_artifact(
+        "rollback-incident.json",
+        {
+            "schema_version": 1,
+            "decision_id": "20260525T000000000000Z",
+            "candidate_id": 7,
+            "failure_kind": "git_revert_failed",
+            "failure_message": "git revert failed",
+            "commit_sha": "abc123",
+            "target_files": ["CODEX.md"],
+            "rollback_plan_written": False,
+            "rollback_applied": False,
+            "source_artifacts": {
+                "apply_plan": {
+                    "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+                    "sha256": "d" * 64,
+                }
+            },
+        },
+    )
+
+
+def test_validate_rollback_incident_rejects_bad_source_artifact_digest():
+    with pytest.raises(ArtifactValidationError, match="SHA-256 digest"):
+        validate_json_artifact(
+            "rollback-incident.json",
+            {
+                "schema_version": 1,
+                "decision_id": "20260525T000000000000Z",
+                "candidate_id": 7,
+                "failure_kind": "git_revert_failed",
+                "failure_message": "git revert failed",
+                "commit_sha": "abc123",
+                "target_files": ["CODEX.md"],
+                "rollback_plan_written": False,
+                "rollback_applied": False,
+                "source_artifacts": {
+                    "apply_plan": {
+                        "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+                        "sha256": "def456",
+                    }
+                },
+            },
+        )
+
+
 def test_validate_auto_apply_preflight_requires_vcs_checks():
     with pytest.raises(ArtifactValidationError, match="checks.vcs"):
         validate_json_artifact(

@@ -1355,6 +1355,20 @@ def test_rollback_execute_handles_git_revert_conflict_without_success_artifacts(
     assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 1
 
     assert not (run_dir / "rollback-plan.json").exists()
+    incident = json.loads((run_dir / "rollback-incident.json").read_text(encoding="utf-8"))
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    assert incident["schema_version"] == 1
+    assert incident["decision_id"] == run_dir.name
+    assert incident["candidate_id"] == 7
+    assert incident["failure_kind"] == "git_revert_failed"
+    assert incident["rollback_plan_written"] is False
+    assert incident["rollback_applied"] is False
+    assert incident["commit_sha"] == apply_plan["applied_commit"]
+    assert incident["target_files"] == ["CODEX.md"]
+    assert incident["source_artifacts"]["apply_plan"] == {
+        "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+        "sha256": _hash(run_dir / "apply-plan.json"),
+    }
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         assert (
             connection.execute(
@@ -1362,6 +1376,71 @@ def test_rollback_execute_handles_git_revert_conflict_without_success_artifacts(
             ).fetchone()[0]
             == 0
         )
+        failed_event = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'rollback.failed'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert failed_event is not None
+    failed_payload = json.loads(failed_event[0])
+    assert failed_payload == {
+        "candidate_id": 7,
+        "commit_sha": apply_plan["applied_commit"],
+        "decision_id": run_dir.name,
+        "failure_kind": "git_revert_failed",
+        "incident": ".sidecar/runs/20260525T000000000000Z/rollback-incident.json",
+        "rollback_applied": False,
+        "rollback_plan_written": False,
+        "target_files": ["CODEX.md"],
+    }
+
+
+def test_rollback_execute_records_incident_for_revert_execution_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 0
+    apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
+    applied_head = _git(repo, "rev-parse", "HEAD")
+
+    def fail_revert(self: VcsAdapter, *, branch_name: str, commit_sha: str) -> str:
+        del self, branch_name, commit_sha
+        raise VcsStateError(f"git revert failed: {SECRET_VALUE} " + ("x" * 2500))
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "revert_commit", fail_revert)
+
+    assert main(["rollback", "--repo", str(repo), "--decision", "latest", "--execute"]) == 1
+
+    assert _git(repo, "rev-parse", "HEAD") == applied_head
+    assert not (run_dir / "rollback-plan.json").exists()
+    incident = json.loads((run_dir / "rollback-incident.json").read_text(encoding="utf-8"))
+    assert incident["failure_kind"] == "git_revert_failed"
+    assert incident["failure_message"].startswith("git revert failed: [REDACTED:openai_api_key]")
+    assert incident["failure_message"].endswith("...[truncated]")
+    assert SECRET_VALUE not in incident["failure_message"]
+    assert incident["commit_sha"] == apply_plan["applied_commit"]
+    assert incident["rollback_plan_written"] is False
+    assert incident["rollback_applied"] is False
+    assert incident["source_artifacts"]["apply_plan"] == {
+        "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+        "sha256": _hash(run_dir / "apply-plan.json"),
+    }
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        rollback_count = connection.execute("SELECT COUNT(*) FROM rollbacks").fetchone()[0]
+        applied_count = connection.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'rollback.applied'"
+        ).fetchone()[0]
+        failed_count = connection.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE event_type = 'rollback.failed'"
+        ).fetchone()[0]
+    assert rollback_count == 0
+    assert applied_count == 0
+    assert failed_count == 1
 
 
 def test_rollback_execute_rejects_dirty_worktree_before_revert(tmp_path: Path):

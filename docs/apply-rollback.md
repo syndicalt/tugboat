@@ -98,7 +98,7 @@ Execute the rollback after review:
 tugboat rollback --repo . --decision latest --execute
 ```
 
-Rollback execution creates a revert commit, writes `rollback-plan.json`, records `rollback.applied`, stores post-rollback hashes, and updates the decision trace.
+Rollback execution creates a revert commit, writes `rollback-plan.json`, records `rollback.applied`, stores post-rollback hashes, and updates the decision trace. If Git revert fails during execution, Tugboat writes `.sidecar/runs/<run-id>/rollback-incident.json` and records `rollback.failed` without writing a success rollback plan or marking the rollback applied.
 
 ## Safety Stops
 
@@ -113,4 +113,4 @@ Stop and investigate when Tugboat prints:
 - `rollback blocked: apply plan`
 - `rollback blocked: git revert`
 
-Preserve `.sidecar/runs/<run-id>/` until the review closes.
+Preserve `.sidecar/runs/<run-id>/` until the review closes. If `rollback-incident.json` exists, treat it as the incident record for the failed rollback attempt and resolve or abort the Git revert state before retrying.
