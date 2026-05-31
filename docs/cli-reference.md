@@ -11,12 +11,13 @@ All commands run from a repository root unless `--repo` points elsewhere.
 
 ```bash
 tugboat doctor
+tugboat doctor --repo .
 tugboat init --repo .
 tugboat index --repo .
 tugboat status --repo .
 ```
 
-- `doctor` prints the installed CLI health and default safety posture.
+- `doctor` prints installed CLI health, repo policy posture, provider/network posture, manifest policy, and actionable recommendations.
 - `init` writes `.sidecar/policy.yaml` and `.sidecar/.gitignore`; it refuses to overwrite an existing policy.
 - `index` parses configured instruction files and stores document/chunk metadata. Add `--check` for dry-run validation without writing index rows.
 - `status` writes `.sidecar/status-report.json` and prints mode, auto-apply state, latest run, latest `llmff` job, pending candidates, retention candidates, and manifest policy.

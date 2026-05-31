@@ -1,0 +1,4 @@
+{"event":"request","text":"Review active Tugboat status."}
+{"event":"tool.started","tool":"tugboat_status"}
+{"event":"tool.finished","tool":"tugboat_status","exit_code":0}
+{"event":"agent.final","text":"Status reviewed."}

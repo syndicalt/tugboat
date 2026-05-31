@@ -187,10 +187,61 @@ def _initialize_repo_policy(repo: Path) -> Path:
     return policy_path
 
 
+def _print_doctor_report(repo: Path) -> None:
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_exists = policy_path.exists()
+    policy = load_policy(repo)
+    auto_apply_state = "enabled" if policy.auto_apply_enabled else "disabled"
+    llmff_network_state = "enabled" if policy.llmff_allow_network else "disabled"
+    allowed_providers = ", ".join(policy.llmff_allowed_providers) or "none"
+    manifest_policy = (
+        f"pinned {len(policy.allowed_manifest_hashes)}"
+        if policy.allowed_manifest_hashes
+        else "unrestricted"
+    )
+
+    print("tugboat: ok")
+    print(f"repo: {repo}")
+    print(f"policy: {'found' if policy_exists else 'missing'}")
+    print(f"mode: {policy.mode}")
+    print(f"auto_apply: {auto_apply_state}")
+    print(f"llmff_network: {llmff_network_state}")
+    print(f"allowed_providers: {allowed_providers}")
+    print(f"manifest_policy: {manifest_policy}")
+    recommendations = _doctor_recommendations(repo, policy, policy_exists)
+    if recommendations:
+        for recommendation in recommendations:
+            print(f"recommendation: {recommendation}")
+    else:
+        print("recommendation: none")
+
+
+def _doctor_recommendations(repo: Path, policy: Policy, policy_exists: bool) -> tuple[str, ...]:
+    if not policy_exists:
+        return (
+            f"run `tugboat init --repo {repo}`",
+            f"run `tugboat index --repo {repo} --check` after initialization",
+        )
+
+    recommendations: list[str] = []
+    if policy.mode != "proposal_only":
+        recommendations.append("review policy mode before running apply or auto-apply")
+    if policy.auto_apply_enabled:
+        recommendations.append("review auto-apply lanes before running `tugboat auto-apply`")
+    if policy.llmff_allow_network:
+        recommendations.append("confirm provider manifests are reviewed and pinned")
+    elif policy.llmff_allowed_providers:
+        recommendations.append("remove allowed providers or enable llmff.allow_network intentionally")
+    if not (repo / ".sidecar" / "db.sqlite").exists():
+        recommendations.append(f"run `tugboat index --repo {repo} --check`")
+    return tuple(recommendations)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
     subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("doctor")
+    doctor = subcommands.add_parser("doctor")
+    doctor.add_argument("--repo", default=".")
 
     init = subcommands.add_parser("init")
     init.add_argument("--repo", required=True)
@@ -365,9 +416,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
-        print("tugboat: ok")
-        print("mode: proposal_only")
-        print("auto_apply: disabled")
+        repo = Path(args.repo).resolve()
+        _print_doctor_report(repo)
         return 0
 
     if args.command == "init":

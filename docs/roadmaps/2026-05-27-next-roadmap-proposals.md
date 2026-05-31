@@ -186,7 +186,51 @@ Exit criteria:
 - `tugboat status --repo .` highlights drift and blocked work;
 - docs explain which metrics should pause auto-update.
 
-## Proposal 6: Team Workflow And PR Integration
+## Proposal 6: Token Efficiency Evaluation
+
+Goal: measure whether Tugboat reduces the context footprint of agent harnesses without weakening behavior, safety, or operator legibility.
+
+Candidate work:
+
+- instruction corpus token footprint;
+- active context pack token footprint;
+- token delta per proposed and accepted edit;
+- duplicate-token and repeated-rule estimates;
+- retrieval pack size by task type;
+- token-cost trend summaries by run, repo, and lane;
+- policy thresholds for maximum token growth;
+- eval assertions that compacted instructions preserve required behavior.
+
+Exit criteria:
+
+- `tugboat harness check --repo .` can report instruction and active-context token footprint;
+- proposal/eval artifacts include token delta and token-growth reasons;
+- auto-update blocks candidates that exceed policy-owned token-growth limits;
+- docs explain when token growth is acceptable because behavior, safety, or legibility improved.
+
+## Proposal 7: Skill Rewrite Evaluation
+
+Goal: evaluate `SKILL.md` rewrites with a skill-specific rubric instead of treating them only as generic instruction edits.
+
+Candidate work:
+
+- skill trigger-condition preservation checks;
+- ambiguity and executability scoring;
+- overfit detection against one-off trace failures;
+- before/after task-success eval suites for skill behavior;
+- skill-specific token efficiency and context footprint checks;
+- required/forbidden section checks for supported skill formats;
+- rejected-rewrite memory keyed by skill, task type, and failure pattern;
+- lane-specific reporting for `skill_improvement` candidates.
+
+Exit criteria:
+
+- skill rewrite candidates include a skill-specific eval report;
+- held-out skill behavior must improve or stay neutral before acceptance;
+- skill rewrites that broaden authority, hide prerequisites, or weaken safety are blocked;
+- `skill_improvement` auto-update remains governed by lane thresholds, eval evidence, VCS, and rollback.
+
+## Proposal 8: Team Workflow And PR Integration
 
 Goal: make Tugboat fit normal engineering review workflows.
 
@@ -206,7 +250,7 @@ Exit criteria:
 - ownership metadata is visible in review packets;
 - PR failure modes are fail-closed and audited.
 
-## Proposal 7: Harness Health And Cleanup Agents
+## Proposal 9: Harness Health And Cleanup Agents
 
 Goal: keep instruction/config files map-like, current, and mechanically legible.
 
@@ -226,7 +270,7 @@ Exit criteria:
 - cleanup proposals include source evidence and structural evals;
 - auto-update can only touch cleanup candidates that satisfy the robust auto-update lane.
 
-## Proposal 8: Zaxy Memory Bridge
+## Proposal 10: Zaxy Memory Bridge
 
 Goal: optionally export high-signal optimizer summaries to Zaxy without making Zaxy part of Tugboat's authority path.
 
@@ -253,9 +297,11 @@ The next roadmap should make robust auto-update the main spine, with supporting 
 3. Provider-Backed `llmff` Manifest Expansion
 4. Operator Review UX
 5. Longitudinal Metrics And Local Dashboard
-6. Team Workflow And PR Integration
-7. Harness Health And Cleanup Agents
-8. Optional Zaxy Memory Bridge
+6. Token Efficiency Evaluation
+7. Skill Rewrite Evaluation
+8. Team Workflow And PR Integration
+9. Harness Health And Cleanup Agents
+10. Optional Zaxy Memory Bridge
 
 The release theme should be:
 

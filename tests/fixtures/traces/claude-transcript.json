@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Fix the failing harness check."
+    },
+    {
+      "role": "user",
+      "kind": "correction",
+      "content": "Keep the change test-backed."
+    },
+    {
+      "role": "assistant",
+      "content": "Added regression coverage."
+    }
+  ]
+}

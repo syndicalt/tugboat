@@ -1,0 +1,6 @@
+{
+  "suite": "unit",
+  "command": "pytest -q",
+  "exit_code": 1,
+  "output": "1 failed"
+}

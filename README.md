@@ -13,3 +13,6 @@ For the production release framing, see
 [docs/announcements/tugboat-production-release-article.md](docs/announcements/tugboat-production-release-article.md).
 
 For release and production checks, see [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
+
+For the path to the stable release, see
+[docs/roadmaps/v1.0.0-roadmap.md](docs/roadmaps/v1.0.0-roadmap.md).

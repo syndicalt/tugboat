@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from tugboat.audit.pipeline import detect_trace_format
 from tugboat.traces.adapters import (
     ingest_ci_failure,
     ingest_claude_transcript,
     ingest_codex_session,
     ingest_mcp_session,
 )
+
+FIXTURE_TRACE_DIR = Path(__file__).parent / "fixtures" / "traces"
 
 
 def test_ingest_codex_session_maps_tool_events_to_canonical_episode(tmp_path: Path):
@@ -533,3 +538,31 @@ def test_ingest_mcp_session_maps_live_tool_events(tmp_path: Path):
     assert episode.tool_calls[0].payload["tool"] == "apply_patch"
     assert episode.command_outputs[0].payload["exit_code"] == 0
     assert episode.final_answer == "Done"
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "trace_format"),
+    (
+        ("claude-transcript.json", "claude"),
+        ("mcp-session.jsonl", "mcp"),
+        ("ci-failure.json", "ci"),
+    ),
+)
+def test_shared_trace_fixtures_are_ingestible(fixture_name: str, trace_format: str):
+    fixture = FIXTURE_TRACE_DIR / fixture_name
+
+    assert fixture.exists()
+    assert detect_trace_format(fixture) == trace_format
+
+    if trace_format == "claude":
+        episode = ingest_claude_transcript(fixture)
+        assert episode.request == "Fix the failing harness check."
+        assert episode.final_answer == "Added regression coverage."
+    elif trace_format == "mcp":
+        episode = ingest_mcp_session(fixture)
+        assert episode.request == "Review active Tugboat status."
+        assert episode.final_answer == "Status reviewed."
+    else:
+        episode = ingest_ci_failure(fixture)
+        assert episode.outcome_labels == ("ci_failed",)
+        assert episode.test_results[0].payload["suite"] == "unit"
