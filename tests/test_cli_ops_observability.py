@@ -218,6 +218,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     }
     assert summary["auto_apply_lanes"] == {
         "docs_hygiene": {
+            "shadowed": 0,
             "eligible": 0,
             "rejected": 0,
             "staged": 0,
@@ -226,6 +227,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             "paused": 0,
         },
         "skill_improvement": {
+            "shadowed": 0,
             "eligible": 0,
             "rejected": 0,
             "staged": 0,

@@ -123,6 +123,7 @@ def _auto_apply_lane_counts(
     counts = {_lane_name(lane): _empty_auto_apply_lane_counts() for lane in lane_names}
     paused_lane_set = {_lane_name(lane) for lane in paused_lanes}
     candidate_lanes: dict[str, str] = {}
+    shadowed_candidates: set[tuple[str, str]] = set()
     eligible_candidates: set[tuple[str, str]] = set()
     rejected_candidates: set[tuple[str, str]] = set()
     staged_candidates: set[tuple[str, str]] = set()
@@ -131,6 +132,15 @@ def _auto_apply_lane_counts(
 
     event_items = list(events)
     for event in event_items:
+        if str(event.get("event_type", "")) == "auto_apply.shadowed":
+            candidate_id = _candidate_id(event)
+            lane = _lane_name(event.get("lane"))
+            if candidate_id is None:
+                continue
+            counts.setdefault(lane, _empty_auto_apply_lane_counts())
+            candidate_lanes[candidate_id] = lane
+            shadowed_candidates.add((lane, candidate_id))
+            continue
         if str(event.get("event_type", "")) != "auto_apply.decided":
             continue
         candidate_id = _candidate_id(event)
@@ -160,6 +170,8 @@ def _auto_apply_lane_counts(
         elif event_type == "rollback.applied" and candidate_id in candidate_lanes:
             rolled_back_candidates.add((candidate_lanes[candidate_id], candidate_id))
 
+    for lane, candidate_id in shadowed_candidates:
+        counts[lane]["shadowed"] += 1
     for lane, candidate_id in eligible_candidates:
         counts[lane]["eligible"] += 1
     for lane, candidate_id in rejected_candidates:
@@ -179,6 +191,7 @@ def _auto_apply_lane_counts(
 
 def _empty_auto_apply_lane_counts() -> dict[str, int]:
     return {
+        "shadowed": 0,
         "eligible": 0,
         "rejected": 0,
         "staged": 0,

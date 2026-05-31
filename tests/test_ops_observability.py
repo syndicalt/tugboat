@@ -219,6 +219,17 @@ def test_sidecar_observability_reports_auto_apply_counts_by_lane(tmp_path: Path)
     repo = tmp_path
     with Store.open(repo / ".sidecar" / "db.sqlite") as store:
         store.append_audit_event(
+            "auto_apply.shadowed",
+            {
+                "candidate_id": 6,
+                "eligible": True,
+                "would_apply": True,
+                "lane": "docs_hygiene",
+                "phase": "shadow",
+                "reasons": [],
+            },
+        )
+        store.append_audit_event(
             "auto_apply.decided",
             {
                 "candidate_id": 7,
@@ -271,6 +282,7 @@ def test_sidecar_observability_reports_auto_apply_counts_by_lane(tmp_path: Path)
 
     assert summary["auto_apply_lanes"] == {
         "docs_hygiene": {
+            "shadowed": 1,
             "eligible": 1,
             "rejected": 0,
             "staged": 1,
@@ -279,6 +291,7 @@ def test_sidecar_observability_reports_auto_apply_counts_by_lane(tmp_path: Path)
             "paused": 0,
         },
         "skill_improvement": {
+            "shadowed": 0,
             "eligible": 0,
             "rejected": 1,
             "staged": 0,
@@ -287,6 +300,7 @@ def test_sidecar_observability_reports_auto_apply_counts_by_lane(tmp_path: Path)
             "paused": 0,
         },
         "unmatched": {
+            "shadowed": 0,
             "eligible": 0,
             "rejected": 1,
             "staged": 0,
@@ -319,6 +333,7 @@ def test_sidecar_observability_reports_paused_auto_apply_lane_from_kill_switch(
     summary = summarize_sidecar_observability(repo)
 
     assert summary["auto_apply_lanes"]["docs_hygiene"] == {
+        "shadowed": 0,
         "eligible": 1,
         "rejected": 0,
         "staged": 1,
@@ -358,6 +373,7 @@ auto_apply:
     summary = summarize_sidecar_observability(repo)
 
     assert summary["auto_apply_lanes"]["docs_hygiene"] == {
+        "shadowed": 0,
         "eligible": 1,
         "rejected": 0,
         "staged": 1,

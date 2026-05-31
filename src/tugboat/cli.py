@@ -316,6 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto_apply.add_argument("--auto-apply-policy-version", type=int)
     auto_apply.add_argument("--actor", required=True)
     auto_apply.add_argument("--preflight", action="store_true")
+    auto_apply.add_argument("--shadow", action="store_true")
 
     review = subcommands.add_parser("review")
     review_subcommands = review.add_subparsers(dest="review_command", required=True)
@@ -718,6 +719,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if _write_blocked_by_read_only(repo, "auto-apply"):
             return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
+        if args.preflight and args.shadow:
+            print("auto-apply blocked: choose only one of --preflight or --shadow")
+            return 1
         if args.preflight:
             try:
                 preflight_path = _write_auto_apply_preflight(
@@ -731,6 +735,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"auto-apply preflight blocked: {error}")
                 return 1
             print(f"auto-apply preflight: {preflight_path}")
+            return 0
+        if args.shadow:
+            try:
+                shadow_path = _write_auto_apply_shadow(
+                    repo,
+                    run_dir,
+                    review_actor=args.actor,
+                    confirmed=args.confirm_auto_apply,
+                    policy_version=args.auto_apply_policy_version,
+                )
+            except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+                print(f"auto-apply shadow blocked: {error}")
+                return 1
+            print(f"auto-apply shadow: {shadow_path}")
             return 0
         try:
             apply_path = _write_apply_plan(
@@ -2473,6 +2491,9 @@ def _write_auto_apply_preflight(
     review_actor: str,
     confirmed: bool,
     policy_version: int | None,
+    artifact_name: str = "auto-apply-preflight.json",
+    shadow_mode: bool = False,
+    phase: str = "preflight",
 ) -> Path:
     candidate = _candidate_from_artifacts(run_dir)
     candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
@@ -2596,7 +2617,7 @@ def _write_auto_apply_preflight(
             },
             "vcs": vcs_checks,
             "auto_apply": _auto_apply_decision_snapshot(
-                phase="preflight",
+                phase=phase,
                 candidate=auto_apply_candidate,
                 readiness=readiness,
                 metrics=metrics,
@@ -2604,8 +2625,47 @@ def _write_auto_apply_preflight(
         },
         "readiness_metrics": metrics,
     }
-    path = run_dir / "auto-apply-preflight.json"
-    _write_secret_scanned_json_artifact(path, "auto-apply-preflight.json", payload)
+    if shadow_mode:
+        payload["shadow_mode"] = True
+    path = run_dir / artifact_name
+    _write_secret_scanned_json_artifact(path, artifact_name, payload)
+    return path
+
+
+def _write_auto_apply_shadow(
+    repo: Path,
+    run_dir: Path,
+    *,
+    review_actor: str,
+    confirmed: bool,
+    policy_version: int | None,
+) -> Path:
+    path = _write_auto_apply_preflight(
+        repo,
+        run_dir,
+        review_actor=review_actor,
+        confirmed=confirmed,
+        policy_version=policy_version,
+        artifact_name="auto-apply-shadow.json",
+        shadow_mode=True,
+        phase="shadow",
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        report_path = path.relative_to(repo).as_posix()
+    except ValueError:
+        report_path = path.as_posix()
+    _record_auto_apply_shadow(
+        repo,
+        candidate_id=int(payload["candidate_id"]),
+        run_id=str(payload["run_id"]),
+        actor=review_actor,
+        eligible=bool(payload["eligible"]),
+        would_apply=bool(payload["would_apply"]),
+        lane=payload.get("lane") if isinstance(payload.get("lane"), str) else None,
+        reasons=tuple(str(reason) for reason in payload.get("reasons", [])),
+        report_path=report_path,
+    )
     return path
 
 
@@ -3158,6 +3218,35 @@ def _record_auto_apply_decision(
                 "lane": lane,
                 "reasons": list(reasons),
                 **snapshot,
+            },
+        )
+
+
+def _record_auto_apply_shadow(
+    repo: Path,
+    *,
+    candidate_id: int,
+    run_id: str,
+    actor: str,
+    eligible: bool,
+    would_apply: bool,
+    lane: str | None,
+    reasons: tuple[str, ...],
+    report_path: str,
+) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "auto_apply.shadowed",
+            {
+                "candidate_id": candidate_id,
+                "run_id": run_id,
+                "actor": actor,
+                "eligible": eligible,
+                "would_apply": would_apply,
+                "lane": lane,
+                "reasons": list(reasons),
+                "report_path": report_path,
+                "phase": "shadow",
             },
         )
 

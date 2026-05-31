@@ -1712,6 +1712,132 @@ def test_auto_apply_preflight_reports_eligible_confirmed_candidate(tmp_path: Pat
     assert not (run_dir / "auto-apply-approval.json").exists()
 
 
+def test_auto_apply_shadow_records_would_apply_without_mutation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--shadow",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-shadow.json").read_text(encoding="utf-8"))
+    assert report["schema_version"] == 1
+    assert report["run_id"] == run_dir.name
+    assert report["candidate_id"] == 7
+    assert report["shadow_mode"] is True
+    assert report["eligible"] is True
+    assert report["would_apply"] is True
+    assert report["lane"] == "docs_hygiene"
+    assert report["reasons"] == []
+    assert report["approval_bundle"]["actor"] == "operator@example.com"
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    assert _auto_apply_decision_payloads(repo) == []
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.shadowed'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert row is not None
+    shadow_payload = json.loads(row[0])
+    assert shadow_payload["candidate_id"] == 7
+    assert shadow_payload["run_id"] == run_dir.name
+    assert shadow_payload["actor"] == "operator@example.com"
+    assert shadow_payload["eligible"] is True
+    assert shadow_payload["would_apply"] is True
+    assert shadow_payload["lane"] == "docs_hygiene"
+    assert shadow_payload["reasons"] == []
+    assert shadow_payload["report_path"] == (
+        ".sidecar/runs/20260525T000000000000Z/auto-apply-shadow.json"
+    )
+
+
+def test_auto_apply_shadow_records_ineligible_candidate_without_mutation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["passed"] = False
+    eval_report["recommendation"] = "reject"
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--shadow",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-shadow.json").read_text(encoding="utf-8"))
+    assert report["shadow_mode"] is True
+    assert report["eligible"] is False
+    assert report["would_apply"] is False
+    assert "eval_report_rejected" in report["reasons"]
+    assert report["approval_bundle"] is None
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    assert _auto_apply_decision_payloads(repo) == []
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'auto_apply.shadowed'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert row is not None
+    shadow_payload = json.loads(row[0])
+    assert shadow_payload["eligible"] is False
+    assert shadow_payload["would_apply"] is False
+    assert "eval_report_rejected" in shadow_payload["reasons"]
+
+
 def test_auto_apply_preflight_reports_eval_rejection_without_mutation(tmp_path: Path):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")

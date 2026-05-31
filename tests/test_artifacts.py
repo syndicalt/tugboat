@@ -1117,6 +1117,7 @@ def test_validate_observability_summary_artifact_accepts_current_schema():
                 },
                 "auto_apply_lanes": {
                     "docs_hygiene": {
+                        "shadowed": 0,
                         "eligible": 1,
                         "rejected": 0,
                         "staged": 1,
@@ -2208,6 +2209,46 @@ def test_validate_auto_apply_preflight_accepts_current_schema():
                     "candidate": {"candidate_id": "7"},
                     "readiness": {"confirmed": False},
                 },
+            },
+            "readiness_metrics": {"reviewed_count": 20},
+        },
+    )
+
+
+def test_validate_auto_apply_shadow_accepts_current_schema():
+    validate_json_artifact(
+        "auto-apply-shadow.json",
+        {
+            "schema_version": 1,
+            "run_id": "20260531T120000Z",
+            "candidate_id": 7,
+            "mode": "commit",
+            "target_files": ["CODEX.md"],
+            "branch_name": "tugboat/run-7-codex",
+            "shadow_mode": True,
+            "eligible": True,
+            "would_apply": True,
+            "lane": "docs_hygiene",
+            "reasons": [],
+            "approval_bundle": {"actor": "operator@example.com"},
+            "checks": {
+                "policy_gate": {"allowed": True, "reasons": []},
+                "stored_policy_gate": {"allowed": True, "reasons": []},
+                "eval_report": {
+                    "candidate_id_matches": True,
+                    "passed": True,
+                    "recommendation": "accept",
+                    "suite_id": "all",
+                },
+                "vcs": {
+                    "preflight_passed": True,
+                    "worktree_clean": True,
+                    "dirty_paths": [],
+                    "target_files_clean": True,
+                    "base_hashes_match": True,
+                    "reasons": [],
+                },
+                "auto_apply": {"phase": "shadow"},
             },
             "readiness_metrics": {"reviewed_count": 20},
         },

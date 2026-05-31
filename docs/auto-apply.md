@@ -80,6 +80,19 @@ Preflight writes `.sidecar/runs/<run-id>/auto-apply-preflight.json` and prints i
 
 Passing `--confirm-auto-apply --auto-apply-policy-version <version>` to preflight lets the report model confirmed execution and include a pending approval bundle for an otherwise eligible candidate. It still does not mutate the repository. The read-only kill switch blocks preflight because preflight writes an artifact.
 
+## Shadow Mode
+
+Use shadow mode for audited no-mutation canary telemetry:
+
+```bash
+tugboat auto-apply --repo . --candidate latest --actor <name> \
+  --shadow \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1
+```
+
+Shadow mode evaluates the same auto-apply gates, writes `.sidecar/runs/<run-id>/auto-apply-shadow.json`, and appends a small `auto_apply.shadowed` audit event with candidate id, run id, actor, lane, eligibility, reasons, and report path. It does not apply patches, create branches, commit, write `apply-plan.json`, write `auto-apply-approval.json`, or append `auto_apply.decided`. Operations observability counts shadowed candidates separately from eligible, staged, applied, and rolled-back candidates. The read-only kill switch blocks shadow mode because it writes an artifact and audit event.
+
 ## Confirmed Execution
 
 Only after review:
@@ -110,7 +123,7 @@ Use the operations summary to inspect lane-level auto-apply activity:
 tugboat ops observability --repo .
 ```
 
-The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated.
+The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.shadowed`, `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated.
 
 ## Emergency Stop
 

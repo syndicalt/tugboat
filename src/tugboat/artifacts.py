@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -1225,6 +1226,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                             "type": "object",
                             "additionalProperties": False,
                             "required": [
+                                "shadowed",
                                 "eligible",
                                 "rejected",
                                 "staged",
@@ -1233,6 +1235,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                                 "paused",
                             ],
                             "properties": {
+                                "shadowed": {"type": "integer"},
                                 "eligible": {"type": "integer"},
                                 "rejected": {"type": "integer"},
                                 "staged": {"type": "integer"},
@@ -2774,6 +2777,16 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+}
+
+
+JSON_ARTIFACT_JSON_SCHEMAS["auto-apply-shadow.json"] = copy.deepcopy(
+    JSON_ARTIFACT_JSON_SCHEMAS["auto-apply-preflight.json"]
+)
+JSON_ARTIFACT_JSON_SCHEMAS["auto-apply-shadow.json"]["required"].insert(7, "shadow_mode")
+JSON_ARTIFACT_JSON_SCHEMAS["auto-apply-shadow.json"]["properties"]["shadow_mode"] = {
+    "type": "boolean",
+    "const": True,
 }
 
 

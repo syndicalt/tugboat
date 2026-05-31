@@ -81,6 +81,9 @@ Auto-apply is a separate, narrow lane:
 ```bash
 tugboat auto-apply --repo . --candidate latest --actor <name>
 tugboat auto-apply --repo . --candidate latest --actor <name> --preflight
+tugboat auto-apply --repo . --candidate latest --actor <name> --shadow \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1
 tugboat auto-apply --repo . --candidate latest --actor <name> \
   --confirm-auto-apply \
   --auto-apply-policy-version 1
@@ -89,6 +92,8 @@ tugboat auto-apply --repo . --candidate latest --actor <name> \
 The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, lane match, ledger-derived burn-in and reliability metrics, eval, governance, token-growth, VCS, and rollback evidence all pass. Runtime arguments confirm intent; policy owns thresholds such as `docs_hygiene.minimum_burn_in_days: 3`, `docs_hygiene.maximum_rejection_rate: 0.20`, `docs_hygiene.max_instruction_token_delta: 50`, and `skill_improvement.maximum_rollback_rate: 0.03`.
 
 `--preflight` writes `.sidecar/runs/<run-id>/auto-apply-preflight.json` with eligibility, reasons, gate snapshots, eval status, VCS checks, readiness metrics, and any pending approval bundle. It exits `0` when the report is produced and does not apply, branch, commit, write an apply plan, or record auto-apply decision events.
+
+`--shadow` writes `.sidecar/runs/<run-id>/auto-apply-shadow.json` and appends an `auto_apply.shadowed` audit event for lane telemetry. It exits `0` when shadow evidence is recorded and does not apply, branch, commit, write an apply plan, write an approval artifact, or record `auto_apply.decided`.
 
 ## Harness And CI
 
@@ -132,4 +137,4 @@ tugboat ops restore --repo . --archive /tmp/tugboat-sidecar.tgz --staging /tmp/t
 tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit "$(git rev-parse HEAD)" --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/pytest-coverage.log
 ```
 
-Operations commands write reviewable artifacts under `.sidecar/ops`. `ops observability` writes `.sidecar/ops/observability/summary.json`, including lane-level auto-apply counts for eligible, rejected, staged, applied, rolled-back, and paused candidates. Destructive operations require explicit apply or execute flags and are blocked by the read-only kill switch where applicable. `ops migrate` blocks if `.sidecar/version.json` is newer than this Tugboat binary supports; upgrade Tugboat before using or migrating a future-version sidecar.
+Operations commands write reviewable artifacts under `.sidecar/ops`. `ops observability` writes `.sidecar/ops/observability/summary.json`, including lane-level auto-apply counts for shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates. Destructive operations require explicit apply or execute flags and are blocked by the read-only kill switch where applicable. `ops migrate` blocks if `.sidecar/version.json` is newer than this Tugboat binary supports; upgrade Tugboat before using or migrating a future-version sidecar.
