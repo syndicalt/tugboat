@@ -64,6 +64,7 @@ def _evidence_chain_lines(repo: Path, run_dir: Path, eval_report_path: Path) -> 
         ("candidate_diff", run_dir / "candidate.diff"),
         ("policy_gate", run_dir / "policy-gate.json"),
         ("eval_report", eval_report_path),
+        ("acceptance_summary", run_dir / "acceptance-summary.raw.json"),
         ("decision_artifact", run_dir / "decision.json"),
         ("provenance_bundle", run_dir / "provenance-bundle.json"),
     )
@@ -130,6 +131,9 @@ def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> 
         ("governance_passed", "optimization_governance_passed"),
         ("recommendation", "optimization_recommendation"),
     )
+    acceptance_reasons = payload.get("acceptance_reasons", [])
+    reviewer_checklist = payload.get("reviewer_checklist", [])
+    rollback_command = payload.get("rollback_command", [])
     return [
         f"- optimization_summary: {optimization_summary_path.relative_to(repo)}",
         *[
@@ -137,12 +141,35 @@ def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> 
             for field, label in fields
             if field in payload
         ],
+        *(
+            [f"- acceptance_reason: {'; '.join(str(reason) for reason in acceptance_reasons)}"]
+            if isinstance(acceptance_reasons, list) and acceptance_reasons
+            else []
+        ),
+        *(
+            [f"- reviewer_checklist: {'; '.join(str(item) for item in reviewer_checklist)}"]
+            if isinstance(reviewer_checklist, list) and reviewer_checklist
+            else []
+        ),
+        *(
+            [f"- rollback_command: {_format_rollback_command(rollback_command)}"]
+            if rollback_command
+            else []
+        ),
     ]
 
 
 def _report_scalar(value: object) -> str:
     if isinstance(value, bool):
         return str(value).lower()
+    return str(value)
+
+
+def _format_rollback_command(value: object) -> str:
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return " ".join(value)
+    if isinstance(value, list) and all(isinstance(item, list) for item in value):
+        return "; ".join(" ".join(str(part) for part in item) for item in value)
     return str(value)
 
 

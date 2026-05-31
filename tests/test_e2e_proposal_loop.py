@@ -527,8 +527,12 @@ llmff:
         "policy_gate: .sidecar/runs/",
         "eval_report: .sidecar/runs/",
         "decision_artifact: .sidecar/runs/",
+        "acceptance_summary: .sidecar/runs/",
     ):
         assert artifact_ref in report
+    assert "- acceptance_reason: policy gate and eval report passed" in report
+    assert "- reviewer_checklist: Review candidate diff; Confirm rollback command" in report
+    assert "- rollback_command: tugboat rollback --decision latest" in report
     assert json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8")) == {
         "schema_version": 1,
         "allowed": True,
