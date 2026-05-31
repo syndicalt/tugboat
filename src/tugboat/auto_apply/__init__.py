@@ -29,6 +29,10 @@ SKILL_IMPROVEMENT_CATEGORIES = frozenset({"skill_improvement"})
 REASON_ORDER = (
     "explicit_policy_required",
     "auto_apply_disabled",
+    "auto_apply_repository_paused",
+    "auto_apply_lane_paused",
+    "auto_apply_category_paused",
+    "auto_apply_incident_pause_active",
     "cli_confirmation_required",
     "cli_confirmation_policy_version_mismatch",
     "burn_in_period_too_short",
@@ -109,11 +113,26 @@ class AutoApplyPolicy:
     maximum_rollback_rate: float = 0.02
     max_changed_lines: int = 50
     max_instruction_token_delta: int = 50
+    paused_repositories: tuple[str, ...] = field(default_factory=tuple)
+    paused_lanes: tuple[str, ...] = field(default_factory=tuple)
+    paused_categories: tuple[str, ...] = field(default_factory=tuple)
+    pause_for_incident: bool = False
     lanes: tuple[AutoApplyLanePolicy, ...] = DEFAULT_AUTO_APPLY_LANES
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowed_repositories", tuple(self.allowed_repositories))
         object.__setattr__(self, "allowed_change_classes", tuple(self.allowed_change_classes))
+        object.__setattr__(self, "paused_repositories", tuple(self.paused_repositories))
+        object.__setattr__(
+            self,
+            "paused_lanes",
+            tuple(_category_key(lane) for lane in self.paused_lanes),
+        )
+        object.__setattr__(
+            self,
+            "paused_categories",
+            tuple(_category_key(category) for category in self.paused_categories),
+        )
         object.__setattr__(self, "lanes", tuple(self.lanes))
 
 
@@ -230,6 +249,15 @@ def evaluate_auto_apply(
             found_reasons.add("auto_apply_disabled")
         if candidate.repository not in policy.allowed_repositories:
             found_reasons.add("repository_not_allowlisted")
+        if candidate.repository in policy.paused_repositories:
+            found_reasons.add("auto_apply_repository_paused")
+        if lane is not None and lane.name in policy.paused_lanes:
+            found_reasons.add("auto_apply_lane_paused")
+        candidate_category_keys = {_category_key(category) for category in candidate.categories}
+        if candidate_category_keys.intersection(policy.paused_categories):
+            found_reasons.add("auto_apply_category_paused")
+        if policy.pause_for_incident:
+            found_reasons.add("auto_apply_incident_pause_active")
         threshold_policy = lane if lane is not None else policy
         if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
             found_reasons.add("burn_in_period_too_short")

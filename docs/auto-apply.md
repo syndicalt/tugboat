@@ -43,6 +43,23 @@ The global `auto_apply.max_instruction_token_delta` is an absolute cap, and each
 
 Allowed examples include typo fixes, broken internal links, formatting normalization, duplicate sentence removal, and verified stale command references.
 
+## Pause Controls
+
+Pause controls are policy-owned. Do not use runtime flags to weaken or bypass them:
+
+```yaml
+auto_apply:
+  paused_repositories:
+    - /absolute/path/to/repo
+  paused_lanes:
+    - docs_hygiene
+  paused_categories:
+    - typo_fix
+  pause_for_incident: true
+```
+
+Paused repositories, lanes, categories, and incident pause state block otherwise eligible candidates with explicit reasons in preflight reports and auto-apply decision events. The operations observability report treats explicitly paused lanes like disabled lanes when reporting staged-but-unapplied candidates.
+
 ## Dry Check
 
 Run without confirmation first:

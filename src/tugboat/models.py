@@ -104,6 +104,10 @@ class Policy:
     auto_apply_max_instruction_token_delta: int = 50
     auto_apply_allowed_repositories: tuple[str, ...] = field(default_factory=tuple)
     auto_apply_allowed_risk_classes: tuple[str, ...] = ("A",)
+    auto_apply_paused_repositories: tuple[str, ...] = field(default_factory=tuple)
+    auto_apply_paused_lanes: tuple[str, ...] = field(default_factory=tuple)
+    auto_apply_paused_categories: tuple[str, ...] = field(default_factory=tuple)
+    auto_apply_pause_for_incident: bool = False
     auto_apply_lanes: tuple[AutoApplyLaneConfig, ...] = DEFAULT_AUTO_APPLY_LANES
     roadmap_learning_rate_max_files_touched: int = 2
     roadmap_learning_rate_max_sections_touched: int = 4

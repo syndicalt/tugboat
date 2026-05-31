@@ -275,6 +275,29 @@ def test_auto_apply_blocks_when_token_growth_metrics_are_missing():
     assert decision.reasons == ("instruction_token_delta_missing",)
 
 
+def test_auto_apply_policy_pause_controls_block_by_repo_lane_category_and_incident():
+    policy = _enabled_policy(
+        paused_repositories=("allowed/repo",),
+        paused_lanes=("docs_hygiene",),
+        paused_categories=("typo_fix",),
+        pause_for_incident=True,
+    )
+
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(policy=policy, burn_in_days=3),
+    )
+
+    assert decision.eligible is False
+    assert decision.lane == "docs_hygiene"
+    assert decision.reasons == (
+        "auto_apply_repository_paused",
+        "auto_apply_lane_paused",
+        "auto_apply_category_paused",
+        "auto_apply_incident_pause_active",
+    )
+
+
 def test_auto_apply_lane_can_set_stricter_token_growth_limit():
     policy = _enabled_policy(
         lanes=(

@@ -1795,6 +1795,110 @@ def test_auto_apply_preflight_reports_vcs_failure_without_mutation(tmp_path: Pat
     assert not (run_dir / "auto-apply-approval.json").exists()
 
 
+def test_auto_apply_preflight_reports_policy_pause_controls(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.write_text(
+        policy_path.read_text(encoding="utf-8")
+        + """
+  paused_repositories:
+    - {repo}
+  paused_lanes:
+    - docs_hygiene
+  paused_categories:
+    - typo_fix
+  pause_for_incident: true
+""".format(repo=repo),
+        encoding="utf-8",
+    )
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["eligible"] is False
+    assert report["lane"] == "docs_hygiene"
+    assert report["reasons"] == [
+        "auto_apply_repository_paused",
+        "auto_apply_lane_paused",
+        "auto_apply_category_paused",
+        "auto_apply_incident_pause_active",
+    ]
+    policy_snapshot = report["checks"]["auto_apply"]["policy"]
+    assert policy_snapshot["paused_repositories"] == [str(repo.resolve())]
+    assert policy_snapshot["paused_lanes"] == ["docs_hygiene"]
+    assert policy_snapshot["paused_categories"] == ["typo_fix"]
+    assert policy_snapshot["pause_for_incident"] is True
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+def test_auto_apply_commit_blocks_policy_paused_candidate_before_apply(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.write_text(
+        policy_path.read_text(encoding="utf-8")
+        + """
+  paused_lanes:
+    - docs_hygiene
+""",
+        encoding="utf-8",
+    )
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decisions = _auto_apply_decision_payloads(repo)
+    assert len(decisions) == 1
+    assert decisions[0]["eligible"] is False
+    assert decisions[0]["lane"] == "docs_hygiene"
+    assert decisions[0]["reasons"] == ["auto_apply_lane_paused"]
+    assert decisions[0]["policy"]["paused_lanes"] == ["docs_hygiene"]
+
+
 @pytest.mark.parametrize("command", ("apply", "auto-apply"))
 @pytest.mark.parametrize("removed_flag", ("--burn-in-days", "--rejection-rate", "--rollback-rate"))
 def test_auto_apply_thresholds_are_policy_owned_not_runtime_cli_knobs(
@@ -2139,6 +2243,10 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
         "maximum_rejection_rate": 0.10,
         "maximum_rollback_rate": 0.02,
         "minimum_burn_in_days": 14,
+        "pause_for_incident": False,
+        "paused_categories": [],
+        "paused_lanes": [],
+        "paused_repositories": [],
         "version": 9,
     }
     assert event_payload["readiness_metrics"] == {

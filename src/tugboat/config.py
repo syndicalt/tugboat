@@ -210,6 +210,13 @@ def load_policy(repo: Path) -> Policy:
             str(Path(item).expanduser().resolve())
             for item in auto_apply.get("allowed_repositories", [])
         ),
+        auto_apply_paused_repositories=tuple(
+            str(Path(item).expanduser().resolve())
+            for item in _as_string_tuple(
+                auto_apply.get("paused_repositories", []),
+                "auto_apply.paused_repositories",
+            )
+        ),
         auto_apply_allowed_risk_classes=_as_string_tuple(
             auto_apply.get(
                 "allowed_risk_classes",
@@ -217,6 +224,15 @@ def load_policy(repo: Path) -> Policy:
             ),
             "auto_apply.allowed_risk_classes",
         ),
+        auto_apply_paused_lanes=_as_string_tuple(
+            auto_apply.get("paused_lanes", []),
+            "auto_apply.paused_lanes",
+        ),
+        auto_apply_paused_categories=_as_string_tuple(
+            auto_apply.get("paused_categories", []),
+            "auto_apply.paused_categories",
+        ),
+        auto_apply_pause_for_incident=bool(auto_apply.get("pause_for_incident", False)),
         auto_apply_lanes=_as_auto_apply_lanes(auto_apply.get("lanes")),
         roadmap_learning_rate_max_files_touched=_as_non_negative_int(
             learning_rate_budget.get(

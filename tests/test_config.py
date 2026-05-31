@@ -134,6 +134,60 @@ auto_apply:
     assert lane.maximum_rollback_rate == 0.05
 
 
+def test_load_policy_yaml_reads_auto_apply_pause_controls(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+auto_apply:
+  paused_repositories:
+    - {tmp_path}
+  paused_lanes:
+    - docs_hygiene
+  paused_categories:
+    - typo-fix
+  pause_for_incident: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.auto_apply_paused_repositories == (str(tmp_path.resolve()),)
+    assert policy.auto_apply_paused_lanes == ("docs_hygiene",)
+    assert policy.auto_apply_paused_categories == ("typo-fix",)
+    assert policy.auto_apply_pause_for_incident is True
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    (
+        ("paused_repositories", "repo"),
+        ("paused_lanes", "docs_hygiene"),
+        ("paused_categories", "typo_fix"),
+    ),
+)
+def test_load_policy_yaml_rejects_malformed_auto_apply_pause_lists(
+    tmp_path: Path,
+    field_name: str,
+    field_value: str,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+auto_apply:
+  {field_name}: {field_value}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=f"auto_apply.{field_name} must be a list"):
+        load_policy(tmp_path)
+
+
 def test_load_policy_yaml_rejects_negative_auto_apply_token_growth_limit(tmp_path: Path):
     policy_dir = tmp_path / ".sidecar"
     policy_dir.mkdir()

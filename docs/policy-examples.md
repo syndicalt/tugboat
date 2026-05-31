@@ -91,6 +91,10 @@ auto_apply:
   minimum_burn_in_days: 14
   maximum_rejection_rate: 0.10
   maximum_rollback_rate: 0.02
+  paused_repositories: []
+  paused_lanes: []
+  paused_categories: []
+  pause_for_incident: false
   lanes:
     docs_hygiene:
       enabled: true
@@ -121,3 +125,4 @@ auto_apply:
 ```
 
 Auto-apply remains disabled unless the global switch is enabled and a lane-specific burn-in, confirmation, VCS, eval, governance, token-growth, and rollback policy is satisfied. Token growth is measured from `eval-report.json` `metrics.instruction_token_delta`; missing or malformed token metrics block auto-apply.
+Pause controls are also policy-owned: `paused_repositories`, `paused_lanes`, `paused_categories`, and `pause_for_incident` block candidates with distinct audit reasons and cannot be overridden by CLI threshold flags.

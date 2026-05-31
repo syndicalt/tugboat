@@ -105,7 +105,10 @@ def _auto_apply_lane_names(repo: Path) -> tuple[str, ...]:
 
 def _auto_apply_paused_lane_names(repo: Path) -> tuple[str, ...]:
     try:
-        return tuple(lane.name for lane in load_policy(repo).auto_apply_lanes if not lane.enabled)
+        policy = load_policy(repo)
+        paused_lanes = {*policy.auto_apply_paused_lanes}
+        paused_lanes.update(lane.name for lane in policy.auto_apply_lanes if not lane.enabled)
+        return tuple(sorted(paused_lanes))
     except (OSError, ValueError):
         return ()
 
