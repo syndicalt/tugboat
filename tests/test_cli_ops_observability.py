@@ -216,3 +216,21 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
         "oldest_queued_job_id": 1,
         "kill_switch_enabled": False,
     }
+    assert summary["auto_apply_lanes"] == {
+        "docs_hygiene": {
+            "eligible": 0,
+            "rejected": 0,
+            "staged": 0,
+            "applied": 0,
+            "rolled_back": 0,
+            "paused": 0,
+        },
+        "skill_improvement": {
+            "eligible": 0,
+            "rejected": 0,
+            "staged": 0,
+            "applied": 0,
+            "rolled_back": 0,
+            "paused": 0,
+        },
+    }

@@ -178,6 +178,7 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "rate": 0.666667,
         "unique_incident_class_count": 2,
     }
+    assert summary["auto_apply_lanes"] == {}
 
 
 def test_summarize_sidecar_observability_closes_sqlite_connection(tmp_path: Path):
@@ -211,6 +212,119 @@ def test_sidecar_observability_includes_daemon_queue_state(tmp_path: Path):
         "jobs_by_state": {"inspecting": 1, "queued": 1},
         "oldest_queued_job_id": queued.id,
         "kill_switch_enabled": False,
+    }
+
+
+def test_sidecar_observability_reports_auto_apply_counts_by_lane(tmp_path: Path):
+    repo = tmp_path
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": True,
+                "lane": "docs_hygiene",
+                "phase": "precheck",
+                "reasons": [],
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": True,
+                "lane": "docs_hygiene",
+                "phase": "final",
+                "reasons": [],
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.applied",
+            {
+                "candidate_id": 7,
+                "approval_bundle": {"lane": "docs_hygiene"},
+            },
+        )
+        store.append_audit_event("rollback.applied", {"candidate_id": 7})
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 8,
+                "eligible": False,
+                "lane": "skill_improvement",
+                "phase": "precheck",
+                "reasons": ["rollback_rate_too_high"],
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 9,
+                "eligible": False,
+                "lane": None,
+                "phase": "precheck",
+                "reasons": ["auto_apply_change_type_not_allowed"],
+            },
+        )
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["auto_apply_lanes"] == {
+        "docs_hygiene": {
+            "eligible": 1,
+            "rejected": 0,
+            "staged": 1,
+            "applied": 1,
+            "rolled_back": 1,
+            "paused": 0,
+        },
+        "skill_improvement": {
+            "eligible": 0,
+            "rejected": 1,
+            "staged": 0,
+            "applied": 0,
+            "rolled_back": 0,
+            "paused": 0,
+        },
+        "unmatched": {
+            "eligible": 0,
+            "rejected": 1,
+            "staged": 0,
+            "applied": 0,
+            "rolled_back": 0,
+            "paused": 0,
+        },
+    }
+
+
+def test_sidecar_observability_reports_paused_auto_apply_lane_from_kill_switch(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": True,
+                "lane": "docs_hygiene",
+                "phase": "precheck",
+                "reasons": [],
+            },
+        )
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["auto_apply_lanes"]["docs_hygiene"] == {
+        "eligible": 1,
+        "rejected": 0,
+        "staged": 1,
+        "applied": 0,
+        "rolled_back": 0,
+        "paused": 1,
     }
 
 

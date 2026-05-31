@@ -1024,6 +1024,16 @@ def test_validate_observability_summary_artifact_accepts_current_schema():
                     "oldest_queued_job_id": 1,
                     "kill_switch_enabled": False,
                 },
+                "auto_apply_lanes": {
+                    "docs_hygiene": {
+                        "eligible": 1,
+                        "rejected": 0,
+                        "staged": 1,
+                        "applied": 1,
+                        "rolled_back": 0,
+                        "paused": 0,
+                    }
+                },
             },
         },
     )

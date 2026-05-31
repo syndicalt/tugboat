@@ -8,6 +8,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
 
+from tugboat.config import load_policy
+
+
 def summarize_observability(
     *,
     runs: Iterable[dict[str, Any]] = (),
@@ -17,6 +20,10 @@ def summarize_observability(
     harness_findings: Iterable[str] = (),
     trace_events: Iterable[dict[str, Any]] = (),
     incidents: Iterable[dict[str, Any]] = (),
+    auto_apply_events: Iterable[dict[str, Any]] = (),
+    auto_apply_lane_names: Iterable[str] = (),
+    auto_apply_paused: bool = False,
+    auto_apply_paused_lanes: Iterable[str] = (),
 ) -> dict[str, Any]:
     run_items = list(runs)
     job_items = list(jobs)
@@ -35,6 +42,12 @@ def summarize_observability(
         "duplicate_rule_count": _duplicate_rule_count(harness_findings),
         "user_correction_recurrence": _user_correction_recurrence(trace_events),
         "recurring_incident_rate": _recurring_incident_rate(incidents),
+        "auto_apply_lanes": _auto_apply_lane_counts(
+            auto_apply_events,
+            lane_names=auto_apply_lane_names,
+            paused=auto_apply_paused,
+            paused_lanes=auto_apply_paused_lanes,
+        ),
     }
 
 
@@ -55,6 +68,7 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
         ]
         trace_events = _sidecar_trace_events(connection)
         corpus_snapshots = _sidecar_corpus_snapshots(connection, repo)
+    daemon_queue = _daemon_queue_status(repo)
     jobs = [*decisions, *_audit_event_jobs(audit_events)]
     return summarize_observability(
         runs=[*runs, *_audit_event_runs(audit_events)],
@@ -64,7 +78,11 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
         harness_findings=harness_findings,
         trace_events=trace_events,
         incidents=incidents,
-    ) | {"daemon_queue": _daemon_queue_status(repo)}
+        auto_apply_events=audit_events,
+        auto_apply_lane_names=_auto_apply_lane_names(repo),
+        auto_apply_paused_lanes=_auto_apply_paused_lane_names(repo),
+        auto_apply_paused=bool(daemon_queue["kill_switch_enabled"]),
+    ) | {"daemon_queue": daemon_queue}
 
 
 def _daemon_queue_status(repo: Path) -> dict[str, Any]:
@@ -76,6 +94,120 @@ def _daemon_queue_status(repo: Path) -> dict[str, Any]:
         "oldest_queued_job_id": status["oldest_queued_job_id"],
         "kill_switch_enabled": status["kill_switch_enabled"],
     }
+
+
+def _auto_apply_lane_names(repo: Path) -> tuple[str, ...]:
+    try:
+        return tuple(lane.name for lane in load_policy(repo).auto_apply_lanes)
+    except (OSError, ValueError):
+        return ()
+
+
+def _auto_apply_paused_lane_names(repo: Path) -> tuple[str, ...]:
+    try:
+        return tuple(lane.name for lane in load_policy(repo).auto_apply_lanes if not lane.enabled)
+    except (OSError, ValueError):
+        return ()
+
+
+def _auto_apply_lane_counts(
+    events: Iterable[dict[str, Any]],
+    *,
+    lane_names: Iterable[str],
+    paused: bool,
+    paused_lanes: Iterable[str],
+) -> dict[str, dict[str, int]]:
+    counts = {_lane_name(lane): _empty_auto_apply_lane_counts() for lane in lane_names}
+    paused_lane_set = {_lane_name(lane) for lane in paused_lanes}
+    candidate_lanes: dict[str, str] = {}
+    eligible_candidates: set[tuple[str, str]] = set()
+    rejected_candidates: set[tuple[str, str]] = set()
+    staged_candidates: set[tuple[str, str]] = set()
+    applied_candidates: set[tuple[str, str]] = set()
+    rolled_back_candidates: set[tuple[str, str]] = set()
+
+    event_items = list(events)
+    for event in event_items:
+        if str(event.get("event_type", "")) != "auto_apply.decided":
+            continue
+        candidate_id = _candidate_id(event)
+        lane = _lane_name(event.get("lane"))
+        if candidate_id is None:
+            continue
+        counts.setdefault(lane, _empty_auto_apply_lane_counts())
+        candidate_lanes[candidate_id] = lane
+        key = (lane, candidate_id)
+        if bool(event.get("eligible", False)):
+            eligible_candidates.add(key)
+            if str(event.get("phase", "")) == "precheck":
+                staged_candidates.add(key)
+        else:
+            rejected_candidates.add(key)
+
+    for event in event_items:
+        event_type = str(event.get("event_type", ""))
+        candidate_id = _candidate_id(event)
+        if candidate_id is None:
+            continue
+        if event_type == "auto_apply.applied":
+            lane = _lane_name(_auto_apply_applied_lane(event) or candidate_lanes.get(candidate_id))
+            counts.setdefault(lane, _empty_auto_apply_lane_counts())
+            candidate_lanes[candidate_id] = lane
+            applied_candidates.add((lane, candidate_id))
+        elif event_type == "rollback.applied" and candidate_id in candidate_lanes:
+            rolled_back_candidates.add((candidate_lanes[candidate_id], candidate_id))
+
+    for lane, candidate_id in eligible_candidates:
+        counts[lane]["eligible"] += 1
+    for lane, candidate_id in rejected_candidates:
+        if (lane, candidate_id) not in eligible_candidates:
+            counts[lane]["rejected"] += 1
+    for lane, candidate_id in staged_candidates:
+        counts[lane]["staged"] += 1
+    for lane, candidate_id in applied_candidates:
+        counts[lane]["applied"] += 1
+    for lane, candidate_id in rolled_back_candidates:
+        counts[lane]["rolled_back"] += 1
+    for lane, lane_counts in counts.items():
+        if paused or lane in paused_lane_set:
+            lane_counts["paused"] = max(0, lane_counts["staged"] - lane_counts["applied"])
+    return {lane: counts[lane] for lane in sorted(counts)}
+
+
+def _empty_auto_apply_lane_counts() -> dict[str, int]:
+    return {
+        "eligible": 0,
+        "rejected": 0,
+        "staged": 0,
+        "applied": 0,
+        "rolled_back": 0,
+        "paused": 0,
+    }
+
+
+def _candidate_id(event: dict[str, Any]) -> str | None:
+    value = event.get("candidate_id")
+    if value is None:
+        return None
+    return str(value)
+
+
+def _lane_name(value: object) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return "unmatched"
+
+
+def _auto_apply_applied_lane(event: dict[str, Any]) -> str | None:
+    approval_bundle = event.get("approval_bundle")
+    if isinstance(approval_bundle, dict):
+        lane = approval_bundle.get("lane")
+        if isinstance(lane, str) and lane.strip():
+            return lane.strip()
+    lane = event.get("lane")
+    if isinstance(lane, str) and lane.strip():
+        return lane.strip()
+    return None
 
 
 def _sidecar_runs(connection: sqlite3.Connection) -> list[dict[str, Any]]:

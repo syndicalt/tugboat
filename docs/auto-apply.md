@@ -73,6 +73,16 @@ tugboat rollback --repo . --decision latest --execute
 
 Review `rollback-plan.json` and `decision-trace.json` after execution.
 
+## Monitoring
+
+Use the operations summary to inspect lane-level auto-apply activity:
+
+```bash
+tugboat ops observability --repo .
+```
+
+The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated.
+
 ## Emergency Stop
 
 Enable the read-only kill switch to block auto-apply and other direct write paths:

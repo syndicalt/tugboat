@@ -1134,6 +1134,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "duplicate_rule_count",
                     "user_correction_recurrence",
                     "recurring_incident_rate",
+                    "auto_apply_lanes",
                 ],
                 "properties": {
                     "run_duration": {"type": "object"},
@@ -1148,6 +1149,29 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "duplicate_rule_count": {"type": "integer"},
                     "user_correction_recurrence": {"type": "object"},
                     "recurring_incident_rate": {"type": "object"},
+                    "auto_apply_lanes": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": [
+                                "eligible",
+                                "rejected",
+                                "staged",
+                                "applied",
+                                "rolled_back",
+                                "paused",
+                            ],
+                            "properties": {
+                                "eligible": {"type": "integer"},
+                                "rejected": {"type": "integer"},
+                                "staged": {"type": "integer"},
+                                "applied": {"type": "integer"},
+                                "rolled_back": {"type": "integer"},
+                                "paused": {"type": "integer"},
+                            },
+                        },
+                    },
                     "daemon_queue": {
                         "type": "object",
                         "additionalProperties": False,
