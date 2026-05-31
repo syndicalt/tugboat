@@ -947,6 +947,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("## Doc Gardening Tasks")
         for item in report.doc_gardening_tasks:
             print(f"- {item}")
+        print("## Token Efficiency")
+        token_metrics = report.token_metrics
+        print(
+            "instruction_corpus_estimated_tokens: "
+            f"{token_metrics['instruction_corpus_estimated_tokens']}"
+        )
+        print(
+            "active_context_estimated_tokens: "
+            f"{token_metrics['active_context_estimated_tokens']}"
+        )
+        print(
+            "duplicate_rule_estimated_tokens: "
+            f"{token_metrics['duplicate_rule_estimated_tokens']}"
+        )
         return 0
 
     if args.command == "harness" and args.harness_command == "cleanup":
@@ -1697,6 +1711,7 @@ def _persist_harness_report(repo: Path, report) -> Path:
         "orphaned_runbooks": report.orphaned_runbooks,
         "recurring_failures_without_docs": report.recurring_failures_without_docs,
         "doc_gardening_tasks": report.doc_gardening_tasks,
+        "token_metrics": report.token_metrics,
     }
     validate_json_artifact("harness-report.json", payload)
     report_path.parent.mkdir(parents=True, exist_ok=True)

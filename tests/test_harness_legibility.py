@@ -526,6 +526,39 @@ def test_generate_harness_report_builds_knowledge_map_and_cleanup_tasks(tmp_path
     ]
 
 
+def test_generate_harness_report_includes_token_efficiency_metrics(tmp_path: Path):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n"
+        "# Runbook\n\nUse tests before applying changes.\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\n"
+        "MUST use tests before applying changes.\n"
+        "MUST use tests before applying changes.\n"
+        "See [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+
+    report = generate_harness_report(repo)
+
+    assert report.token_metrics == {
+        "active_context_estimated_tokens": 49,
+        "active_context_files": [
+            {"estimated_tokens": 29, "path": "AGENTS.md"},
+            {"estimated_tokens": 20, "path": "docs/runbook.md"},
+        ],
+        "duplicate_rule_estimated_tokens": 6,
+        "instruction_corpus_estimated_tokens": 29,
+        "instruction_files": [
+            {"estimated_tokens": 29, "line_count": 5, "path": "AGENTS.md"},
+        ],
+    }
+
+
 def test_generate_harness_report_flags_recurring_failures_without_docs(tmp_path: Path):
     repo = tmp_path
     docs = repo / "docs"
@@ -700,6 +733,13 @@ def test_harness_report_cli_validates_payload_before_writing(
         orphaned_runbooks: list[str] = []
         recurring_failures_without_docs: list[str] = []
         doc_gardening_tasks: list[str] = []
+        token_metrics = {
+            "instruction_corpus_estimated_tokens": 0,
+            "active_context_estimated_tokens": 0,
+            "duplicate_rule_estimated_tokens": 0,
+            "instruction_files": [],
+            "active_context_files": [],
+        }
 
     monkeypatch.setattr(
         "tugboat.cli.generate_harness_report",

@@ -1121,6 +1121,33 @@ def test_validate_harness_report_artifact_accepts_current_schema():
                 "approval-boundary: Approval corrections repeated."
             ],
             "doc_gardening_tasks": ["Add ownership metadata to docs/runbook.md."],
+            "token_metrics": {
+                "instruction_corpus_estimated_tokens": 12,
+                "active_context_estimated_tokens": 20,
+                "duplicate_rule_estimated_tokens": 4,
+                "instruction_files": [
+                    {"path": "AGENTS.md", "estimated_tokens": 12, "line_count": 3}
+                ],
+                "active_context_files": [
+                    {"path": "AGENTS.md", "estimated_tokens": 12},
+                    {"path": "docs/runbook.md", "estimated_tokens": 8},
+                ],
+            },
+        },
+    )
+
+
+def test_validate_harness_report_artifact_accepts_legacy_without_token_metrics():
+    validate_json_artifact(
+        "harness-report.json",
+        {
+            "schema_version": 1,
+            "knowledge_map": {"AGENTS.md": ["docs/runbook.md"]},
+            "missing_docs": [],
+            "stale_docs": [],
+            "orphaned_runbooks": [],
+            "recurring_failures_without_docs": [],
+            "doc_gardening_tasks": [],
         },
     )
 

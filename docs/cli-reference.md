@@ -93,7 +93,7 @@ tugboat ci --repo .
 python -m pytest --cov=src --cov-report=term-missing -q
 ```
 
-`harness cleanup` writes review-only cleanup candidates and is blocked by `.sidecar/read-only.kill`. `ci` writes `.sidecar/ci/ci-report.json` and checks manifest contracts, semantic policy lint, harness health, and optional eval evidence.
+`harness report` writes `.sidecar/harness-report.json` with knowledge-map, doc-gardening, recurring-failure, and estimated token-efficiency metrics for the instruction corpus and active context. `harness cleanup` writes review-only cleanup candidates and is blocked by `.sidecar/read-only.kill`. `ci` writes `.sidecar/ci/ci-report.json` and checks manifest contracts, semantic policy lint, harness health, and optional eval evidence.
 
 ## MCP And Daemon
 

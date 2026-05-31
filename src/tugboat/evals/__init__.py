@@ -205,6 +205,7 @@ def run_offline_eval_suite(
         "candidate_preview_files": candidate_preview_files,
         "governance_regressions": governance_regressions,
         "structural_findings": sum(len(report.findings) for report in structural_reports),
+        **_instruction_token_delta_metrics(policy_pairs),
     }
     structural_score = 1.0 if all(report.passed for report in structural_reports) and governance_regressions == 0 else 0.0
     trigger_score = structural_score
@@ -1147,6 +1148,25 @@ def _weakens_normative_language(before_words: tuple[str, ...], after_words: tupl
 
 def _words(markdown: str) -> tuple[str, ...]:
     return tuple(re.findall(r"[a-z]+", markdown.lower()))
+
+
+_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]")
+
+
+def _instruction_token_delta_metrics(
+    policy_pairs: tuple[tuple[str, str], ...],
+) -> dict[str, int]:
+    before_tokens = sum(_estimated_tokens(before) for before, _ in policy_pairs)
+    after_tokens = sum(_estimated_tokens(after) for _, after in policy_pairs)
+    return {
+        "instruction_tokens_before": before_tokens,
+        "instruction_tokens_after": after_tokens,
+        "instruction_token_delta": after_tokens - before_tokens,
+    }
+
+
+def _estimated_tokens(text: str) -> int:
+    return len(_TOKEN_PATTERN.findall(text))
 
 
 def _anchor_for(heading: str) -> str:

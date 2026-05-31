@@ -343,6 +343,24 @@ def test_run_offline_eval_suite_all_evaluates_candidate_preview_instead_of_curre
     ]
 
 
+def test_run_offline_eval_suite_all_reports_candidate_instruction_token_delta(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text("# Policy\n\nRun tests.\n", encoding="utf-8")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nRun tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.metrics["instruction_tokens_before"] == 5
+    assert report.metrics["instruction_tokens_after"] == 8
+    assert report.metrics["instruction_token_delta"] == 3
+
+
 def test_run_offline_eval_suite_all_rejects_noop_preview_without_held_out_improvement(
     tmp_path: Path,
 ):

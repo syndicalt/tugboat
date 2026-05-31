@@ -1363,6 +1363,47 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "items": {"type": "string"},
             },
             "doc_gardening_tasks": {"type": "array", "items": {"type": "string"}},
+            "token_metrics": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "instruction_corpus_estimated_tokens",
+                    "active_context_estimated_tokens",
+                    "duplicate_rule_estimated_tokens",
+                    "instruction_files",
+                    "active_context_files",
+                ],
+                "properties": {
+                    "instruction_corpus_estimated_tokens": {"type": "integer"},
+                    "active_context_estimated_tokens": {"type": "integer"},
+                    "duplicate_rule_estimated_tokens": {"type": "integer"},
+                    "instruction_files": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["path", "estimated_tokens", "line_count"],
+                            "properties": {
+                                "path": {"type": "string"},
+                                "estimated_tokens": {"type": "integer"},
+                                "line_count": {"type": "integer"},
+                            },
+                        },
+                    },
+                    "active_context_files": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["path", "estimated_tokens"],
+                            "properties": {
+                                "path": {"type": "string"},
+                                "estimated_tokens": {"type": "integer"},
+                            },
+                        },
+                    },
+                },
+            },
         },
     },
     "harness-cleanup-proposal.json": {

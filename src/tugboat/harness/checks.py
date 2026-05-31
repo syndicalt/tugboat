@@ -33,6 +33,7 @@ class HarnessReport:
     orphaned_runbooks: list[str]
     recurring_failures_without_docs: list[str]
     doc_gardening_tasks: list[str]
+    token_metrics: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -200,6 +201,7 @@ def generate_harness_report(repo: Path) -> HarnessReport:
         orphaned_runbooks=orphaned_runbooks,
         recurring_failures_without_docs=recurring_failures_without_docs,
         doc_gardening_tasks=_dedupe(doc_gardening_tasks),
+        token_metrics=_token_metrics(repo, knowledge_map),
     )
 
 
@@ -237,6 +239,61 @@ def _repo_local_markdown_refs(text: str) -> list[MarkdownRef]:
             refs.append(MarkdownRef(path=path, anchor=target.anchor))
 
     return refs
+
+
+TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]")
+
+
+def _token_metrics(repo: Path, knowledge_map: dict[str, list[str]]) -> dict[str, object]:
+    instruction_files: list[dict[str, object]] = []
+    instruction_total = 0
+    active_files: dict[str, int] = {}
+    rule_counts: dict[str, int] = {}
+    must_rules: set[str] = set()
+    never_rules: set[str] = set()
+
+    for path in _configured_instruction_paths(repo):
+        relative_path = path.relative_to(repo).as_posix()
+        text = path.read_text(encoding="utf-8")
+        estimated_tokens = _estimated_tokens(text)
+        instruction_total += estimated_tokens
+        instruction_files.append(
+            {
+                "path": relative_path,
+                "estimated_tokens": estimated_tokens,
+                "line_count": len(text.splitlines()),
+            }
+        )
+        active_files[relative_path] = estimated_tokens
+        _collect_rules(text, rule_counts, must_rules, never_rules)
+
+    for refs in knowledge_map.values():
+        for ref in refs:
+            target = (repo / ref).resolve()
+            if not _is_relative_to(target, repo) or not target.is_file():
+                continue
+            active_files.setdefault(ref, _estimated_tokens(target.read_text(encoding="utf-8")))
+
+    duplicate_rule_tokens = 0
+    for normalized_rule, count in rule_counts.items():
+        if count > 1:
+            duplicate_rule_tokens += (count - 1) * _estimated_tokens(normalized_rule)
+
+    active_context_files = [
+        {"path": path, "estimated_tokens": active_files[path]}
+        for path in sorted(active_files)
+    ]
+    return {
+        "instruction_corpus_estimated_tokens": instruction_total,
+        "active_context_estimated_tokens": sum(active_files.values()),
+        "duplicate_rule_estimated_tokens": duplicate_rule_tokens,
+        "instruction_files": sorted(instruction_files, key=lambda item: str(item["path"])),
+        "active_context_files": active_context_files,
+    }
+
+
+def _estimated_tokens(text: str) -> int:
+    return len(TOKEN_PATTERN.findall(text))
 
 
 @dataclass(frozen=True)

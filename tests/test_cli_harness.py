@@ -30,4 +30,8 @@ def test_harness_report_cli_writes_knowledge_map_and_tasks(tmp_path: Path, capsy
     output = capsys.readouterr().out
     assert "# Tugboat Harness Report" in output
     assert "AGENTS.md -> docs/runbook.md" in output
+    assert "## Token Efficiency" in output
+    assert "instruction_corpus_estimated_tokens:" in output
+    assert "active_context_estimated_tokens:" in output
+    assert "duplicate_rule_estimated_tokens:" in output
     assert "- Add ownership metadata to docs/runbook.md." in output
