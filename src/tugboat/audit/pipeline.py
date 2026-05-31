@@ -638,16 +638,20 @@ def _ingest_trace(trace: Path, trace_format: str):
     if trace_format == "auto":
         trace_format = detect_trace_format(trace)
     if trace_format == "generic-jsonl":
-        return ingest_jsonl_trace(trace)
-    if trace_format == "codex":
-        return ingest_codex_session_bundle(trace)
-    if trace_format == "claude":
-        return ingest_claude_transcript_bundle(trace)
-    if trace_format == "ci":
-        return ingest_ci_failure_bundle(trace)
-    if trace_format == "mcp":
-        return ingest_mcp_session_bundle(trace)
-    raise ValueError(f"unsupported trace format: {trace_format}")
+        bundle = ingest_jsonl_trace(trace)
+    elif trace_format == "codex":
+        bundle = ingest_codex_session_bundle(trace)
+    elif trace_format == "claude":
+        bundle = ingest_claude_transcript_bundle(trace)
+    elif trace_format == "ci":
+        bundle = ingest_ci_failure_bundle(trace)
+    elif trace_format == "mcp":
+        bundle = ingest_mcp_session_bundle(trace)
+    else:
+        raise ValueError(f"unsupported trace format: {trace_format}")
+    if not bundle.events:
+        raise ValueError("trace contains no events")
+    return bundle
 
 
 def _trace_input_problem(trace: Path) -> str | None:
