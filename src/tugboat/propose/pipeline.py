@@ -712,7 +712,49 @@ def _run_drift_detect(
         "optimizer-notes.raw.json",
     )
     validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
+    declared_evidence_refs = _audit_evidence_refs(run_dir)
+    _validate_drift_evidence_refs_declared_by_audit(declared_evidence_refs, payload)
+    _validate_optimizer_notes_evidence_refs_declared_by_audit(
+        declared_evidence_refs,
+        optimizer_payload,
+    )
     return output_path, optimizer_notes_path
+
+
+def _validate_drift_evidence_refs_declared_by_audit(
+    declared: set[str],
+    payload: dict[str, object],
+) -> None:
+    refs = [
+        str(ref)
+        for cluster in payload.get("clusters", [])
+        if isinstance(cluster, dict)
+        for ref in cluster.get("evidence_refs", [])
+    ]
+    missing = sorted({ref for ref in refs if ref not in declared})
+    if missing:
+        raise ValueError(
+            "drift.raw.json evidence refs not declared by audit evidence: "
+            + ", ".join(missing)
+        )
+
+
+def _validate_optimizer_notes_evidence_refs_declared_by_audit(
+    declared: set[str],
+    payload: dict[str, object],
+) -> None:
+    refs = [
+        str(ref)
+        for note in payload.get("notes", [])
+        if isinstance(note, dict)
+        for ref in note.get("evidence_refs", [])
+    ]
+    missing = sorted({ref for ref in refs if ref not in declared})
+    if missing:
+        raise ValueError(
+            "optimizer-notes.raw.json evidence refs not declared by audit evidence: "
+            + ", ".join(missing)
+        )
 
 
 def _audit_reports_input_path(run_dir: Path) -> Path:
