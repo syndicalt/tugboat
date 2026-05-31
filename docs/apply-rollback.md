@@ -14,6 +14,8 @@ tugboat report --repo . --run latest
 tugboat inspect-decision --repo . --decision latest
 ```
 
+`inspect-decision` prints the decision trace path plus a concise metadata summary: run id, decision, candidate id, candidate file, candidate state, risk class, eval pass/fail summary, rollback readiness, and the next artifact to inspect. It does not print raw trace payload snippets, rationale text, optimizer memory, or rollback bodies.
+
 Review these files under `.sidecar/runs/<run-id>/`:
 
 - `candidate.diff`

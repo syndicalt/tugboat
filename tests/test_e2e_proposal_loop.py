@@ -431,7 +431,10 @@ raise SystemExit(64)
     return path
 
 
-def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(tmp_path: Path):
+def test_proposal_loop_writes_review_artifacts_without_mutating_instructions(
+    tmp_path: Path,
+    capsys,
+):
     repo = tmp_path / "repo"
     repo.mkdir()
     codex = repo / "CODEX.md"
@@ -463,7 +466,9 @@ llmff:
         assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
         assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
         assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 0
+        capsys.readouterr()
         assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
+        inspect_output = capsys.readouterr().out
         assert main(["report", "--repo", str(repo), "--run", "latest"]) == 0
     finally:
         os.umask(previous_umask)
@@ -471,6 +476,17 @@ llmff:
     run_dirs = sorted((repo / ".sidecar" / "runs").iterdir())
     assert run_dirs
     run_dir = run_dirs[-1]
+    assert f"decision_trace: {run_dir / 'decision-trace.json'}" in inspect_output
+    assert f"run_id: {run_dir.name}" in inspect_output
+    assert "decision: needs_review" in inspect_output
+    assert "candidate_file: CODEX.md" in inspect_output
+    assert "candidate_state: needs_review" in inspect_output
+    assert "evals: all=passed" in inspect_output
+    assert "rollback_ready: no" in inspect_output
+    assert "review_next: inspect .sidecar/runs/" in inspect_output
+    assert "You skipped the regression test" not in inspect_output
+    assert "payload_snippet" not in inspect_output
+    assert "[REDACTED:" not in inspect_output
     assert (run_dir / "trace-input.jsonl").exists()
     assert S_IMODE((run_dir / "trace-input.jsonl").stat().st_mode) == 0o600
     assert S_IMODE((run_dir / "trace-redacted.jsonl").stat().st_mode) == 0o600
@@ -506,6 +522,8 @@ llmff:
     assert (run_dir / "decision-trace.json").exists()
     assert (run_dir / "report.md").exists()
     decision_trace = json.loads((run_dir / "decision-trace.json").read_text(encoding="utf-8"))
+    assert f"candidate_id: {decision_trace['candidate']['candidate_id']}" in inspect_output
+    assert f"risk_class: {decision_trace['candidate']['risk_class']}" in inspect_output
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
     evidence_id = audit["evidence_refs"][0]
     assert decision_trace["schema_version"] == 1

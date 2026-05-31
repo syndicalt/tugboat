@@ -944,6 +944,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"inspect decision blocked: {error}")
             return 1
         print(f"decision_trace: {trace_path}")
+        _print_decision_inspection_summary(trace_path)
         return 0
 
     if args.command == "harness" and args.harness_command == "check":
@@ -4396,6 +4397,50 @@ def _bounded_rollback_failure_message(message: str, *, limit: int = 2000) -> str
     if len(redacted) <= limit:
         return redacted
     return f"{redacted[:limit]}...[truncated]"
+
+
+def _print_decision_inspection_summary(trace_path: Path) -> None:
+    payload = json.loads(trace_path.read_text(encoding="utf-8"))
+    decision = _json_object_field(payload, "decision")
+    candidate = _json_object_field(payload, "candidate")
+    artifacts = _json_object_field(payload, "artifacts")
+    print(f"run_id: {payload.get('run_id', '')}")
+    print(f"decision: {decision.get('decision', '')}")
+    print(f"candidate_id: {candidate.get('candidate_id', '')}")
+    print(f"candidate_file: {candidate.get('base_file', '')}")
+    print(f"candidate_state: {candidate.get('state', '')}")
+    print(f"risk_class: {candidate.get('risk_class', '')}")
+    print(f"evals: {_decision_trace_eval_summary(payload)}")
+    print(f"rollback_ready: {_decision_trace_rollback_ready(decision, artifacts)}")
+    next_artifact = artifacts.get("report") or artifacts.get("candidate_diff") or trace_path.as_posix()
+    print(f"review_next: inspect {next_artifact}")
+
+
+def _json_object_field(payload: dict[str, object], field: str) -> dict[str, object]:
+    value = payload.get(field, {})
+    return value if isinstance(value, dict) else {}
+
+
+def _decision_trace_eval_summary(payload: dict[str, object]) -> str:
+    evals = payload.get("evals", [])
+    if not isinstance(evals, list) or not evals:
+        return "none"
+    summaries: list[str] = []
+    for eval_record in evals:
+        if not isinstance(eval_record, dict):
+            continue
+        suite_id = str(eval_record.get("suite_id", "unknown"))
+        status = "passed" if eval_record.get("passed") is True else "failed"
+        summaries.append(f"{suite_id}={status}")
+    return ", ".join(summaries) if summaries else "none"
+
+
+def _decision_trace_rollback_ready(
+    decision: dict[str, object],
+    artifacts: dict[str, object],
+) -> str:
+    applied_commit = str(decision.get("applied_commit", ""))
+    return "yes" if applied_commit and artifacts.get("rollback_plan") else "no"
 
 
 def _latest_decision_id_for_candidate(store: Store, *, candidate_id: int) -> int:

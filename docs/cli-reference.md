@@ -42,6 +42,23 @@ tugboat inspect-decision --repo . --decision latest
 
 Supported `--trace-format` values are `auto`, `generic-jsonl`, `codex`, `claude`, `ci`, and `mcp`.
 
+`inspect-decision` writes `.sidecar/runs/<run-id>/decision-trace.json` and prints a metadata-only operator summary:
+
+```text
+decision_trace: <path>
+run_id: <run-id>
+decision: needs_review
+candidate_id: <id>
+candidate_file: CODEX.md
+candidate_state: needs_review
+risk_class: <class>
+evals: all=passed
+rollback_ready: no
+review_next: inspect .sidecar/runs/<run-id>/candidate.diff
+```
+
+Raw trace evidence, payload snippets, rationale text, optimizer memory, and rollback bodies stay in artifacts rather than stdout.
+
 `optimize` also accepts training and validation metadata:
 
 ```bash
