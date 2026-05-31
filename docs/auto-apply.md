@@ -27,6 +27,7 @@ Auto-apply is only for narrow Class A changes in an enabled policy lane after a 
 - low rollback rate;
 - held-out eval pass;
 - governance pass;
+- evaluated instruction token delta within policy limits;
 - VCS-backed commit path;
 - one-command rollback;
 - allowed change category;
@@ -34,10 +35,11 @@ Auto-apply is only for narrow Class A changes in an enabled policy lane after a 
 
 Default lane thresholds are intentionally usable but still bounded:
 
-- `docs_hygiene`: 3 burn-in days, 20% maximum rejection rate, 5% maximum rollback rate, and 50 changed lines.
-- `skill_improvement`: 7 burn-in days, 15% maximum rejection rate, 3% maximum rollback rate, and 30 changed lines.
+- `docs_hygiene`: 3 burn-in days, 20% maximum rejection rate, 5% maximum rollback rate, 50 changed lines, and 50 added instruction tokens.
+- `skill_improvement`: 7 burn-in days, 15% maximum rejection rate, 3% maximum rollback rate, 30 changed lines, and 30 added instruction tokens.
 
 Repos can tighten these values in `.sidecar/policy.yaml`; runtime auto-apply commands cannot override them.
+The global `auto_apply.max_instruction_token_delta` is an absolute cap, and each lane can set an equal or stricter `max_instruction_token_delta`. Auto-apply fails closed with `instruction_token_delta_missing` if the eval artifact does not include `metrics.instruction_token_delta`, and with `max_instruction_token_delta_exceeded` if the evaluated candidate grows the instruction corpus beyond policy.
 
 Allowed examples include typo fixes, broken internal links, formatting normalization, duplicate sentence removal, and verified stale command references.
 

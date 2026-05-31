@@ -149,6 +149,7 @@ def _initialize_repo_policy(repo: Path) -> Path:
         "auto_apply": {
             "enabled": False,
             "max_changed_lines": Policy().auto_apply_max_changed_lines,
+            "max_instruction_token_delta": Policy().auto_apply_max_instruction_token_delta,
             "minimum_burn_in_days": Policy().auto_apply_minimum_burn_in_days,
             "maximum_rejection_rate": Policy().auto_apply_maximum_rejection_rate,
             "maximum_rollback_rate": Policy().auto_apply_maximum_rollback_rate,
@@ -158,6 +159,7 @@ def _initialize_repo_policy(repo: Path) -> Path:
                     "allowed_categories": list(lane.allowed_categories),
                     "allowed_risk_classes": list(lane.allowed_risk_classes),
                     "max_changed_lines": lane.max_changed_lines,
+                    "max_instruction_token_delta": lane.max_instruction_token_delta,
                     "minimum_burn_in_days": lane.minimum_burn_in_days,
                     "maximum_rejection_rate": lane.maximum_rejection_rate,
                     "maximum_rollback_rate": lane.maximum_rollback_rate,
@@ -2516,6 +2518,10 @@ def _assert_auto_apply_precheck(
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
     changed_lines = _auto_apply_candidate_changed_lines(candidate)
+    instruction_token_delta = _auto_apply_instruction_token_delta(
+        run_dir,
+        candidate_id=candidate_id,
+    )
     held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
         run_dir,
         candidate_id=candidate_id,
@@ -2536,6 +2542,7 @@ def _assert_auto_apply_precheck(
         rejection_rate=float(metrics["rejection_rate"]),
         rollback_rate=float(metrics["rollback_rate"]),
         changed_lines=changed_lines,
+        instruction_token_delta=instruction_token_delta,
         vcs_proof=vcs_proof,
     )
     readiness = _auto_apply_readiness(
@@ -2592,6 +2599,10 @@ def _assert_auto_apply_final(
     metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
     categories = _auto_apply_candidate_categories(candidate)
     changed_lines = _auto_apply_candidate_changed_lines(candidate)
+    instruction_token_delta = _auto_apply_instruction_token_delta(
+        run_dir,
+        candidate_id=candidate_id,
+    )
     held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
         run_dir,
         candidate_id=candidate_id,
@@ -2612,6 +2623,7 @@ def _assert_auto_apply_final(
         rejection_rate=float(metrics["rejection_rate"]),
         rollback_rate=float(metrics["rollback_rate"]),
         changed_lines=changed_lines,
+        instruction_token_delta=instruction_token_delta,
         vcs_proof=vcs_proof,
     )
     readiness = _auto_apply_readiness(
@@ -2739,6 +2751,7 @@ def _auto_apply_readiness(
             maximum_rejection_rate=policy.auto_apply_maximum_rejection_rate,
             maximum_rollback_rate=policy.auto_apply_maximum_rollback_rate,
             max_changed_lines=policy.auto_apply_max_changed_lines,
+            max_instruction_token_delta=policy.auto_apply_max_instruction_token_delta,
             lanes=tuple(
                 AutoApplyLanePolicy(
                     name=lane.name,
@@ -2746,6 +2759,7 @@ def _auto_apply_readiness(
                     allowed_categories=lane.allowed_categories,
                     allowed_change_classes=lane.allowed_risk_classes,
                     max_changed_lines=lane.max_changed_lines,
+                    max_instruction_token_delta=lane.max_instruction_token_delta,
                     minimum_burn_in_days=lane.minimum_burn_in_days,
                     maximum_rejection_rate=lane.maximum_rejection_rate,
                     maximum_rollback_rate=lane.maximum_rollback_rate,
@@ -2791,6 +2805,28 @@ def _auto_apply_candidate_changed_lines(candidate: CandidatePatch) -> int:
         if isinstance(raw_value, int):
             changed_lines += max(0, raw_value)
     return changed_lines
+
+
+def _auto_apply_instruction_token_delta(run_dir: Path, *, candidate_id: int) -> int | None:
+    eval_report_path = run_dir / "eval-report.json"
+    if not eval_report_path.exists():
+        return None
+    try:
+        eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
+        validate_json_artifact("eval-report.json", eval_report)
+        if int(eval_report["candidate_id"]) != candidate_id:
+            return None
+        metrics = eval_report.get("metrics", {})
+        if not isinstance(metrics, dict):
+            return None
+        raw_delta = metrics.get("instruction_token_delta")
+        if raw_delta is None:
+            return None
+        if isinstance(raw_delta, bool):
+            return None
+        return int(raw_delta)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
 
 
 def _auto_apply_eval_evidence(run_dir: Path, *, candidate_id: int) -> tuple[bool, bool]:
@@ -2857,6 +2893,7 @@ def _auto_apply_decision_snapshot(
             "held_out_eval_passed": candidate.held_out_eval_passed,
             "governance_regression_passed": candidate.governance_regression_passed,
             "changed_lines": candidate.changed_lines,
+            "instruction_token_delta": candidate.instruction_token_delta,
         },
         "policy": None
         if policy is None
@@ -2869,6 +2906,7 @@ def _auto_apply_decision_snapshot(
             "maximum_rejection_rate": policy.maximum_rejection_rate,
             "maximum_rollback_rate": policy.maximum_rollback_rate,
             "max_changed_lines": policy.max_changed_lines,
+            "max_instruction_token_delta": policy.max_instruction_token_delta,
             "lanes": [
                 {
                     "name": lane.name,
@@ -2876,6 +2914,7 @@ def _auto_apply_decision_snapshot(
                     "allowed_categories": list(lane.allowed_categories),
                     "allowed_change_classes": list(lane.allowed_change_classes),
                     "max_changed_lines": lane.max_changed_lines,
+                    "max_instruction_token_delta": lane.max_instruction_token_delta,
                     "minimum_burn_in_days": lane.minimum_burn_in_days,
                     "maximum_rejection_rate": lane.maximum_rejection_rate,
                     "maximum_rollback_rate": lane.maximum_rollback_rate,

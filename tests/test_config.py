@@ -15,6 +15,7 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.auto_apply_minimum_burn_in_days == 14
     assert policy.auto_apply_maximum_rejection_rate == 0.10
     assert policy.auto_apply_maximum_rollback_rate == 0.02
+    assert policy.auto_apply_max_instruction_token_delta == 50
     assert [(lane.name, lane.max_changed_lines) for lane in policy.auto_apply_lanes] == [
         ("docs_hygiene", 50),
         ("skill_improvement", 30),
@@ -61,6 +62,7 @@ instruction_files:
 auto_apply:
   enabled: false
   max_changed_lines: 12
+  max_instruction_token_delta: 9
 llmff:
   binary: llmff
   require_inspect: true
@@ -74,6 +76,7 @@ llmff:
     assert len(policy.instruction_files) == 1
     assert policy.instruction_files[0].path == "CODEX.md"
     assert policy.auto_apply_max_changed_lines == 12
+    assert policy.auto_apply_max_instruction_token_delta == 9
 
 
 def test_load_policy_yaml_reads_auto_apply_allowed_risk_classes(tmp_path: Path):
@@ -110,6 +113,7 @@ auto_apply:
       allowed_risk_classes:
         - A
       max_changed_lines: 50
+      max_instruction_token_delta: 6
       minimum_burn_in_days: 3
       maximum_rejection_rate: 0.20
       maximum_rollback_rate: 0.05
@@ -124,9 +128,44 @@ auto_apply:
     assert lane.name == "docs_hygiene"
     assert lane.allowed_categories == ("typo_fix",)
     assert lane.max_changed_lines == 50
+    assert lane.max_instruction_token_delta == 6
     assert lane.minimum_burn_in_days == 3
     assert lane.maximum_rejection_rate == 0.20
     assert lane.maximum_rollback_rate == 0.05
+
+
+def test_load_policy_yaml_rejects_negative_auto_apply_token_growth_limit(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+auto_apply:
+  max_instruction_token_delta: -1
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="auto_apply.max_instruction_token_delta"):
+        load_policy(tmp_path)
+
+
+def test_load_policy_yaml_rejects_negative_lane_token_growth_limit(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+auto_apply:
+  lanes:
+    docs_hygiene:
+      max_instruction_token_delta: -1
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="auto_apply.lanes.docs_hygiene.max_instruction_token_delta"):
+        load_policy(tmp_path)
 
 
 def test_load_policy_yaml_reads_allowed_manifest_hashes(tmp_path: Path):

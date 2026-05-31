@@ -166,7 +166,11 @@ def _candidate_run(
                 "held_out_score": 0.90,
                 "governance_passed": True,
                 "recommendation": "accept",
-                "metrics": {"governance_regressions": 0, "incident_replay_cases": 1},
+                "metrics": {
+                    "governance_regressions": 0,
+                    "incident_replay_cases": 1,
+                    "instruction_token_delta": 0,
+                },
                 "validation_splits": {
                     "trigger": ["incident_replay:regression"],
                     "held_out": ["held-out:no-regression"],
@@ -314,6 +318,7 @@ def _write_auto_apply_policy(
     *,
     version: int = 9,
     allowed_risk_classes: tuple[str, ...] = ("A",),
+    max_instruction_token_delta: int = 50,
 ) -> None:
     policy_path = repo / ".sidecar" / "policy.yaml"
     policy_path.parent.mkdir(parents=True, exist_ok=True)
@@ -332,6 +337,7 @@ auto_apply:
   minimum_burn_in_days: 14
   maximum_rejection_rate: 0.10
   maximum_rollback_rate: 0.02
+  max_instruction_token_delta: {max_instruction_token_delta}
 """,
         encoding="utf-8",
     )
@@ -1929,6 +1935,7 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
                 "allowed_change_classes": ["A"],
                 "enabled": True,
                 "max_changed_lines": 50,
+                "max_instruction_token_delta": 50,
                 "maximum_rejection_rate": 0.2,
                 "maximum_rollback_rate": 0.05,
                 "minimum_burn_in_days": 3,
@@ -1939,6 +1946,7 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
                 "allowed_change_classes": ["A"],
                 "enabled": True,
                 "max_changed_lines": 30,
+                "max_instruction_token_delta": 30,
                 "maximum_rejection_rate": 0.15,
                 "maximum_rollback_rate": 0.03,
                 "minimum_burn_in_days": 7,
@@ -1946,6 +1954,7 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
             },
         ],
         "max_changed_lines": 50,
+        "max_instruction_token_delta": 50,
         "maximum_rejection_rate": 0.10,
         "maximum_rollback_rate": 0.02,
         "minimum_burn_in_days": 14,
@@ -1968,6 +1977,94 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
     assert "candidate.diff" not in serialized_payload
     assert "eval-report" not in serialized_payload
     assert "rationale" not in serialized_payload
+
+
+def test_auto_apply_blocks_candidate_over_policy_token_growth_limit(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["metrics"]["instruction_token_delta"] = 6
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    _write_auto_apply_policy(repo, version=9, max_instruction_token_delta=5)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["eligible"] is False
+    assert decision["lane"] == "docs_hygiene"
+    assert decision["reasons"] == ["max_instruction_token_delta_exceeded"]
+    assert decision["candidate"]["instruction_token_delta"] == 6
+    assert decision["policy"]["max_instruction_token_delta"] == 5
+    assert decision["policy"]["lanes"][0]["max_instruction_token_delta"] == 50
+
+
+def test_auto_apply_blocks_when_eval_report_omits_token_growth_metric(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    del eval_report["metrics"]["instruction_token_delta"]
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["eligible"] is False
+    assert decision["reasons"] == ["instruction_token_delta_missing"]
+    assert decision["candidate"]["instruction_token_delta"] is None
 
 
 def test_auto_apply_blocks_underclassified_class_a_candidate_touching_policy_domain(
@@ -2216,11 +2313,13 @@ def test_auto_apply_precheck_blocks_without_eval_evidence(tmp_path: Path):
     assert decision["phase"] == "precheck"
     assert decision["eligible"] is False
     assert decision["reasons"] == [
+        "instruction_token_delta_missing",
         "held_out_eval_failed",
         "governance_regression_failed",
     ]
     assert decision["candidate"]["held_out_eval_passed"] is False
     assert decision["candidate"]["governance_regression_passed"] is False
+    assert decision["candidate"]["instruction_token_delta"] is None
 
 
 def test_auto_apply_final_uses_eval_report_governance_result(tmp_path: Path):

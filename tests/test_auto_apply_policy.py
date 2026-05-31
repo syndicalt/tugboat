@@ -3,6 +3,7 @@ from __future__ import annotations
 from tugboat.auto_apply import (
     AutoApplyCandidate,
     AutoApplyConfirmation,
+    AutoApplyLanePolicy,
     AutoApplyPolicy,
     AutoApplyReadiness,
     VcsProof,
@@ -21,6 +22,7 @@ def _passing_candidate(**overrides: object) -> AutoApplyCandidate:
         "rejection_rate": 0.02,
         "rollback_rate": 0.001,
         "changed_lines": 1,
+        "instruction_token_delta": 0,
         "vcs_proof": VcsProof(
             mode="branch",
             commit_sha=None,
@@ -68,6 +70,7 @@ def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     assert AutoApplyPolicy().maximum_rejection_rate == 0.10
     assert AutoApplyPolicy().maximum_rollback_rate == 0.02
     assert AutoApplyPolicy().max_changed_lines == 50
+    assert AutoApplyPolicy().max_instruction_token_delta == 50
     assert [lane.name for lane in AutoApplyPolicy().lanes] == [
         "docs_hygiene",
         "skill_improvement",
@@ -123,6 +126,7 @@ def test_auto_apply_reports_all_auditable_ineligibility_reasons():
             rejection_rate=0.25,
             rollback_rate=0.08,
             changed_lines=51,
+            instruction_token_delta=51,
             vcs_proof=VcsProof(
                 mode="proposal_only",
                 commit_sha=None,
@@ -141,6 +145,7 @@ def test_auto_apply_reports_all_auditable_ineligibility_reasons():
         "change_class_not_allowed",
         "auto_apply_change_type_not_allowed",
         "max_changed_lines_exceeded",
+        "max_instruction_token_delta_exceeded",
         "held_out_eval_failed",
         "governance_regression_failed",
         "rejection_rate_too_high",
@@ -238,6 +243,62 @@ def test_skill_improvement_lane_has_separate_thresholds():
     assert accepted.lane == "skill_improvement"
     assert too_large.eligible is False
     assert too_large.reasons == ("max_changed_lines_exceeded",)
+
+
+def test_auto_apply_blocks_candidates_that_exceed_token_growth_limit():
+    at_limit = evaluate_auto_apply(
+        candidate=_passing_candidate(instruction_token_delta=50),
+        readiness=_ready(),
+    )
+    over_limit = evaluate_auto_apply(
+        candidate=_passing_candidate(instruction_token_delta=51),
+        readiness=_ready(),
+    )
+    reduction = evaluate_auto_apply(
+        candidate=_passing_candidate(instruction_token_delta=-200),
+        readiness=_ready(),
+    )
+
+    assert at_limit.eligible is True
+    assert reduction.eligible is True
+    assert over_limit.eligible is False
+    assert over_limit.reasons == ("max_instruction_token_delta_exceeded",)
+
+
+def test_auto_apply_blocks_when_token_growth_metrics_are_missing():
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(instruction_token_delta=None),
+        readiness=_ready(),
+    )
+
+    assert decision.eligible is False
+    assert decision.reasons == ("instruction_token_delta_missing",)
+
+
+def test_auto_apply_lane_can_set_stricter_token_growth_limit():
+    policy = _enabled_policy(
+        lanes=(
+            AutoApplyLanePolicy(
+                name="docs_hygiene",
+                enabled=True,
+                allowed_categories=("typo_fix",),
+                max_changed_lines=50,
+                max_instruction_token_delta=5,
+                minimum_burn_in_days=3,
+                maximum_rejection_rate=0.20,
+                maximum_rollback_rate=0.05,
+            ),
+        )
+    )
+
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(instruction_token_delta=6),
+        readiness=_ready(policy=policy, burn_in_days=3),
+    )
+
+    assert decision.eligible is False
+    assert decision.lane == "docs_hygiene"
+    assert decision.reasons == ("max_instruction_token_delta_exceeded",)
 
 
 def test_eligible_candidate_returns_approval_bundle_without_apply_execution():

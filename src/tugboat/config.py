@@ -137,6 +137,13 @@ def _as_auto_apply_lanes(raw: Any) -> tuple[AutoApplyLaneConfig, ...]:
                     ),
                     f"auto_apply.lanes.{name}.max_changed_lines",
                 ),
+                max_instruction_token_delta=_as_non_negative_int(
+                    lane_raw.get(
+                        "max_instruction_token_delta",
+                        default.max_instruction_token_delta if default else 50,
+                    ),
+                    f"auto_apply.lanes.{name}.max_instruction_token_delta",
+                ),
                 minimum_burn_in_days=_as_non_negative_days(
                     lane_raw.get(
                         "minimum_burn_in_days",
@@ -191,6 +198,13 @@ def load_policy(repo: Path) -> Policy:
         auto_apply_max_changed_lines=_as_non_negative_int(
             auto_apply.get("max_changed_lines", Policy().auto_apply_max_changed_lines),
             "auto_apply.max_changed_lines",
+        ),
+        auto_apply_max_instruction_token_delta=_as_non_negative_int(
+            auto_apply.get(
+                "max_instruction_token_delta",
+                Policy().auto_apply_max_instruction_token_delta,
+            ),
+            "auto_apply.max_instruction_token_delta",
         ),
         auto_apply_allowed_repositories=tuple(
             str(Path(item).expanduser().resolve())

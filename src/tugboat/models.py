@@ -58,6 +58,7 @@ class AutoApplyLaneConfig:
     allowed_categories: tuple[str, ...]
     allowed_risk_classes: tuple[str, ...] = ("A",)
     max_changed_lines: int = 30
+    max_instruction_token_delta: int = 50
     minimum_burn_in_days: int = 14
     maximum_rejection_rate: float = 0.10
     maximum_rollback_rate: float = 0.02
@@ -75,6 +76,7 @@ DEFAULT_AUTO_APPLY_LANES = (
             "typo_fix",
         ),
         max_changed_lines=50,
+        max_instruction_token_delta=50,
         minimum_burn_in_days=3,
         maximum_rejection_rate=0.20,
         maximum_rollback_rate=0.05,
@@ -84,6 +86,7 @@ DEFAULT_AUTO_APPLY_LANES = (
         enabled=True,
         allowed_categories=("skill_improvement",),
         max_changed_lines=30,
+        max_instruction_token_delta=30,
         minimum_burn_in_days=7,
         maximum_rejection_rate=0.15,
         maximum_rollback_rate=0.03,
@@ -98,6 +101,7 @@ class Policy:
     instruction_files: tuple[InstructionFilePolicy, ...] = field(default_factory=tuple)
     auto_apply_enabled: bool = False
     auto_apply_max_changed_lines: int = 50
+    auto_apply_max_instruction_token_delta: int = 50
     auto_apply_allowed_repositories: tuple[str, ...] = field(default_factory=tuple)
     auto_apply_allowed_risk_classes: tuple[str, ...] = ("A",)
     auto_apply_lanes: tuple[AutoApplyLaneConfig, ...] = DEFAULT_AUTO_APPLY_LANES

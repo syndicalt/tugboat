@@ -36,6 +36,8 @@ REASON_ORDER = (
     "change_class_not_allowed",
     "auto_apply_change_type_not_allowed",
     "max_changed_lines_exceeded",
+    "instruction_token_delta_missing",
+    "max_instruction_token_delta_exceeded",
     "held_out_eval_failed",
     "governance_regression_failed",
     "rejection_rate_too_high",
@@ -57,6 +59,7 @@ class AutoApplyLanePolicy:
     allowed_categories: tuple[str, ...]
     allowed_change_classes: tuple[str, ...] = ("A",)
     max_changed_lines: int = 30
+    max_instruction_token_delta: int = 50
     minimum_burn_in_days: int = 14
     maximum_rejection_rate: float = 0.10
     maximum_rollback_rate: float = 0.02
@@ -77,6 +80,7 @@ DEFAULT_AUTO_APPLY_LANES = (
         enabled=True,
         allowed_categories=tuple(sorted(ALLOWED_CHANGE_CATEGORIES)),
         max_changed_lines=50,
+        max_instruction_token_delta=50,
         minimum_burn_in_days=3,
         maximum_rejection_rate=0.20,
         maximum_rollback_rate=0.05,
@@ -86,6 +90,7 @@ DEFAULT_AUTO_APPLY_LANES = (
         enabled=True,
         allowed_categories=tuple(sorted(SKILL_IMPROVEMENT_CATEGORIES)),
         max_changed_lines=30,
+        max_instruction_token_delta=30,
         minimum_burn_in_days=7,
         maximum_rejection_rate=0.15,
         maximum_rollback_rate=0.03,
@@ -103,6 +108,7 @@ class AutoApplyPolicy:
     maximum_rejection_rate: float = 0.10
     maximum_rollback_rate: float = 0.02
     max_changed_lines: int = 50
+    max_instruction_token_delta: int = 50
     lanes: tuple[AutoApplyLanePolicy, ...] = DEFAULT_AUTO_APPLY_LANES
 
     def __post_init__(self) -> None:
@@ -156,6 +162,7 @@ class AutoApplyCandidate:
     rejection_rate: float
     rollback_rate: float
     changed_lines: int
+    instruction_token_delta: int | None
     vcs_proof: VcsProof
 
     def __post_init__(self) -> None:
@@ -232,6 +239,13 @@ def evaluate_auto_apply(
             found_reasons.add("rollback_rate_too_high")
         if candidate.changed_lines > threshold_policy.max_changed_lines:
             found_reasons.add("max_changed_lines_exceeded")
+        if candidate.instruction_token_delta is None:
+            found_reasons.add("instruction_token_delta_missing")
+        elif candidate.instruction_token_delta > min(
+            policy.max_instruction_token_delta,
+            threshold_policy.max_instruction_token_delta,
+        ):
+            found_reasons.add("max_instruction_token_delta_exceeded")
 
     if confirmation is None or not confirmation.confirmed or not confirmation.actor:
         found_reasons.add("cli_confirmation_required")
