@@ -18,8 +18,14 @@ def test_built_wheel_runs_fresh_repo_proposal_loop(tmp_path: Path):
     fixture_llmff = bin_dir / "tugboat-fixture-llmff"
     repo = tmp_path / "fresh"
     repo.mkdir()
-    original = "# Rules\n\nUse tests.\n"
+    docs_dir = repo / "docs"
+    docs_dir.mkdir()
+    original = "# Rules\n\nUse tests. See [runbook](docs/runbook.md).\n"
     (repo / "CODEX.md").write_text(original, encoding="utf-8")
+    (docs_dir / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n# Runbook\n\nUse tests.\n",
+        encoding="utf-8",
+    )
     trace = repo / "traces" / "episode.jsonl"
     trace.parent.mkdir()
     trace.write_text(
@@ -30,20 +36,43 @@ def test_built_wheel_runs_fresh_repo_proposal_loop(tmp_path: Path):
 
     assert tugboat.exists()
     assert fixture_llmff.exists()
-    _run_installed(tugboat, "init", "--repo", str(repo))
-    _run_installed(tugboat, "index", "--repo", str(repo))
-    _run_installed(tugboat, "audit", "--repo", str(repo), "--trace", str(trace))
-    _run_installed(tugboat, "propose", "--repo", str(repo), "--audit", "latest")
-    _run_installed(tugboat, "eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all")
-    _run_installed(tugboat, "report", "--repo", str(repo), "--run", "latest")
+    doctor_output = _run_installed(tugboat, "doctor", "--repo", str(repo))
+    init_output = _run_installed(tugboat, "init", "--repo", str(repo))
+    index_output = _run_installed(tugboat, "index", "--repo", str(repo), "--check")
+    harness_output = _run_installed(tugboat, "harness", "check", "--repo", str(repo))
+    optimize_output = _run_installed(
+        tugboat, "optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"
+    )
+    report_output = _run_installed(tugboat, "report", "--repo", str(repo), "--run", "latest")
+
+    assert "tugboat: ok" in doctor_output
+    assert "initialized:" in init_output
+    assert "indexed documents: 1" in index_output
+    assert "harness: ok" in harness_output
+    assert "optimization: needs_review" in optimize_output
+    assert "report:" in report_output
 
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    for artifact_name in (
+        "audit.json",
+        "candidate.json",
+        "eval-report.json",
+        "optimization-summary.json",
+        "report.md",
+    ):
+        assert (run_dir / artifact_name).exists(), artifact_name
     assert (run_dir / "report.md").exists()
     inspect = json.loads(
         (run_dir / "patch-propose" / "llmff-inspect.json").read_text(encoding="utf-8")
     )
     assert inspect["inspect"]["fixture_backend"] == "tugboat"
+    optimization_summary = json.loads(
+        (run_dir / "optimization-summary.json").read_text(encoding="utf-8")
+    )
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert optimization_summary["decision"] == "needs_review"
+    assert eval_report["suite_id"] == "all"
 
 
 def test_wheel_contains_runtime_manifest_templates(tmp_path: Path):
@@ -90,8 +119,8 @@ def _install_wheel_in_venv(tmp_path: Path, wheel: Path) -> Path:
     return python
 
 
-def _run_installed(tugboat: Path, *args: str) -> None:
-    subprocess.run(
+def _run_installed(tugboat: Path, *args: str) -> str:
+    result = subprocess.run(
         [str(tugboat), *args],
         check=True,
         stdout=subprocess.PIPE,
@@ -99,3 +128,4 @@ def _run_installed(tugboat: Path, *args: str) -> None:
         text=True,
         cwd=tugboat.parent,
     )
+    return result.stdout
