@@ -94,6 +94,20 @@ def test_apply_unified_diff_rejects_unexpected_file_path():
     assert apply_unified_diff(base, diff, expected_path="CODEX.md") is None
 
 
+def test_apply_unified_diff_rejects_unsafe_file_paths():
+    base = "alpha\n"
+    traversal_diff = (
+        "--- a/../CODEX.md\n"
+        "+++ b/../CODEX.md\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-alpha\n"
+        "+beta\n"
+    )
+
+    assert apply_unified_diff(base, traversal_diff) is None
+    assert classify_markdown_diff_operations(base, traversal_diff) == ()
+
+
 def test_classify_markdown_diff_operations_derives_add_section_and_budget():
     base = "# Testing\n\nUse regression tests.\n"
     diff = (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 import re
 
 
@@ -287,7 +288,15 @@ def _parse_file_header(
     path = match.group("path")
     if not path.startswith(expected_prefix):
         return None
-    return path.removeprefix(expected_prefix)
+    repo_path = path.removeprefix(expected_prefix)
+    if not _is_safe_repo_relative_path(repo_path):
+        return None
+    return repo_path
+
+
+def _is_safe_repo_relative_path(path: str) -> bool:
+    parsed = PurePosixPath(path)
+    return bool(path) and not parsed.is_absolute() and ".." not in parsed.parts
 
 
 class _RangedHunk:
