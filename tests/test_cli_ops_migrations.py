@@ -82,3 +82,22 @@ def test_ops_migrate_apply_is_blocked_by_read_only_kill_switch(
     assert "migration blocked: read-only kill switch is enabled" in capsys.readouterr().out
     assert not (sidecar / "version.json").exists()
     assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_ops_migrate_blocks_newer_sidecar_schema_without_traceback(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["ops", "migrate", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "migration blocked: sidecar schema version 999 is newer than supported" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "migrations" / "migration-report.json").exists()

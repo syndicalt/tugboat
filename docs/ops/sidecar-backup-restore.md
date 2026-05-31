@@ -13,6 +13,8 @@ The `.sidecar` directory contains Tugboat state: run artifacts, manifest copies,
 
 Stop writers first: pause CI jobs, daemon jobs, MCP write-intent requests, and manual `tugboat audit` or `tugboat propose` runs.
 
+Create and verify a backup before `tugboat ops migrate --repo . --apply` or before upgrading Tugboat across a release that changes `.sidecar` schema or artifact semantics. Older Tugboat binaries intentionally block newer sidecars; if `tugboat ops migrate --repo .` reports a sidecar schema version newer than supported, upgrade Tugboat and restore only from a backup created by a compatible or older Tugboat version.
+
 Write the Tugboat backup plan before running shell commands:
 
 ```bash

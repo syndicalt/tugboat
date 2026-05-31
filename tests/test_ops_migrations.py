@@ -99,6 +99,20 @@ def test_dry_run_migration_plan_reports_steps_without_mutating_sidecar(
     assert json.loads(marker.read_text(encoding="utf-8")) == {"schema_version": 2}
 
 
+def test_dry_run_migration_plan_blocks_newer_sidecar_schema(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    marker = sidecar / "version.json"
+    marker.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sidecar schema version 999 is newer than supported"):
+        dry_run_migration_plan(tmp_path)
+
+    assert json.loads(marker.read_text(encoding="utf-8")) == {"schema_version": 999}
+
+
 def test_execute_migration_plan_updates_older_policy_yaml_to_current_version(
     tmp_path: Path,
 ) -> None:
@@ -221,4 +235,21 @@ def test_execute_migration_plan_validates_report_before_mutating_sidecar(
         "version": 1,
         "mode": "proposal_only",
     }
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_execute_migration_plan_validates_policy_before_mutating_sidecar(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    policy = sidecar / "policy.yaml"
+    policy.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=".sidecar/policy.yaml must contain a mapping"):
+        execute_migration_plan(tmp_path)
+
+    assert not (sidecar / "version.json").exists()
+    assert policy.read_text(encoding="utf-8") == "- not\n- a\n- mapping\n"
+    assert not (sidecar / "ops").exists()
     assert not (sidecar / "migrations" / "migration-report.json").exists()

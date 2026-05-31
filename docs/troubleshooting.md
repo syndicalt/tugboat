@@ -115,6 +115,12 @@ tugboat daemon run-once --repo .
 
 If the kill switch is enabled, queued jobs will not execute. If leases are stale, `run-once` or `cycle` recovers expired leases before acquiring work.
 
+## Operations
+
+`migration blocked: sidecar schema version <n> is newer than supported version <m>`
+
+Stop and upgrade Tugboat before running more commands against that sidecar. A newer `.sidecar/version.json` means the sidecar may contain schema or artifact semantics this binary does not understand; older binaries must not migrate, apply, or reinterpret it.
+
 ## Secrets And Redaction
 
 If a secret appears in a trace, prompt, event, checkpoint, diff, or report:

@@ -125,4 +125,4 @@ tugboat ops restore --repo . --archive /tmp/tugboat-sidecar.tgz --staging /tmp/t
 tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit "$(git rev-parse HEAD)" --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/pytest-coverage.log
 ```
 
-Operations commands write reviewable artifacts under `.sidecar/ops`. Destructive operations require explicit apply or execute flags and are blocked by the read-only kill switch where applicable.
+Operations commands write reviewable artifacts under `.sidecar/ops`. Destructive operations require explicit apply or execute flags and are blocked by the read-only kill switch where applicable. `ops migrate` blocks if `.sidecar/version.json` is newer than this Tugboat binary supports; upgrade Tugboat before using or migrating a future-version sidecar.

@@ -59,6 +59,14 @@ DEFAULT_MIGRATIONS: tuple[SidecarMigration, ...] = (
 )
 
 
+def supported_sidecar_version(
+    migrations: tuple[SidecarMigration, ...] = DEFAULT_MIGRATIONS,
+) -> int:
+    if not migrations:
+        return 1
+    return max(migration.to_version for migration in migrations)
+
+
 def current_sidecar_version(repo: Path) -> int:
     sidecar = repo / ".sidecar"
     if not sidecar.exists():
@@ -101,6 +109,12 @@ def dry_run_migration_plan(
     current_version = current_sidecar_version(repo)
     if current_version == 0:
         return MigrationPlan(current_version=0, target_version=0, steps=())
+    supported_version = supported_sidecar_version(migrations)
+    if current_version > supported_version:
+        raise ValueError(
+            f"sidecar schema version {current_version} is newer than supported "
+            f"version {supported_version}; upgrade Tugboat before using this sidecar"
+        )
 
     pending = ordered_migrations_after(current_version, migrations)
     target_version = pending[-1].to_version if pending else current_version
@@ -130,6 +144,14 @@ def execute_migration_plan(
     validate_migration_report(plan)
 
     sidecar = repo / ".sidecar"
+    policy_path = sidecar / "policy.yaml"
+    policy_payload = None
+    if policy_path.exists():
+        policy_payload = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(policy_payload, dict):
+            raise ValueError(".sidecar/policy.yaml must contain a mapping")
+        policy_payload["version"] = plan.target_version
+
     version_json = sidecar / "version.json"
     version_json.write_text(
         json.dumps({"schema_version": plan.target_version}, indent=2, sort_keys=True) + "\n",
@@ -138,12 +160,7 @@ def execute_migration_plan(
     if any(step.migration_id == "sidecar-v2-to-v3" for step in plan.steps):
         (sidecar / "ops" / "observability").mkdir(parents=True, exist_ok=True)
 
-    policy_path = sidecar / "policy.yaml"
-    if policy_path.exists():
-        policy_payload = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(policy_payload, dict):
-            raise ValueError(".sidecar/policy.yaml must contain a mapping")
-        policy_payload["version"] = plan.target_version
+    if policy_payload is not None:
         policy_path.write_text(yaml.safe_dump(policy_payload, sort_keys=True), encoding="utf-8")
 
     report_path = write_migration_report(repo, plan)

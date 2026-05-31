@@ -13,7 +13,7 @@ Use this checklist before publishing a Tugboat release or promoting a build for 
 
 - The release branch is clean except for intended release changes.
 - The release notes identify user-visible changes, policy changes, storage changes, and rollback notes.
-- Any `.sidecar` schema or artifact-format change has an explicit migration or compatibility note.
+- Any `.sidecar` schema or artifact-format change has an explicit migration or compatibility note, including whether older Tugboat binaries block newer sidecars and whether operators must back up before `tugboat ops migrate --repo . --apply`.
 - No release step requires secret values in logs, CI summaries, or retained artifacts.
 
 ## Checklist

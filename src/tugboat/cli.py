@@ -1052,7 +1052,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if args.apply and _write_blocked_by_read_only(repo, "migration"):
             return 1
-        plan = execute_migration_plan(repo) if args.apply else dry_run_migration_plan(repo)
+        try:
+            plan = execute_migration_plan(repo) if args.apply else dry_run_migration_plan(repo)
+        except (ValueError, json.JSONDecodeError, OSError) as error:
+            print(f"migration blocked: {error}")
+            return 1
         print(f"migration_mode: {'apply' if args.apply else 'dry-run'}")
         print(f"current_version: {plan.current_version}")
         print(f"target_version: {plan.target_version}")
