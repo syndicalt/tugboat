@@ -635,6 +635,7 @@ def _instruction_source_ref(document, chunk) -> str:
 
 
 def _ingest_trace(trace: Path, trace_format: str):
+    requested_trace_format = trace_format
     if trace_format == "auto":
         trace_format = detect_trace_format(trace)
     if trace_format == "generic-jsonl":
@@ -650,6 +651,12 @@ def _ingest_trace(trace: Path, trace_format: str):
     else:
         raise ValueError(f"unsupported trace format: {trace_format}")
     if not bundle.events:
+        if requested_trace_format != "auto":
+            detected_format = detect_trace_format(trace)
+            raise ValueError(
+                f"trace format {requested_trace_format} produced no recognized events; "
+                f"rerun with --trace-format auto or {detected_format}"
+            )
         raise ValueError("trace contains no events")
     return bundle
 

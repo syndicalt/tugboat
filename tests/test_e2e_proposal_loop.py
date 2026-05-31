@@ -223,6 +223,49 @@ def test_audit_empty_trace_returns_clear_error_without_traceback(tmp_path: Path,
     assert audit["llmff_failure_message"] == "trace contains no events"
 
 
+def test_audit_forced_trace_format_mismatch_returns_actionable_hint(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text(
+        json.dumps({"type": "user_request", "content": "Fix bug"}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "claude",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        "audit blocked: invalid trace: trace format claude produced no recognized "
+        "events; rerun with --trace-format auto or generic-jsonl"
+    ) in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "invalid_trace"
+    assert audit["llmff_failure_message"] == (
+        "trace format claude produced no recognized events; "
+        "rerun with --trace-format auto or generic-jsonl"
+    )
+
+
 def _write_fake_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3
