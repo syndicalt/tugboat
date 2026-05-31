@@ -3643,8 +3643,14 @@ llmff:
             memory_type="rejected_edit",
             key="fingerprint-1",
             payload={
+                "category": "policy_regression",
+                "failure_pattern": "duplicates existing guidance",
+                "file": "CODEX.md",
+                "operator": "add",
                 "semantic_fingerprint": "fingerprint-1",
                 "rejection_reason": "held_out_not_improved",
+                "review_actor": "reviewer",
+                "section": "Rules",
                 "source_refs": ["audit:1"],
             },
         )
@@ -3669,8 +3675,14 @@ llmff:
         "schema_version": 1,
         "rejected_edits": [
             {
+                "category": "policy_regression",
+                "failure_pattern": "duplicates existing guidance",
+                "file": "CODEX.md",
                 "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                "operator": "add",
                 "rejection_reason": "held_out_not_improved",
+                "review_actor": "reviewer",
+                "section": "Rules",
                 "semantic_fingerprint": "fingerprint-1",
                 "source_refs": ["audit:1"],
             }
@@ -5464,6 +5476,136 @@ llmff:
         "held_out": ["held-out:no-regression"],
         "trigger": ["incident_replay:regression"],
     }
+
+
+def test_review_reject_records_human_rejected_edit_memory(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate_id = int(json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))["candidate_id"])
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "review",
+                "reject",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "reviewer",
+                "--reason",
+                "redundant_rule",
+                "--category",
+                "policy_regression",
+                "--failure-pattern",
+                "duplicates existing guidance",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        state = store.connection.execute(
+            "SELECT state FROM candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()[0]
+        review_action = store.connection.execute(
+            """
+            SELECT actor, action, reason
+            FROM review_actions
+            WHERE candidate_id = ?
+            ORDER BY rowid DESC
+            LIMIT 1
+            """,
+            (candidate_id,),
+        ).fetchone()
+        decision = store.connection.execute(
+            """
+            SELECT actor, policy, decision, reason
+            FROM decisions
+            WHERE candidate_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (candidate_id,),
+        ).fetchone()
+        memory_row = store.connection.execute(
+            """
+            SELECT key, payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'rejected_edit'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    key = str(memory_row[0])
+    payload = json.loads(memory_row[1])
+    assert output == "review: rejected\n"
+    assert state == "rejected"
+    assert review_action == ("reviewer", "rejected", "redundant_rule")
+    assert decision == ("reviewer", "human_review", "rejected", "redundant_rule")
+    assert len(key) == 64
+    assert payload == {
+        "category": "policy_regression",
+        "failure_pattern": "duplicates existing guidance",
+        "file": "CODEX.md",
+        "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+        "operator": "add",
+        "rejection_reason": "redundant_rule",
+        "review_actor": "reviewer",
+        "section": "Rules",
+        "semantic_fingerprint": key,
+        "source_refs": [f"candidate:{candidate_id}", "suite:human_review"],
+    }
+
+    assert (
+        main(
+            [
+                "review",
+                "reject",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "reviewer",
+                "--reason",
+                "redundant_rule",
+                "--category",
+                "policy_regression",
+                "--failure-pattern",
+                "duplicates existing guidance",
+            ]
+        )
+        == 1
+    )
+    assert "review blocked: candidate is not awaiting review" in capsys.readouterr().out
 
 
 def test_eval_rejects_accept_recommendation_without_held_out_cases(

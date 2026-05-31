@@ -314,6 +314,16 @@ def build_parser() -> argparse.ArgumentParser:
     auto_apply.add_argument("--auto-apply-policy-version", type=int)
     auto_apply.add_argument("--actor", required=True)
 
+    review = subcommands.add_parser("review")
+    review_subcommands = review.add_subparsers(dest="review_command", required=True)
+    review_reject = review_subcommands.add_parser("reject")
+    review_reject.add_argument("--repo", required=True)
+    review_reject.add_argument("--candidate", required=True)
+    review_reject.add_argument("--actor", required=True)
+    review_reject.add_argument("--reason", required=True)
+    review_reject.add_argument("--category", required=True)
+    review_reject.add_argument("--failure-pattern", required=True)
+
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("--repo", required=True)
     rollback.add_argument("--decision", required=True)
@@ -720,6 +730,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"auto-apply blocked: {error}")
             return 1
         print(f"auto-apply plan: {apply_path}")
+        return 0
+
+    if args.command == "review" and args.review_command == "reject":
+        repo = Path(args.repo)
+        if _write_blocked_by_read_only(repo, "review rejection"):
+            return 1
+        run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
+        try:
+            _write_human_review_rejection(
+                repo,
+                run_dir,
+                actor=args.actor,
+                reason=args.reason,
+                category=args.category,
+                failure_pattern=args.failure_pattern,
+            )
+        except (FileNotFoundError, KeyError, ValueError, SecretScanError) as error:
+            print(f"review blocked: {error}")
+            return 1
+        print("review: rejected")
         return 0
 
     if args.command == "rollback":
@@ -3521,6 +3551,159 @@ def _record_missing_rejected_edit_memory(
                 "source_refs": [f"candidate:{candidate_id}", f"suite:{suite_id}"],
             },
         )
+
+
+def _write_human_review_rejection(
+    repo: Path,
+    run_dir: Path,
+    *,
+    actor: str,
+    reason: str,
+    category: str,
+    failure_pattern: str,
+) -> None:
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    validate_json_artifact("candidate.json", candidate)
+    candidate_id = int(candidate["candidate_id"])
+    rejected_memory = _human_rejected_edit_memory_payloads(
+        candidate,
+        candidate_id=candidate_id,
+        actor=actor,
+        reason=reason,
+        category=category,
+        failure_pattern=failure_pattern,
+    )
+    _scan_human_review_rejection(
+        actor=actor,
+        reason=reason,
+        category=category,
+        failure_pattern=failure_pattern,
+        rejected_memory=rejected_memory,
+    )
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        row = store.connection.execute(
+            "SELECT state FROM candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"candidate not found: {candidate_id}")
+        if str(row[0]) != "needs_review":
+            raise ValueError("candidate is not awaiting review")
+        store.update_candidate_state(candidate_id=candidate_id, state="rejected", reason=reason)
+        store.record_review_action(
+            candidate_id=candidate_id,
+            actor=actor,
+            action="rejected",
+            reason=reason,
+        )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor=actor,
+            policy="human_review",
+            decision="rejected",
+            reason=reason,
+        )
+        for fingerprint, payload in rejected_memory:
+            store.record_optimizer_memory(
+                repo_path=_repo_memory_path(repo),
+                memory_type="rejected_edit",
+                key=fingerprint,
+                payload=payload,
+            )
+        store.append_audit_event(
+            "review.rejected",
+            {
+                "actor": actor,
+                "candidate_id": candidate_id,
+                "category": category,
+                "failure_pattern": failure_pattern,
+                "reason": reason,
+                "run_id": run_dir.name,
+            },
+        )
+    _merge_json(
+        run_dir / "decision.json",
+        {
+            "decision": "rejected",
+            "policy_allowed": False,
+            "policy_reasons": [reason],
+            "review_actor": actor,
+        },
+    )
+    _transition_originating_daemon_job(
+        repo,
+        run_dir,
+        candidate_id=candidate_id,
+        source_state=JobState.WAITING_REVIEW,
+        target_state=JobState.REJECTED,
+    )
+
+
+def _human_rejected_edit_memory_payloads(
+    candidate: dict[str, object],
+    *,
+    candidate_id: int,
+    actor: str,
+    reason: str,
+    category: str,
+    failure_pattern: str,
+) -> list[tuple[str, dict[str, object]]]:
+    raw_metadata = candidate.get("bounded_edit_metadata", [])
+    if not isinstance(raw_metadata, list):
+        raise ValueError("candidate bounded_edit_metadata is required for rejected edit memory")
+
+    records: list[tuple[str, dict[str, object]]] = []
+    for item in raw_metadata:
+        if not isinstance(item, dict):
+            continue
+        operator = str(item.get("operator", ""))
+        target_file = str(item.get("file", candidate.get("base_file", "")))
+        section = str(item.get("section", ""))
+        if not operator or not target_file or not section:
+            continue
+        fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
+        records.append(
+            (
+                fingerprint,
+                {
+                    "category": category,
+                    "failure_pattern": failure_pattern,
+                    "file": target_file,
+                    "future_proposal_suppression_signal": REJECTED_EDIT_SUPPRESSION_SIGNAL,
+                    "operator": operator,
+                    "rejection_reason": reason,
+                    "review_actor": actor,
+                    "section": section,
+                    "semantic_fingerprint": fingerprint,
+                    "source_refs": [f"candidate:{candidate_id}", "suite:human_review"],
+                },
+            )
+        )
+    if not records:
+        raise ValueError("candidate bounded_edit_metadata is required for rejected edit memory")
+    return records
+
+
+def _scan_human_review_rejection(
+    *,
+    actor: str,
+    reason: str,
+    category: str,
+    failure_pattern: str,
+    rejected_memory: list[tuple[str, dict[str, object]]],
+) -> None:
+    payload = {
+        "actor": actor,
+        "category": category,
+        "failure_pattern": failure_pattern,
+        "reason": reason,
+        "rejected_memory": [memory for _, memory in rejected_memory],
+    }
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    findings = scan_text("review-rejection.json", text)
+    if findings:
+        raise SecretScanError(findings)
 
 
 def _bounded_edit_fingerprint(operator: str, target_file: str, section: str) -> str:

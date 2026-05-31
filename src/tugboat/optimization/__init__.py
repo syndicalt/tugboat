@@ -100,6 +100,12 @@ class RejectedEditRecord:
     rejection_reason: str
     source_refs: tuple[str, ...]
     future_proposal_suppression_signal: str = REJECTED_EDIT_SUPPRESSION_SIGNAL
+    operator: str | None = None
+    file: str | None = None
+    section: str | None = None
+    category: str | None = None
+    failure_pattern: str | None = None
+    review_actor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +174,17 @@ class OptimizationMemory:
                 "semantic_fingerprint": record.semantic_fingerprint,
                 "source_refs": list(record.source_refs),
             }
+            for field_name in (
+                "operator",
+                "file",
+                "section",
+                "category",
+                "failure_pattern",
+                "review_actor",
+            ):
+                value = getattr(record, field_name)
+                if value is not None:
+                    payload[field_name] = value
             store.record_optimizer_memory(
                 repo_path=repo_path,
                 memory_type="rejected_edit",
@@ -226,6 +243,12 @@ class OptimizationMemory:
                             REJECTED_EDIT_SUPPRESSION_SIGNAL,
                         )
                     ),
+                    operator=_optional_string(payload, "operator"),
+                    file=_optional_string(payload, "file"),
+                    section=_optional_string(payload, "section"),
+                    category=_optional_string(payload, "category"),
+                    failure_pattern=_optional_string(payload, "failure_pattern"),
+                    review_actor=_optional_string(payload, "review_actor"),
                 )
             elif memory_type == "slow_update":
                 record = _slow_update_record_from_payload(payload)
@@ -465,6 +488,11 @@ def _slow_update_record_from_payload(payload: dict[str, object]) -> SlowUpdateRe
     if separator and category in SLOW_UPDATE_CATEGORIES:
         return SlowUpdateRecord(category=category, note=note)
     return SlowUpdateRecord(category="optimizer_guidance", note=legacy_note)
+
+
+def _optional_string(payload: dict[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) else None
 
 
 def _unique(values: tuple[str, ...]) -> tuple[str, ...]:

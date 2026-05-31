@@ -310,7 +310,7 @@ def test_old_rejected_edit_memory_rows_load_with_default_suppression_signal(tmp_
             payload={
                 "rejection_reason": "held_out_not_improved",
                 "semantic_fingerprint": fingerprint,
-                "source_refs": ["ev_1"],
+                "source_refs": "ev_1",
             },
         )
         loaded = OptimizationMemory.load(store, repo=repo)
@@ -318,6 +318,42 @@ def test_old_rejected_edit_memory_rows_load_with_default_suppression_signal(tmp_
     assert loaded.rejected_edits[fingerprint].future_proposal_suppression_signal == (
         "suppress_matching_bounded_edit_fingerprint"
     )
+    assert loaded.rejected_edits[fingerprint].source_refs == ()
+
+
+def test_structured_rejected_edit_memory_context_round_trips(tmp_path):
+    repo = tmp_path
+    fingerprint = BoundedEdit("add", "CODEX.md", "Rules", 1, 0).fingerprint
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key=fingerprint,
+            payload={
+                "category": "policy_regression",
+                "failure_pattern": "duplicates existing guidance",
+                "file": "CODEX.md",
+                "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                "operator": "add",
+                "rejection_reason": "redundant_rule",
+                "review_actor": "reviewer",
+                "section": "Rules",
+                "semantic_fingerprint": fingerprint,
+                "source_refs": ["candidate:7", "suite:human_review"],
+            },
+        )
+        loaded = OptimizationMemory.load(store, repo=repo)
+        loaded.persist(store, repo=repo)
+        reloaded = OptimizationMemory.load(store, repo=repo)
+
+    record = reloaded.rejected_edits[fingerprint]
+    assert record.operator == "add"
+    assert record.file == "CODEX.md"
+    assert record.section == "Rules"
+    assert record.category == "policy_regression"
+    assert record.failure_pattern == "duplicates existing guidance"
+    assert record.review_actor == "reviewer"
 
 
 def test_fixture_benchmark_accepts_one_improvement_and_rejects_one_harmful_edit():

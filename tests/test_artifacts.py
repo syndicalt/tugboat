@@ -860,6 +860,31 @@ def test_validate_optimizer_memory_artifact_accepts_current_schema():
     )
 
 
+def test_validate_optimizer_memory_artifact_accepts_structured_rejected_edit_context():
+    validate_json_artifact(
+        "optimizer-memory.json",
+        {
+            "schema_version": 1,
+            "rejected_edits": [
+                {
+                    "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                    "semantic_fingerprint": "abc123",
+                    "rejection_reason": "redundant_rule",
+                    "source_refs": ["candidate:7", "suite:human_review"],
+                    "operator": "add",
+                    "file": "CODEX.md",
+                    "section": "Rules",
+                    "category": "policy_regression",
+                    "failure_pattern": "duplicates existing guidance",
+                    "review_actor": "reviewer",
+                }
+            ],
+            "slow_update_notes": [],
+            "slow_update_records": [],
+        },
+    )
+
+
 def test_validate_optimizer_memory_artifact_rejects_unknown_suppression_signal():
     with pytest.raises(ArtifactValidationError, match="future_proposal_suppression_signal"):
         validate_json_artifact(

@@ -25,6 +25,7 @@ from tugboat.manifests import (
 from tugboat.optimization import (
     LearningRateBudget,
     OptimizationMemory,
+    RejectedEditRecord,
     budget_reasons_for_bounded_edit_metadata,
 )
 from tugboat.patches import apply_unified_diff, bounded_edit_metadata_mismatch_fields
@@ -816,12 +817,7 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "rejected_edits": [
-            {
-                "future_proposal_suppression_signal": record.future_proposal_suppression_signal,
-                "semantic_fingerprint": record.semantic_fingerprint,
-                "rejection_reason": record.rejection_reason,
-                "source_refs": list(record.source_refs),
-            }
+            _rejected_edit_artifact_payload(record)
             for _, record in sorted(memory.rejected_edits.items())
         ],
         "slow_update_notes": list(memory.slow_update_notes),
@@ -844,6 +840,27 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
     path = run_dir / "optimizer-memory.json"
     _write_private_json_artifact(path, "optimizer-memory.json", payload)
     return path
+
+
+def _rejected_edit_artifact_payload(record: RejectedEditRecord) -> dict[str, object]:
+    payload = {
+        "future_proposal_suppression_signal": record.future_proposal_suppression_signal,
+        "semantic_fingerprint": record.semantic_fingerprint,
+        "rejection_reason": record.rejection_reason,
+        "source_refs": list(record.source_refs),
+    }
+    for field_name in (
+        "operator",
+        "file",
+        "section",
+        "category",
+        "failure_pattern",
+        "review_actor",
+    ):
+        value = getattr(record, field_name)
+        if value is not None:
+            payload[field_name] = value
+    return payload
 
 
 def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> CandidatePatch:
