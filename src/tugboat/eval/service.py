@@ -25,6 +25,7 @@ def write_eval_report(
     longitudinal_metrics: dict[str, Any] | None = None,
     validation_splits: dict[str, tuple[str, ...]] | None = None,
     eval_cases: tuple[dict[str, str], ...] | None = None,
+    skill_report: dict[str, Any] | None = None,
 ) -> Path:
     run_dir = _repo_local_run_dir(repo, run_id)
     ensure_private_dir(runs_dir(repo))
@@ -44,6 +45,8 @@ def write_eval_report(
     }
     if longitudinal_metrics is not None:
         payload["longitudinal_metrics"] = longitudinal_metrics
+    if skill_report is not None:
+        payload["skill_report"] = skill_report
     if validation_splits is not None:
         payload["validation_splits"] = {
             split_name: list(case_ids)

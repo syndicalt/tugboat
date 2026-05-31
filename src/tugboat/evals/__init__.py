@@ -56,6 +56,7 @@ class OfflineEvalReport:
     live_provider_required: bool = False
     eval_cases: tuple[EvalCaseRecord, ...] = ()
     validation_splits: dict[str, tuple[str, ...]] | None = None
+    skill_report: dict[str, object] | None = None
 
 
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -177,7 +178,13 @@ def run_offline_eval_suite(
         policy_root=root,
         preview_root=preview_root,
     )
-    eval_cases = (*structural_cases, *fixture_cases)
+    skill_rewrite_metrics, skill_rewrite_cases, skill_report = _skill_rewrite_eval(
+        policy_files,
+        policy_pairs,
+        policy_root=root,
+        preview_root=preview_root,
+    )
+    eval_cases = (*structural_cases, *skill_rewrite_cases, *fixture_cases)
     validation_splits = _validation_splits(eval_cases)
     behavioral_cases = (
         fixture_metrics["incident_replay_cases"]
@@ -196,6 +203,7 @@ def run_offline_eval_suite(
         all(report.passed for report in structural_reports)
         and governance_regressions == 0
         and fixture_metrics["fixture_case_failures"] == 0
+        and skill_rewrite_metrics["skill_rewrite_failures"] == 0
     )
     metrics = {
         **fixture_metrics,
@@ -205,6 +213,7 @@ def run_offline_eval_suite(
         "candidate_preview_files": candidate_preview_files,
         "governance_regressions": governance_regressions,
         "structural_findings": sum(len(report.findings) for report in structural_reports),
+        **skill_rewrite_metrics,
         **_instruction_token_delta_metrics(policy_pairs),
     }
     structural_score = 1.0 if all(report.passed for report in structural_reports) and governance_regressions == 0 else 0.0
@@ -246,6 +255,7 @@ def run_offline_eval_suite(
         recommendation="accept" if passed else "reject",
         eval_cases=eval_cases,
         validation_splits=validation_splits,
+        skill_report=skill_report,
     )
 
 
@@ -302,6 +312,304 @@ def _structural_eval_cases(
         )
         for case_id, policy_text in zip(case_ids, policy_texts, strict=True)
     )
+
+
+def _skill_rewrite_eval(
+    policy_files: tuple[Path, ...],
+    policy_pairs: tuple[tuple[str, str], ...],
+    *,
+    policy_root: Path,
+    preview_root: Path | None,
+) -> tuple[dict[str, int], tuple[EvalCaseRecord, ...], dict[str, object] | None]:
+    metrics = {
+        "skill_rewrite_cases": 0,
+        "skill_rewrite_failures": 0,
+        "skill_trigger_preservation_failures": 0,
+        "skill_executability_failures": 0,
+        "skill_ambiguity_failures": 0,
+        "skill_overfit_failures": 0,
+        "skill_token_footprint_cases": 0,
+        "skill_required_section_failures": 0,
+        "skill_forbidden_section_failures": 0,
+        "skill_safety_weakening_failures": 0,
+    }
+    if preview_root is None:
+        return metrics, (), None
+
+    skill_reports: list[dict[str, object]] = []
+    cases: list[EvalCaseRecord] = []
+    for path, (before, after) in zip(policy_files, policy_pairs, strict=True):
+        if path.name != "SKILL.md" or before == after:
+            continue
+        relative_path = path.relative_to(policy_root).as_posix()
+        report = evaluate_skill_rewrite_pair(before, after, path=relative_path)
+        skill_reports.append(report)
+        metrics["skill_rewrite_cases"] += 1
+        metrics["skill_token_footprint_cases"] += 1
+        if not bool(report["passed"]):
+            metrics["skill_rewrite_failures"] += 1
+        report_metrics = report["metrics"]
+        if isinstance(report_metrics, dict):
+            if report_metrics.get("trigger_preservation_score") == 0.0:
+                metrics["skill_trigger_preservation_failures"] += 1
+            if report_metrics.get("executability_score") == 0.0:
+                metrics["skill_executability_failures"] += 1
+            if report_metrics.get("ambiguity_score") == 0.0:
+                metrics["skill_ambiguity_failures"] += 1
+            if report_metrics.get("overfit_risk_score") == 0.0:
+                metrics["skill_overfit_failures"] += 1
+            if report_metrics.get("required_sections_passed") == 0:
+                metrics["skill_required_section_failures"] += 1
+            if int(report_metrics.get("forbidden_sections_found", 0)) > 0:
+                metrics["skill_forbidden_section_failures"] += 1
+            if report_metrics.get("safety_preservation_score") == 0.0:
+                metrics["skill_safety_weakening_failures"] += 1
+        cases.append(
+            EvalCaseRecord(
+                case_id=f"skill-rewrite:candidate-preview:{relative_path}",
+                case_hash=_text_hash(after),
+                split_name="governance",
+            )
+        )
+
+    if not skill_reports:
+        return metrics, tuple(cases), None
+    if len(skill_reports) == 1:
+        return metrics, tuple(cases), skill_reports[0]
+    return metrics, tuple(cases), _combined_skill_report(skill_reports)
+
+
+def evaluate_skill_rewrite_pair(
+    before: str,
+    after: str,
+    *,
+    path: str,
+) -> dict[str, object]:
+    findings: list[dict[str, str]] = []
+    before_frontmatter = _frontmatter_fields(before)
+    after_frontmatter = _frontmatter_fields(after)
+    before_description = before_frontmatter.get("description", "").strip()
+    after_description = after_frontmatter.get("description", "").strip()
+    if before_description and after_description != before_description:
+        findings.append(
+            _skill_finding(
+                "skill.trigger.removed",
+                "Skill trigger description was removed or materially changed.",
+                "frontmatter.description",
+            )
+        )
+
+    after_words = set(_words(after))
+    instruction_words = set(_skill_instruction_words(after))
+    if not instruction_words.intersection(
+        {"use", "run", "verify", "inspect", "execute", "write", "check", "review"}
+    ):
+        findings.append(
+            _skill_finding(
+                "skill.executability.weak",
+                "Skill rewrite does not contain clear executable operator guidance.",
+                path,
+            )
+        )
+    if after_words.intersection({"maybe", "probably", "somehow", "quickly", "stuff", "things"}):
+        findings.append(
+            _skill_finding(
+                "skill.ambiguity.vague_language",
+                "Skill rewrite includes vague language that weakens operator clarity.",
+                path,
+            )
+        )
+    if _has_trace_specific_overfit(after):
+        findings.append(
+            _skill_finding(
+                "skill.overfit.trace_specific",
+                "Skill rewrite appears overfit to a trace, date, incident, or session.",
+                path,
+            )
+        )
+
+    required_sections = _required_skill_sections(before)
+    missing_required_sections = [
+        section for section in required_sections if section not in set(_anchors(after))
+    ]
+    if missing_required_sections:
+        findings.append(
+            _skill_finding(
+                "skill.required_section.removed",
+                "Skill rewrite removed a required section from the existing skill.",
+                ", ".join(missing_required_sections),
+            )
+        )
+
+    forbidden_sections = _forbidden_skill_sections(after)
+    if forbidden_sections:
+        findings.append(
+            _skill_finding(
+                "skill.forbidden_section.present",
+                "Skill rewrite introduced a forbidden sensitive or authority-bypass section.",
+                ", ".join(forbidden_sections),
+            )
+        )
+
+    safety_weakening = _has_governance_regression(after) or _classify_semantic_diff(before, after) == "normative_change"
+    if safety_weakening:
+        findings.append(
+            _skill_finding(
+                "skill.safety.weakened",
+                "Skill rewrite weakens safety, verification, or governance obligations.",
+                path,
+            )
+        )
+
+    before_tokens = _estimated_tokens(before)
+    after_tokens = _estimated_tokens(after)
+    passed = not findings
+    return {
+        "schema_version": 1,
+        "skill_path": path,
+        "passed": passed,
+        "findings": findings,
+        "metrics": {
+            "trigger_preservation_score": 0.0
+            if any(finding["code"] == "skill.trigger.removed" for finding in findings)
+            else 1.0,
+            "executability_score": 0.0
+            if any(finding["code"] == "skill.executability.weak" for finding in findings)
+            else 1.0,
+            "ambiguity_score": 0.0
+            if any(finding["code"] == "skill.ambiguity.vague_language" for finding in findings)
+            else 1.0,
+            "overfit_risk_score": 0.0
+            if any(finding["code"] == "skill.overfit.trace_specific" for finding in findings)
+            else 1.0,
+            "safety_preservation_score": 0.0 if safety_weakening else 1.0,
+            "required_sections_passed": 0 if missing_required_sections else 1,
+            "forbidden_sections_found": len(forbidden_sections),
+            "skill_tokens_before": before_tokens,
+            "skill_tokens_after": after_tokens,
+            "skill_token_delta": after_tokens - before_tokens,
+        },
+        "required_sections": ["frontmatter.name", "frontmatter.description", *required_sections],
+        "forbidden_sections": ["Secrets", "Credentials", "Approval Bypass"],
+        "safety_weakening": safety_weakening,
+        "overfit_risk": "medium"
+        if any(finding["code"] == "skill.overfit.trace_specific" for finding in findings)
+        else "low",
+    }
+
+
+def _combined_skill_report(reports: list[dict[str, object]]) -> dict[str, object]:
+    findings = [
+        finding
+        for report in reports
+        for finding in report.get("findings", [])
+        if isinstance(finding, dict)
+    ]
+    return {
+        "schema_version": 1,
+        "skill_path": "multiple",
+        "passed": not findings,
+        "findings": findings,
+        "metrics": {
+            "trigger_preservation_score": 0.0
+            if any(finding.get("code") == "skill.trigger.removed" for finding in findings)
+            else 1.0,
+            "executability_score": 0.0
+            if any(finding.get("code") == "skill.executability.weak" for finding in findings)
+            else 1.0,
+            "ambiguity_score": 0.0
+            if any(finding.get("code") == "skill.ambiguity.vague_language" for finding in findings)
+            else 1.0,
+            "overfit_risk_score": 0.0
+            if any(finding.get("code") == "skill.overfit.trace_specific" for finding in findings)
+            else 1.0,
+            "safety_preservation_score": 0.0
+            if any(finding.get("code") == "skill.safety.weakened" for finding in findings)
+            else 1.0,
+            "required_sections_passed": 0
+            if any(finding.get("code") == "skill.required_section.removed" for finding in findings)
+            else 1,
+            "forbidden_sections_found": sum(
+                1 for finding in findings if finding.get("code") == "skill.forbidden_section.present"
+            ),
+            "skill_tokens_before": sum(
+                int(report.get("metrics", {}).get("skill_tokens_before", 0))
+                for report in reports
+                if isinstance(report.get("metrics"), dict)
+            ),
+            "skill_tokens_after": sum(
+                int(report.get("metrics", {}).get("skill_tokens_after", 0))
+                for report in reports
+                if isinstance(report.get("metrics"), dict)
+            ),
+            "skill_token_delta": sum(
+                int(report.get("metrics", {}).get("skill_token_delta", 0))
+                for report in reports
+                if isinstance(report.get("metrics"), dict)
+            ),
+        },
+        "required_sections": ["frontmatter.name", "frontmatter.description"],
+        "forbidden_sections": ["Secrets", "Credentials", "Approval Bypass"],
+        "safety_weakening": any(finding.get("code") == "skill.safety.weakened" for finding in findings),
+        "overfit_risk": "medium"
+        if any(finding.get("code") == "skill.overfit.trace_specific" for finding in findings)
+        else "low",
+    }
+
+
+def _skill_finding(code: str, message: str, target: str) -> dict[str, str]:
+    return {
+        "code": code,
+        "severity": "error",
+        "message": message,
+        "target": target,
+    }
+
+
+def _frontmatter_fields(markdown: str) -> dict[str, str]:
+    frontmatter = _frontmatter(markdown)
+    if frontmatter is None:
+        return {}
+    fields: dict[str, str] = {}
+    for line in frontmatter.splitlines()[1:-1]:
+        key, separator, value = line.partition(":")
+        if separator:
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def _skill_instruction_words(markdown: str) -> tuple[str, ...]:
+    in_frontmatter = False
+    frontmatter_closed = False
+    instruction_lines: list[str] = []
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if not frontmatter_closed and stripped == "---":
+            in_frontmatter = not in_frontmatter
+            if not in_frontmatter:
+                frontmatter_closed = True
+            continue
+        if in_frontmatter or stripped.startswith("#"):
+            continue
+        instruction_lines.append(line)
+    return _words("\n".join(instruction_lines))
+
+
+def _required_skill_sections(markdown: str) -> list[str]:
+    anchors = set(_anchors(markdown))
+    return [section for section in ("when-to-use", "instructions") if section in anchors]
+
+
+def _forbidden_skill_sections(markdown: str) -> list[str]:
+    forbidden = {"secrets", "credentials", "approval-bypass"}
+    return [anchor for anchor in _anchors(markdown) if anchor in forbidden]
+
+
+def _has_trace_specific_overfit(markdown: str) -> bool:
+    words = set(_words(markdown))
+    has_trace_reference = bool(words & {"trace", "session", "incident"})
+    has_specific_number = re.search(r"\b20\d{2}[-/]\d{2}[-/]\d{2}\b|\b\d{6,}\b", markdown) is not None
+    return has_trace_reference and has_specific_number
 
 
 def run_provider_smoke_suite(

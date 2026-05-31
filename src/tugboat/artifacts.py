@@ -51,6 +51,74 @@ def _audited_array_schema(
     }
 
 
+SKILL_REPORT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "schema_version",
+        "skill_path",
+        "passed",
+        "findings",
+        "metrics",
+        "required_sections",
+        "forbidden_sections",
+        "safety_weakening",
+        "overfit_risk",
+    ],
+    "properties": {
+        "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+        "skill_path": {"type": "string", "minLength": 1},
+        "passed": {"type": "boolean"},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["code", "severity", "message"],
+                "properties": {
+                    "code": {"type": "string", "minLength": 1},
+                    "severity": {"type": "string", "enum": ["info", "warning", "error"]},
+                    "message": {"type": "string", "minLength": 1},
+                    "target": {"type": "string"},
+                },
+            },
+        },
+        "metrics": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "trigger_preservation_score",
+                "executability_score",
+                "ambiguity_score",
+                "overfit_risk_score",
+                "safety_preservation_score",
+                "required_sections_passed",
+                "forbidden_sections_found",
+                "skill_tokens_before",
+                "skill_tokens_after",
+                "skill_token_delta",
+            ],
+            "properties": {
+                "trigger_preservation_score": {"type": "number"},
+                "executability_score": {"type": "number"},
+                "ambiguity_score": {"type": "number"},
+                "overfit_risk_score": {"type": "number"},
+                "safety_preservation_score": {"type": "number"},
+                "required_sections_passed": {"type": "integer"},
+                "forbidden_sections_found": {"type": "integer"},
+                "skill_tokens_before": {"type": "integer"},
+                "skill_tokens_after": {"type": "integer"},
+                "skill_token_delta": {"type": "integer"},
+            },
+        },
+        "required_sections": {"type": "array", "items": {"type": "string"}},
+        "forbidden_sections": {"type": "array", "items": {"type": "string"}},
+        "safety_weakening": {"type": "boolean"},
+        "overfit_risk": {"type": "string", "enum": ["low", "medium", "high"]},
+    },
+}
+
+
 JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     "audit.json": {
         "$schema": JSON_SCHEMA_URI,
@@ -637,6 +705,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "governance_passed": {"type": "boolean"},
             "held_out_score": {"type": "number"},
             "metrics": {"type": "object"},
+            "skill_report": SKILL_REPORT_SCHEMA,
             "longitudinal_metrics": {"type": "object"},
             "passed": {"type": "boolean"},
             "recommendation": {"type": "string"},
@@ -679,6 +748,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "governance_passed": {"type": "boolean"},
             "recommendation": {"type": "string"},
             "metrics": {"type": "object"},
+            "skill_report": SKILL_REPORT_SCHEMA,
             "validation_splits": {
                 "type": "object",
                 "properties": {

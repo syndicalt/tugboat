@@ -37,6 +37,27 @@ def _write_candidate_preview(run_dir: Path, text: str, *, preview_hash: str | No
     )
 
 
+def _write_skill_candidate_preview(run_dir: Path, text: str) -> None:
+    preview_root = run_dir / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "SKILL.md").write_text(text, encoding="utf-8")
+    preview_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    (run_dir / "candidate-preview.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "base_file": "SKILL.md",
+                "base_hash": "base",
+                "diff_hash": "diff",
+                "preview_path": f".sidecar/runs/{run_dir.name}/candidate-preview/SKILL.md",
+                "preview_hash": preview_hash,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _repo_from_run_dir(run_dir: Path) -> Path:
     return run_dir.parents[2]
 
@@ -320,6 +341,51 @@ def test_eval_suite_all_rejects_candidate_when_required_phase4_categories_are_mi
     assert report["metrics"]["common_obligation_cases"] == 0
     assert report["metrics"]["final_answer_evidence_cases"] == 0
     assert report["metrics"]["tool_permission_boundary_cases"] == 0
+
+
+def test_eval_suite_all_writes_skill_report_for_skill_preview(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "You may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    _write_skill_candidate_preview(
+        run_dir,
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "You must run tests before final answers. Always cite verification evidence.\n",
+    )
+    _write_candidate_json(run_dir)
+    copytree(FIXTURES / "passing", repo / ".sidecar" / "evals")
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 0
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["passed"] is True
+    assert report["recommendation"] == "accept"
+    assert report["skill_report"]["passed"] is True
+    assert report["skill_report"]["skill_path"] == "SKILL.md"
+    assert report["skill_report"]["findings"] == []
+    assert report["metrics"]["skill_rewrite_cases"] == 1
+    assert "skill-rewrite:candidate-preview:SKILL.md" in [
+        case["case_id"] for case in report["eval_cases"]
+    ]
 
 
 def test_eval_suite_all_returns_nonzero_for_governance_regression(tmp_path: Path):

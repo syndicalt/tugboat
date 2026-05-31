@@ -70,6 +70,10 @@ tugboat rollback --repo . --decision latest --execute
 
 `proposal` mode writes an apply plan without mutating instruction files. `branch`, `commit`, and `pr` modes require clean/stale-base checks, policy gate proof, eval evidence, and VCS adapter execution.
 
+## Eval Reports
+
+`tugboat eval --repo . --candidate latest --suite all` writes `.sidecar/runs/<run-id>/eval-report.json`. For `SKILL.md` preview rewrites, the report includes `skill_report` with deterministic checks for trigger preservation, executability, ambiguity, overfit risk, token footprint, required sections, forbidden sections, and safety weakening. A failing `skill_report` forces `passed: false` and `recommendation: reject`.
+
 ## Auto-Apply
 
 Auto-apply is a separate, narrow lane:

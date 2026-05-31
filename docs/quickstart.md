@@ -105,7 +105,7 @@ tugboat harness check --repo .
 python -m pytest -q
 ```
 
-Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
+Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimization-summary.json`, and `report.md`. When the candidate rewrites `SKILL.md`, inspect `eval-report.json` `skill_report` before applying; failing trigger, executability, ambiguity, overfit, section, token-footprint, or safety checks should stay in review.
 
 For the complete command surface, see [docs/cli-reference.md](cli-reference.md). For reviewed mutation workflows, see [docs/apply-rollback.md](apply-rollback.md). For auto-apply, daemon, and troubleshooting operations, see [docs/auto-apply.md](auto-apply.md), [docs/daemon-guide.md](daemon-guide.md), and [docs/troubleshooting.md](troubleshooting.md).
 

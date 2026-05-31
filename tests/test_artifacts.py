@@ -131,6 +131,97 @@ def test_validate_eval_report_artifact_accepts_current_schema():
     )
 
 
+def test_validate_eval_report_artifact_accepts_skill_report():
+    skill_report = {
+        "schema_version": 1,
+        "skill_path": "SKILL.md",
+        "passed": False,
+        "findings": [
+            {
+                "code": "skill.trigger.removed",
+                "severity": "error",
+                "message": "Skill trigger description was removed.",
+                "target": "frontmatter.description",
+            }
+        ],
+        "metrics": {
+            "trigger_preservation_score": 0.0,
+            "executability_score": 1.0,
+            "ambiguity_score": 0.5,
+            "overfit_risk_score": 0.75,
+            "safety_preservation_score": 0.0,
+            "required_sections_passed": 0,
+            "forbidden_sections_found": 1,
+            "skill_tokens_before": 120,
+            "skill_tokens_after": 142,
+            "skill_token_delta": 22,
+        },
+        "required_sections": ["frontmatter.name", "frontmatter.description"],
+        "forbidden_sections": ["Secrets", "Credentials", "Approval Bypass"],
+        "safety_weakening": True,
+        "overfit_risk": "medium",
+    }
+
+    validate_json_artifact(
+        "eval-report.json",
+        {
+            "schema_version": 1,
+            "candidate_id": 1,
+            "governance_passed": False,
+            "held_out_score": 1.0,
+            "metrics": {"governance_regressions": 1},
+            "passed": False,
+            "recommendation": "reject",
+            "skill_report": skill_report,
+            "suite_id": "all",
+            "trigger_score": 0.0,
+        },
+    )
+    validate_json_artifact(
+        "eval-report.raw.json",
+        {
+            "passed": False,
+            "metrics": {"governance_regressions": 1},
+            "skill_report": skill_report,
+        },
+    )
+
+
+def test_validate_eval_report_artifact_rejects_malformed_skill_report():
+    with pytest.raises(ArtifactValidationError, match="skill_report.findings\\[0\\].severity"):
+        validate_json_artifact(
+            "eval-report.json",
+            {
+                "schema_version": 1,
+                "candidate_id": 1,
+                "governance_passed": False,
+                "held_out_score": 1.0,
+                "metrics": {"governance_regressions": 1},
+                "passed": False,
+                "recommendation": "reject",
+                "skill_report": {
+                    "schema_version": 1,
+                    "skill_path": "SKILL.md",
+                    "passed": False,
+                    "findings": [
+                        {
+                            "code": "skill.trigger.removed",
+                            "severity": "critical",
+                            "message": "bad",
+                        }
+                    ],
+                    "metrics": {},
+                    "required_sections": [],
+                    "forbidden_sections": [],
+                    "safety_weakening": True,
+                    "overfit_risk": "medium",
+                },
+                "suite_id": "all",
+                "trigger_score": 0.0,
+            },
+        )
+
+
 def test_validate_unseen_eval_reports_artifact_accepts_current_schema():
     validate_json_artifact(
         "unseen-eval-reports.json",

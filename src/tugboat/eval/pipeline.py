@@ -51,6 +51,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
     policy_decision_payload: dict[str, object] | None = None
     validation_splits: dict[str, tuple[str, ...]] | None = None
     eval_cases: tuple[EvalCaseRecord, ...] = ()
+    skill_report: dict[str, object] | None = None
     offline_report = None
 
     if suite_id == "provider-smoke" and not (run_dir / "candidate.raw.json").exists():
@@ -88,6 +89,9 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         governance_passed = offline_report.governance_passed
         recommendation = offline_report.recommendation
         live_provider_required = offline_report.live_provider_required
+        skill_report = offline_report.skill_report
+        eval_cases = offline_report.eval_cases
+        validation_splits = offline_report.validation_splits
         longitudinal_metrics = _longitudinal_eval_metrics(repo)
     elif (run_dir / "candidate.raw.json").exists():
         try:
@@ -124,6 +128,16 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
             )
             validation_splits = _validation_splits_from_eval_payload(eval_payload)
             eval_cases = _eval_cases_from_eval_payload(eval_payload)
+            raw_skill_report = eval_payload.get("skill_report")
+            if raw_skill_report is not None:
+                if not isinstance(raw_skill_report, dict):
+                    raise ValueError("llmff eval_report.skill_report must be a JSON object")
+                skill_report = raw_skill_report
+                if not bool(raw_skill_report.get("passed", False)):
+                    passed = False
+                    recommendation = "reject"
+                    if bool(raw_skill_report.get("safety_weakening", False)):
+                        governance_passed = False
             if not deterministic_decision.allowed:
                 passed = False
                 governance_passed = False
@@ -198,6 +212,7 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
         longitudinal_metrics=longitudinal_metrics,
         validation_splits=validation_splits,
         eval_cases=_eval_case_payloads(eval_cases) if eval_cases else None,
+        skill_report=skill_report,
     )
     if policy_decision_payload is not None:
         _write_policy_gate(
@@ -213,20 +228,6 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
             passed=passed,
             metrics=metrics,
         )
-        if offline_report is not None:
-            for case in offline_report.eval_cases:
-                store.record_eval_case(
-                    suite_id=suite_id,
-                    case_id=case.case_id,
-                    case_hash=case.case_hash,
-                )
-            if offline_report.validation_splits is not None:
-                for split_name, case_ids in offline_report.validation_splits.items():
-                    store.record_validation_split(
-                        suite_id=suite_id,
-                        split_name=split_name,
-                        case_ids=case_ids,
-                    )
         if validation_splits is not None:
             for split_name, case_ids in validation_splits.items():
                 store.record_validation_split(

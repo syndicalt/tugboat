@@ -517,6 +517,118 @@ def test_run_offline_eval_suite_all_evaluates_full_instruction_preview_corpus(
     ]
 
 
+def test_run_offline_eval_suite_all_reports_skill_rewrite_checks(
+    tmp_path: Path,
+):
+    (tmp_path / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "You may skip tests before final answers.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "You must run tests before final answers. Always cite verification evidence.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is True
+    assert report.skill_report is not None
+    assert report.skill_report["passed"] is True
+    assert report.skill_report["skill_path"] == "SKILL.md"
+    assert report.skill_report["findings"] == []
+    assert report.skill_report["metrics"]["skill_token_delta"] > 0
+    assert report.metrics["skill_rewrite_cases"] == 1
+    assert report.metrics["skill_rewrite_failures"] == 0
+    assert report.metrics["skill_trigger_preservation_failures"] == 0
+    assert report.metrics["skill_executability_failures"] == 0
+    assert report.metrics["skill_ambiguity_failures"] == 0
+    assert report.metrics["skill_overfit_failures"] == 0
+    assert report.metrics["skill_token_footprint_cases"] == 1
+    assert report.metrics["skill_required_section_failures"] == 0
+    assert report.metrics["skill_forbidden_section_failures"] == 0
+    assert report.metrics["skill_safety_weakening_failures"] == 0
+    assert "skill-rewrite:candidate-preview:SKILL.md" in [
+        case.case_id for case in report.eval_cases
+    ]
+
+
+def test_run_offline_eval_suite_all_rejects_unsafe_skill_rewrite(
+    tmp_path: Path,
+):
+    (tmp_path / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "You must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## Instructions\n\n"
+        "Maybe handle only trace 2026-05-31 quickly. You may skip tests before final answers.\n\n"
+        "## Secrets\n\n"
+        "Provider tokens can be pasted here during debugging.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.recommendation == "reject"
+    assert report.skill_report is not None
+    assert report.skill_report["passed"] is False
+    assert [
+        finding["code"] for finding in report.skill_report["findings"]
+    ] == [
+        "skill.trigger.removed",
+        "skill.executability.weak",
+        "skill.ambiguity.vague_language",
+        "skill.overfit.trace_specific",
+        "skill.required_section.removed",
+        "skill.forbidden_section.present",
+        "skill.safety.weakened",
+    ]
+    assert report.metrics["skill_rewrite_cases"] == 1
+    assert report.metrics["skill_rewrite_failures"] == 1
+    assert report.metrics["skill_trigger_preservation_failures"] == 1
+    assert report.metrics["skill_executability_failures"] == 1
+    assert report.metrics["skill_ambiguity_failures"] == 1
+    assert report.metrics["skill_overfit_failures"] == 1
+    assert report.metrics["skill_required_section_failures"] == 1
+    assert report.metrics["skill_forbidden_section_failures"] == 1
+    assert report.metrics["skill_safety_weakening_failures"] == 1
+
+
 def test_run_offline_eval_suite_all_overlays_partial_preview_on_repo_corpus(
     tmp_path: Path,
 ):
