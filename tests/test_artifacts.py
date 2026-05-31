@@ -2172,6 +2172,80 @@ def test_validate_auto_apply_approval_requires_readiness_metrics():
         )
 
 
+def test_validate_auto_apply_preflight_accepts_current_schema():
+    validate_json_artifact(
+        "auto-apply-preflight.json",
+        {
+            "schema_version": 1,
+            "run_id": "20260531T120000Z",
+            "candidate_id": 7,
+            "mode": "commit",
+            "target_files": ["CODEX.md"],
+            "branch_name": "tugboat/run-7-codex",
+            "eligible": False,
+            "would_apply": False,
+            "lane": None,
+            "reasons": ["cli_confirmation_required"],
+            "approval_bundle": None,
+            "checks": {
+                "policy_gate": {"allowed": True, "reasons": []},
+                "stored_policy_gate": {"allowed": True, "reasons": []},
+                "eval_report": {
+                    "candidate_id_matches": True,
+                    "passed": True,
+                    "recommendation": "accept",
+                    "suite_id": "all",
+                },
+                "vcs": {
+                    "preflight_passed": True,
+                    "worktree_clean": True,
+                    "dirty_paths": [],
+                    "target_files_clean": True,
+                    "base_hashes_match": True,
+                    "reasons": [],
+                },
+                "auto_apply": {
+                    "candidate": {"candidate_id": "7"},
+                    "readiness": {"confirmed": False},
+                },
+            },
+            "readiness_metrics": {"reviewed_count": 20},
+        },
+    )
+
+
+def test_validate_auto_apply_preflight_requires_vcs_checks():
+    with pytest.raises(ArtifactValidationError, match="checks.vcs"):
+        validate_json_artifact(
+            "auto-apply-preflight.json",
+            {
+                "schema_version": 1,
+                "run_id": "20260531T120000Z",
+                "candidate_id": 7,
+                "mode": "commit",
+                "target_files": ["CODEX.md"],
+                "branch_name": "tugboat/run-7-codex",
+                "eligible": False,
+                "would_apply": False,
+                "lane": None,
+                "reasons": ["cli_confirmation_required"],
+                "approval_bundle": None,
+                "checks": {
+                    "policy_gate": {"allowed": True, "reasons": []},
+                    "stored_policy_gate": {"allowed": True, "reasons": []},
+                    "eval_report": {
+                        "candidate_id_matches": True,
+                        "passed": True,
+                        "recommendation": "accept",
+                        "suite_id": "all",
+                    },
+                    "auto_apply": {"candidate": {"candidate_id": "7"}},
+                },
+                "readiness_metrics": {"reviewed_count": 20},
+            },
+        )
+
+
 def test_validate_rollback_plan_rejects_missing_metadata():
     with pytest.raises(ArtifactValidationError, match="metadata"):
         validate_json_artifact(

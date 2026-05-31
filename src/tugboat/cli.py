@@ -315,6 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto_apply.add_argument("--confirm-auto-apply", action="store_true")
     auto_apply.add_argument("--auto-apply-policy-version", type=int)
     auto_apply.add_argument("--actor", required=True)
+    auto_apply.add_argument("--preflight", action="store_true")
 
     review = subcommands.add_parser("review")
     review_subcommands = review.add_subparsers(dest="review_command", required=True)
@@ -717,6 +718,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         if _write_blocked_by_read_only(repo, "auto-apply"):
             return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
+        if args.preflight:
+            try:
+                preflight_path = _write_auto_apply_preflight(
+                    repo,
+                    run_dir,
+                    review_actor=args.actor,
+                    confirmed=args.confirm_auto_apply,
+                    policy_version=args.auto_apply_policy_version,
+                )
+            except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+                print(f"auto-apply preflight blocked: {error}")
+                return 1
+            print(f"auto-apply preflight: {preflight_path}")
+            return 0
         try:
             apply_path = _write_apply_plan(
                 repo,
@@ -2449,6 +2464,181 @@ def _write_apply_plan(
                 reason=",".join(decision.review_required_reasons),
             )
     return path
+
+
+def _write_auto_apply_preflight(
+    repo: Path,
+    run_dir: Path,
+    *,
+    review_actor: str,
+    confirmed: bool,
+    policy_version: int | None,
+) -> Path:
+    candidate = _candidate_from_artifacts(run_dir)
+    candidate_meta = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    candidate_id = int(candidate_meta["candidate_id"])
+    target_files = (candidate.base_file,)
+    policy = load_policy(repo)
+    decision = evaluate_candidate(
+        repo,
+        policy,
+        candidate,
+        rejected_edit_fingerprints=_load_rejected_edit_fingerprints(repo),
+    )
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    validate_json_artifact("policy-gate.json", policy_gate)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    validate_json_artifact("eval-report.json", eval_report)
+    candidate_id_matches = int(eval_report["candidate_id"]) == candidate_id
+    eval_acceptance_reason = ""
+    try:
+        if not candidate_id_matches:
+            raise ValueError("eval report candidate_id does not match candidate")
+        if not bool(eval_report["passed"]):
+            raise ValueError("eval report did not pass")
+        _assert_eval_acceptance(eval_report, policy_gate)
+    except ValueError as error:
+        eval_acceptance_reason = str(error)
+
+    adapter = VcsAdapter(repo)
+    branch_name = adapter.branch_name(
+        run_id=run_dir.name,
+        candidate_id=candidate_id,
+        base_file=candidate.base_file,
+    )
+    vcs_checks = _auto_apply_vcs_preflight_checks(adapter, target_files, candidate)
+    rollback_command = _auto_apply_rollback_command(repo, run_dir)
+    metrics = _auto_apply_ledger_metrics(repo, exclude_candidate_id=candidate_id)
+    categories = _auto_apply_candidate_categories(candidate)
+    changed_lines = _auto_apply_candidate_changed_lines(candidate)
+    instruction_token_delta = _auto_apply_instruction_token_delta(
+        run_dir,
+        candidate_id=candidate_id,
+    )
+    held_out_eval_passed, governance_regression_passed = _auto_apply_eval_evidence(
+        run_dir,
+        candidate_id=candidate_id,
+    )
+    auto_apply_candidate = AutoApplyCandidate(
+        candidate_id=str(candidate_id),
+        repository=str(repo.resolve()),
+        change_class=candidate.risk_class,
+        categories=categories,
+        held_out_eval_passed=held_out_eval_passed,
+        governance_regression_passed=governance_regression_passed,
+        rejection_rate=float(metrics["rejection_rate"]),
+        rollback_rate=float(metrics["rollback_rate"]),
+        changed_lines=changed_lines,
+        instruction_token_delta=instruction_token_delta,
+        vcs_proof=VcsProof(
+            mode="commit",
+            commit_sha="pending",
+            branch_name=branch_name,
+            rollback_commands=(rollback_command,),
+        ),
+    )
+    readiness = _auto_apply_readiness(
+        repo,
+        review_actor=review_actor,
+        confirmed=confirmed,
+        policy_version=policy_version,
+        burn_in_days=int(metrics["burn_in_days"]),
+    )
+    auto_apply_decision = evaluate_auto_apply(
+        candidate=auto_apply_candidate,
+        readiness=readiness,
+    )
+    reasons = list(auto_apply_decision.reasons)
+    if not decision.allowed:
+        reasons.append("policy_gate_rejected")
+    if not bool(policy_gate["allowed"]):
+        reasons.append("stored_policy_gate_rejected")
+    if eval_acceptance_reason:
+        reasons.append("eval_report_rejected")
+    if not bool(vcs_checks["preflight_passed"]):
+        reasons.append("vcs_preflight_failed")
+    reasons = list(dict.fromkeys(reasons))
+    approval_bundle = None
+    if auto_apply_decision.approval_bundle is not None and not reasons:
+        approval_bundle = auto_apply_decision.approval_bundle.to_json_dict()
+        approval_bundle["readiness_metrics"] = metrics
+    eval_report_check: dict[str, object] = {
+        "candidate_id_matches": candidate_id_matches,
+        "passed": bool(eval_report["passed"]),
+        "recommendation": str(eval_report.get("recommendation", "")),
+        "suite_id": str(eval_report["suite_id"]),
+    }
+    if eval_acceptance_reason:
+        eval_report_check["acceptance_reason"] = eval_acceptance_reason
+    payload: dict[str, object] = {
+        "schema_version": SCHEMA_VERSION,
+        "run_id": run_dir.name,
+        "candidate_id": candidate_id,
+        "mode": "commit",
+        "target_files": list(target_files),
+        "branch_name": branch_name,
+        "eligible": not reasons,
+        "would_apply": not reasons,
+        "lane": auto_apply_decision.lane,
+        "reasons": reasons,
+        "approval_bundle": approval_bundle,
+        "checks": {
+            "policy_gate": {
+                "allowed": decision.allowed,
+                "reasons": list(decision.reasons),
+            },
+            "stored_policy_gate": {
+                "allowed": bool(policy_gate["allowed"]),
+                "reasons": list(policy_gate.get("reasons", [])),
+            },
+            "eval_report": {
+                **eval_report_check,
+            },
+            "vcs": vcs_checks,
+            "auto_apply": _auto_apply_decision_snapshot(
+                phase="preflight",
+                candidate=auto_apply_candidate,
+                readiness=readiness,
+                metrics=metrics,
+            ),
+        },
+        "readiness_metrics": metrics,
+    }
+    path = run_dir / "auto-apply-preflight.json"
+    _write_secret_scanned_json_artifact(path, "auto-apply-preflight.json", payload)
+    return path
+
+
+def _auto_apply_vcs_preflight_checks(
+    adapter: VcsAdapter,
+    target_files: tuple[str, ...],
+    candidate: CandidatePatch,
+) -> dict[str, object]:
+    worktree_check = adapter.check_clean_worktree()
+    user_dirty_paths = tuple(
+        path for path in worktree_check.dirty_paths if not path.startswith(".sidecar/")
+    )
+    target_files_clean = True
+    base_hashes_match = True
+    reasons: list[str] = []
+    try:
+        adapter.assert_target_files_clean(target_files)
+    except VcsStateError as error:
+        target_files_clean = False
+        reasons.append(str(error))
+    try:
+        adapter.assert_base_hashes({candidate.base_file: candidate.base_hash})
+    except VcsStateError as error:
+        base_hashes_match = False
+        reasons.append(str(error))
+    return {
+        "preflight_passed": not user_dirty_paths and target_files_clean and base_hashes_match,
+        "worktree_clean": not user_dirty_paths,
+        "dirty_paths": list(user_dirty_paths),
+        "target_files_clean": target_files_clean,
+        "base_hashes_match": base_hashes_match,
+        "reasons": reasons,
+    }
 
 
 def _preflight_apply_metadata(path: Path, payload: dict[str, object]) -> None:

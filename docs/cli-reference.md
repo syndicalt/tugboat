@@ -80,12 +80,15 @@ Auto-apply is a separate, narrow lane:
 
 ```bash
 tugboat auto-apply --repo . --candidate latest --actor <name>
+tugboat auto-apply --repo . --candidate latest --actor <name> --preflight
 tugboat auto-apply --repo . --candidate latest --actor <name> \
   --confirm-auto-apply \
   --auto-apply-policy-version 1
 ```
 
 The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, lane match, ledger-derived burn-in and reliability metrics, eval, governance, token-growth, VCS, and rollback evidence all pass. Runtime arguments confirm intent; policy owns thresholds such as `docs_hygiene.minimum_burn_in_days: 3`, `docs_hygiene.maximum_rejection_rate: 0.20`, `docs_hygiene.max_instruction_token_delta: 50`, and `skill_improvement.maximum_rollback_rate: 0.03`.
+
+`--preflight` writes `.sidecar/runs/<run-id>/auto-apply-preflight.json` with eligibility, reasons, gate snapshots, eval status, VCS checks, readiness metrics, and any pending approval bundle. It exits `0` when the report is produced and does not apply, branch, commit, write an apply plan, or record auto-apply decision events.
 
 ## Harness And CI
 

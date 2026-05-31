@@ -1614,6 +1614,187 @@ def test_auto_apply_commit_blocks_without_enabled_policy_or_confirmation(tmp_pat
     assert not (run_dir / "auto-apply-approval.json").exists()
 
 
+def test_auto_apply_preflight_reports_ineligible_candidate_without_mutation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="General")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["schema_version"] == 1
+    assert report["run_id"] == run_dir.name
+    assert report["candidate_id"] == 7
+    assert report["eligible"] is False
+    assert report["lane"] is None
+    assert report["reasons"] == [
+        "cli_confirmation_required",
+        "auto_apply_change_type_not_allowed",
+    ]
+    assert report["mode"] == "commit"
+    assert report["would_apply"] is False
+    assert report["checks"]["policy_gate"] == {"allowed": True, "reasons": []}
+    assert report["checks"]["stored_policy_gate"] == {"allowed": True, "reasons": []}
+    assert report["checks"]["eval_report"] == {
+        "candidate_id_matches": True,
+        "passed": True,
+        "recommendation": "accept",
+        "suite_id": "all",
+    }
+    assert report["checks"]["vcs"]["base_hashes_match"] is True
+    assert report["readiness_metrics"]["reviewed_count"] == 20
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "status", "--porcelain=v1", "--", "CODEX.md") == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    assert _auto_apply_decision_payloads(repo) == []
+
+
+def test_auto_apply_preflight_reports_eligible_confirmed_candidate(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["eligible"] is True
+    assert report["lane"] == "docs_hygiene"
+    assert report["reasons"] == []
+    assert report["would_apply"] is True
+    assert report["approval_bundle"]["actor"] == "operator@example.com"
+    assert report["approval_bundle"]["rollback_command"] == [
+        "tugboat",
+        "rollback",
+        "--repo",
+        str(repo.resolve()),
+        "--decision",
+        run_dir.name,
+        "--execute",
+    ]
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+def test_auto_apply_preflight_reports_eval_rejection_without_mutation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["passed"] = False
+    eval_report["recommendation"] = "reject"
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["eligible"] is False
+    assert report["would_apply"] is False
+    assert "eval_report_rejected" in report["reasons"]
+    assert report["checks"]["eval_report"]["acceptance_reason"] == "eval report did not pass"
+    assert report["approval_bundle"] is None
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_auto_apply_preflight_reports_vcs_failure_without_mutation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    (repo / "CODEX.md").write_text("# Rules\n\nUse dirty tests.\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["eligible"] is False
+    assert "vcs_preflight_failed" in report["reasons"]
+    assert report["checks"]["vcs"]["preflight_passed"] is False
+    assert report["checks"]["vcs"]["worktree_clean"] is False
+    assert report["checks"]["vcs"]["target_files_clean"] is False
+    assert report["checks"]["vcs"]["base_hashes_match"] is False
+    assert report["checks"]["vcs"]["dirty_paths"] == ["CODEX.md"]
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
 @pytest.mark.parametrize("command", ("apply", "auto-apply"))
 @pytest.mark.parametrize("removed_flag", ("--burn-in-days", "--rejection-rate", "--rollback-rate"))
 def test_auto_apply_thresholds_are_policy_owned_not_runtime_cli_knobs(

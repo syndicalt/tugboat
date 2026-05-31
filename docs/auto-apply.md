@@ -53,6 +53,16 @@ tugboat auto-apply --repo . --candidate latest --actor <name>
 
 The expected safe result for an unconfirmed or ineligible candidate is `auto-apply blocked:` with reasons in the candidate run artifacts.
 
+For a no-mutation eligibility report, use preflight:
+
+```bash
+tugboat auto-apply --repo . --candidate latest --actor <name> --preflight
+```
+
+Preflight writes `.sidecar/runs/<run-id>/auto-apply-preflight.json` and prints its path. It exits `0` when the report is produced, whether the candidate is eligible or ineligible. It does not apply patches, create branches, commit, write `apply-plan.json`, write `auto-apply-approval.json`, or append auto-apply decision events. The report includes policy, stored gate, eval, VCS, lane, readiness, and reasons so operators can see exactly why a candidate would or would not apply.
+
+Passing `--confirm-auto-apply --auto-apply-policy-version <version>` to preflight lets the report model confirmed execution and include a pending approval bundle for an otherwise eligible candidate. It still does not mutate the repository. The read-only kill switch blocks preflight because preflight writes an artifact.
+
 ## Confirmed Execution
 
 Only after review:
