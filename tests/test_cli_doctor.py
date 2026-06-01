@@ -30,7 +30,26 @@ def test_doctor_reports_missing_policy_with_actionable_next_steps(tmp_path, caps
     out = capsys.readouterr().out
     assert "policy: missing" in out
     assert f"recommendation: run `tugboat init --repo {tmp_path.resolve()}`" in out
-    assert f"recommendation: run `tugboat index --repo {tmp_path.resolve()} --check`" in out
+    assert f"recommendation: run `tugboat index --repo {tmp_path.resolve()}` after initialization" in out
+
+
+def test_doctor_recommends_persistent_index_when_initialized_repo_has_no_db(tmp_path, capsys):
+    assert main(["init", "--repo", str(tmp_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(["doctor", "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert f"recommendation: run `tugboat index --repo {tmp_path.resolve()}`" in out
+    assert f"recommendation: run `tugboat index --repo {tmp_path.resolve()} --check`" not in out
+
+    assert main(["index", "--repo", str(tmp_path)]) == 0
+    capsys.readouterr()
+
+    assert main(["doctor", "--repo", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "recommendation: run `tugboat index" not in out
 
 
 def test_doctor_reports_existing_policy_posture_and_provider_warning(tmp_path, capsys):

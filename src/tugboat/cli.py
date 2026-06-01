@@ -285,7 +285,7 @@ def _doctor_recommendations(
     if not policy_exists:
         return (
             f"run `tugboat init --repo {repo}`",
-            f"run `tugboat index --repo {repo} --check` after initialization",
+            f"run `tugboat index --repo {repo}` after initialization",
         )
 
     recommendations: list[str] = []
@@ -306,7 +306,7 @@ def _doctor_recommendations(
     elif policy.llmff_allowed_providers:
         recommendations.append("remove allowed providers or enable llmff.allow_network intentionally")
     if not (repo / ".sidecar" / "db.sqlite").exists():
-        recommendations.append(f"run `tugboat index --repo {repo} --check`")
+        recommendations.append(f"run `tugboat index --repo {repo}`")
     return tuple(recommendations)
 
 
