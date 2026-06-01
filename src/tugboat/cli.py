@@ -352,6 +352,8 @@ def _print_trace_blocked_next_step(trace: Path, message: str) -> None:
         return
     if message.startswith("audit blocked: invalid trace:"):
         if "rerun with --trace-format" in message:
+            rerun_hint = message.rsplit("rerun with ", 1)[-1]
+            print(f"next: rerun with {rerun_hint}")
             return
         print("next: validate the trace as JSONL or JSON and rerun with --trace-format auto")
 
