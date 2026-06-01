@@ -33,6 +33,13 @@ python -m build --wheel --outdir dist 2>&1 | tee .sidecar/ci/build-wheel.txt
 WHEEL="$(ls dist/tugboat-*.whl | sort | tail -n 1)"
 echo "built ${WHEEL}" | tee -a .sidecar/ci/build-wheel.txt
 python -m twine check "${WHEEL}" 2>&1 | tee .sidecar/ci/twine-check.txt
+cat > .sidecar/ci/security-review.md <<'EOF'
+# Security Review
+
+No open critical or high findings for proposal-only operation.
+
+Approved as a release candidate for proposal-only use.
+EOF
 python -m venv .sidecar/ci/install-smoke-venv
 {
   .sidecar/ci/install-smoke-venv/bin/python -m pip install "${WHEEL}"

@@ -290,7 +290,7 @@ def evaluate_auto_apply(
         candidate_category_keys = {_category_key(category) for category in candidate.categories}
         if candidate_category_keys.intersection(policy.paused_categories):
             found_reasons.add("auto_apply_category_paused")
-        if policy.pause_for_incident and readiness.active_incidents:
+        if readiness.active_incidents:
             found_reasons.add("auto_apply_incident_pause_active")
         threshold_policy = lane if lane is not None else policy
         has_narrower_observation_approval = bool(

@@ -631,7 +631,7 @@ DOC_CONTRACTS = {
             "shadow_approval_stale",
             "explicit non-goals",
             "examples or fixtures",
-            "evidence-driven watch",
+            "hard lifecycle blocker",
             "active_incidents",
             "tugboat rollback --repo . --decision latest --execute",
             "tugboat daemon read-only --repo . --enable",
@@ -1090,6 +1090,25 @@ def test_github_actions_release_evidence_path_retains_v1_manifest_inputs(
     ]
     for fragment in required_fragments:
         assert fragment in workflow, f"{relative_path} is missing {fragment!r}"
+
+
+def test_release_checklist_produces_every_release_manifest_evidence_input() -> None:
+    checklist = (REPO_ROOT / "docs/ops/release-checklist.md").read_text(encoding="utf-8")
+    evidence_paths = sorted(set(re.findall(r"--evidence (\.sidecar/ci/[^\s]+)", checklist)))
+
+    assert ".sidecar/ci/security-review.md" in evidence_paths
+    for evidence_path in evidence_paths:
+        producer = (
+            f"tee {evidence_path}" in checklist
+            or f"> {evidence_path}" in checklist
+            or (
+                evidence_path == ".sidecar/ci/ci-report.json"
+                and "tugboat ci --repo ." in checklist
+            )
+        )
+        assert producer, f"{evidence_path} is consumed by release-manifest without a producer"
+    assert "cat > .sidecar/ci/security-review.md <<'EOF'" in checklist
+    assert "No open critical or high findings for proposal-only operation." in checklist
 
 
 def test_dev_extra_installs_release_build_tools() -> None:

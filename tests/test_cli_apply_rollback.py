@@ -2504,20 +2504,12 @@ def test_auto_apply_preflight_reports_policy_pause_controls(tmp_path: Path):
     assert not (run_dir / "auto-apply-approval.json").exists()
 
 
-def test_auto_apply_preflight_blocks_when_incident_pause_detects_failed_rollback(
+def test_auto_apply_preflight_blocks_when_failed_rollback_incident_is_active(
     tmp_path: Path,
 ):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
     _write_auto_apply_policy(repo, version=9)
-    policy_path = repo / ".sidecar" / "policy.yaml"
-    policy_path.write_text(
-        policy_path.read_text(encoding="utf-8")
-        + """
-  pause_for_incident: true
-""",
-        encoding="utf-8",
-    )
     _seed_auto_apply_history(repo)
     _seed_rollback_failed_incident(repo)
 
@@ -2544,7 +2536,7 @@ def test_auto_apply_preflight_blocks_when_incident_pause_detects_failed_rollback
     assert report["eligible"] is False
     assert report["would_apply"] is False
     assert report["reasons"] == ["auto_apply_incident_pause_active"]
-    assert report["checks"]["auto_apply"]["policy"]["pause_for_incident"] is True
+    assert report["checks"]["auto_apply"]["policy"]["pause_for_incident"] is False
     assert report["checks"]["auto_apply"]["incident_active"] is True
     assert report["checks"]["auto_apply"]["active_incidents"] == [
         {
@@ -2716,6 +2708,51 @@ def test_auto_apply_commit_blocks_policy_paused_candidate_before_apply(tmp_path:
     assert decisions[0]["lane"] == "docs_hygiene"
     assert decisions[0]["reasons"] == ["auto_apply_lane_paused"]
     assert decisions[0]["policy"]["paused_lanes"] == ["docs_hygiene"]
+
+
+def test_auto_apply_commit_blocks_active_failed_rollback_incident_before_apply(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    _seed_rollback_failed_incident(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["eligible"] is False
+    assert decision["lane"] == "docs_hygiene"
+    assert decision["reasons"] == ["auto_apply_incident_pause_active"]
+    assert decision["policy"]["pause_for_incident"] is False
+    assert decision["incident_active"] is True
 
 
 def test_auto_apply_commit_requires_production_observation_period_without_mutation(

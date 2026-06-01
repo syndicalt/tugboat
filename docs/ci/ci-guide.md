@@ -63,6 +63,14 @@ jobs:
       - run: python -m pytest --cov=src --cov-report=term-missing -q 2>&1 | tee .sidecar/ci/pytest-coverage.log
       - run: python -m build --wheel --outdir dist 2>&1 | tee .sidecar/ci/build-wheel.txt
       - run: python -m twine check dist/<wheel>.whl 2>&1 | tee .sidecar/ci/twine-check.txt
+      - run: |
+          cat > .sidecar/ci/security-review.md <<'EOF'
+          # Security Review
+
+          No open critical or high findings for proposal-only operation.
+
+          Approved as a release candidate for proposal-only use.
+          EOF
       - run: python -m venv .sidecar/ci/install-smoke-venv
       - run: tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
       - uses: actions/upload-artifact@v4

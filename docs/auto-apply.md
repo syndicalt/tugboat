@@ -60,12 +60,11 @@ auto_apply:
     - docs_hygiene
   paused_categories:
     - typo_fix
-  pause_for_incident: true
 ```
 
-Paused repositories, lanes, categories, and incident pause state block otherwise eligible candidates with explicit reasons in preflight reports and auto-apply decision events. The operations observability report treats explicitly paused lanes like disabled lanes when reporting staged-but-unapplied candidates.
+Paused repositories, lanes, and categories block otherwise eligible candidates with explicit reasons in preflight reports and auto-apply decision events. The operations observability report treats explicitly paused lanes like disabled lanes when reporting staged-but-unapplied candidates.
 
-`pause_for_incident: true` is an evidence-driven watch, not a permanent pause by itself. It blocks auto-apply when Tugboat finds active incident evidence such as a `rollback.failed` audit event for an unresolved failed rollback. Preflight, shadow, and final auto-apply reports include `incident_active` and `active_incidents` under `checks.auto_apply`; missing or invalid referenced incident artifacts remain visible and fail closed until a later `rollback.applied` event for the same candidate supersedes the failed rollback.
+Active rollback incidents are a hard lifecycle blocker, independent of pause policy. Tugboat blocks auto-apply when it finds active incident evidence such as a `rollback.failed` audit event for an unresolved failed rollback. Preflight, shadow, and final auto-apply reports include `incident_active` and `active_incidents` under `checks.auto_apply`; missing or invalid referenced incident artifacts remain visible and fail closed until a later `rollback.applied` event for the same candidate supersedes the failed rollback.
 
 ## Dry Check
 
@@ -124,7 +123,7 @@ Every successful auto-apply must record a one-command rollback:
 tugboat rollback --repo . --decision latest --execute
 ```
 
-Review `rollback-plan.json` and `decision-trace.json` after execution. If rollback execution fails before a revert commit is recorded, Tugboat writes `rollback-incident.json` with `rollback_applied: false` and records `rollback.failed`. If the revert commit succeeds but rollback-plan publication fails, Tugboat writes `rollback-incident.json` with `rollback_applied: true`, `rollback_plan_written: false`, and the `revert_commit`; it records `rollback.applied` followed by `rollback.failed` so rollback-rate metrics and incident pause checks both remain accurate.
+Review `rollback-plan.json` and `decision-trace.json` after execution. If rollback execution fails before a revert commit is recorded, Tugboat writes `rollback-incident.json` with `rollback_applied: false` and records `rollback.failed`. If the revert commit succeeds but rollback-plan publication fails, Tugboat writes `rollback-incident.json` with `rollback_applied: true`, `rollback_plan_written: false`, and the `revert_commit`; it records `rollback.applied` followed by `rollback.failed` so rollback-rate metrics and incident checks both remain accurate.
 
 ## Monitoring
 
@@ -134,7 +133,7 @@ Use the operations summary to inspect lane-level auto-apply activity:
 tugboat ops observability --repo .
 ```
 
-The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.shadowed`, `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated. Candidates blocked by repository, lane, category, or active incident pause controls are counted as paused rather than rejected so operational pauses do not inflate policy rejection rates.
+The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.shadowed`, `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated. Candidates blocked by repository, lane, category, or active rollback incidents are counted as paused rather than rejected so operational pauses and incident stops do not inflate policy rejection rates.
 
 ## Emergency Stop
 

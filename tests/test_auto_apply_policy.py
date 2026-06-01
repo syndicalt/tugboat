@@ -398,8 +398,7 @@ def test_auto_apply_disabled_lane_blocks_matching_candidate():
     assert decision.reasons == ("auto_apply_lane_disabled",)
 
 
-def test_auto_apply_incident_pause_requires_active_incident():
-    policy = _enabled_policy(pause_for_incident=True)
+def test_auto_apply_active_incident_blocks_even_without_policy_pause_opt_in():
     incident = AutoApplyIncidentState(
         artifact_status="valid",
         artifact_valid=True,
@@ -411,26 +410,32 @@ def test_auto_apply_incident_pause_requires_active_incident():
 
     without_incident = evaluate_auto_apply(
         candidate=_passing_candidate(),
-        readiness=_ready(policy=policy, active_incidents=()),
+        readiness=_ready(
+            policy=_enabled_policy(pause_for_incident=False),
+            active_incidents=(),
+        ),
     )
     with_incident = evaluate_auto_apply(
-        candidate=_passing_candidate(),
-        readiness=_ready(policy=policy, active_incidents=(incident,)),
-    )
-    without_policy_opt_in = evaluate_auto_apply(
         candidate=_passing_candidate(),
         readiness=_ready(
             policy=_enabled_policy(pause_for_incident=False),
             active_incidents=(incident,),
         ),
     )
+    with_policy_opt_in = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(
+            policy=_enabled_policy(pause_for_incident=True),
+            active_incidents=(incident,),
+        ),
+    )
 
     assert without_incident.eligible is True
     assert without_incident.reasons == ()
-    assert without_policy_opt_in.eligible is True
-    assert without_policy_opt_in.reasons == ()
     assert with_incident.eligible is False
     assert with_incident.reasons == ("auto_apply_incident_pause_active",)
+    assert with_policy_opt_in.eligible is False
+    assert with_policy_opt_in.reasons == ("auto_apply_incident_pause_active",)
 
 
 def test_auto_apply_lane_can_set_stricter_token_growth_limit():

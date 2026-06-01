@@ -165,5 +165,5 @@ auto_apply:
       maximum_rollback_rate: 0.03
 ```
 
-Auto-apply remains disabled unless the global switch is enabled and a lane-specific burn-in, confirmation, VCS, eval, governance, token-growth, and rollback policy is satisfied. Token growth is measured from `eval-report.json` `metrics.instruction_token_delta`; missing or malformed token metrics block auto-apply.
-Pause controls are also policy-owned: `paused_repositories`, `paused_lanes`, `paused_categories`, and `pause_for_incident` block candidates with distinct audit reasons and cannot be overridden by CLI threshold flags.
+Auto-apply remains disabled unless the global switch is enabled and a lane-specific burn-in, confirmation, VCS, eval, governance, token-growth, and rollback policy is satisfied. Token growth is measured from `eval-report.json` `metrics.instruction_token_delta`; missing or malformed token metrics block auto-apply. Unresolved rollback incidents always block auto-apply as a lifecycle safety gate.
+Pause controls are also policy-owned: `paused_repositories`, `paused_lanes`, and `paused_categories` block candidates with distinct audit reasons and cannot be overridden by CLI threshold flags.
