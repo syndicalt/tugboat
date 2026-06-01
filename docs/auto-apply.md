@@ -125,7 +125,7 @@ Use the operations summary to inspect lane-level auto-apply activity:
 tugboat ops observability --repo .
 ```
 
-The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.shadowed`, `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated.
+The report is written to `.sidecar/ops/observability/summary.json`. Its `auto_apply_lanes` section counts shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as `auto_apply.shadowed`, `auto_apply.decided`, `auto_apply.applied`, and `rollback.applied`; successful precheck and final decisions for the same candidate are deduplicated. Candidates blocked by repository, lane, category, or active incident pause controls are counted as paused rather than rejected so operational pauses do not inflate policy rejection rates.
 
 ## Emergency Stop
 

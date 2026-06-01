@@ -141,6 +141,7 @@ def _auto_apply_lane_counts(
     staged_candidates: set[tuple[str, str]] = set()
     applied_candidates: set[tuple[str, str]] = set()
     rolled_back_candidates: set[tuple[str, str]] = set()
+    paused_candidates: set[tuple[str, str]] = set()
 
     event_items = list(events)
     for event in event_items:
@@ -166,6 +167,8 @@ def _auto_apply_lane_counts(
             eligible_candidates.add(key)
             if str(event.get("phase", "")) == "precheck":
                 staged_candidates.add(key)
+        elif _auto_apply_pause_reasons(event):
+            paused_candidates.add(key)
         else:
             rejected_candidates.add(key)
 
@@ -196,8 +199,23 @@ def _auto_apply_lane_counts(
     for lane, candidate_id in rolled_back_candidates:
         counts[lane]["rolled_back"] += 1
     for lane, lane_counts in counts.items():
+        lane_paused_candidates = {
+            candidate_id
+            for paused_lane, candidate_id in paused_candidates
+            if paused_lane == lane
+        }
         if paused or lane in paused_lane_set:
-            lane_counts["paused"] = max(0, lane_counts["staged"] - lane_counts["applied"])
+            lane_paused_candidates.update(
+                candidate_id
+                for staged_lane, candidate_id in staged_candidates
+                if staged_lane == lane
+            )
+            lane_paused_candidates.difference_update(
+                candidate_id
+                for applied_lane, candidate_id in applied_candidates
+                if applied_lane == lane
+            )
+        lane_counts["paused"] = len(lane_paused_candidates)
     return {lane: counts[lane] for lane in sorted(counts)}
 
 
@@ -236,6 +254,19 @@ def _auto_apply_applied_lane(event: dict[str, Any]) -> str | None:
     if isinstance(lane, str) and lane.strip():
         return lane.strip()
     return None
+
+
+def _auto_apply_pause_reasons(event: dict[str, Any]) -> tuple[str, ...]:
+    reasons = event.get("reasons", ())
+    if not isinstance(reasons, (list, tuple)):
+        return ()
+    pause_reasons = {
+        "auto_apply_repository_paused",
+        "auto_apply_lane_paused",
+        "auto_apply_category_paused",
+        "auto_apply_incident_pause_active",
+    }
+    return tuple(reason for reason in reasons if str(reason) in pause_reasons)
 
 
 def _sidecar_runs(connection: sqlite3.Connection) -> list[dict[str, Any]]:

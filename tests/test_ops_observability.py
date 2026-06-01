@@ -394,6 +394,85 @@ auto_apply:
     }
 
 
+def test_sidecar_observability_counts_pause_decisions_as_paused_not_rejected(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+auto_apply:
+  paused_lanes:
+    - docs_hygiene
+""".lstrip(),
+        encoding="utf-8",
+    )
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": True,
+                "lane": "docs_hygiene",
+                "phase": "precheck",
+                "reasons": [],
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": False,
+                "lane": "docs_hygiene",
+                "phase": "final",
+                "reasons": ["auto_apply_lane_paused"],
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": False,
+                "lane": "docs_hygiene",
+                "phase": "final",
+                "reasons": ["auto_apply_lane_paused"],
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 8,
+                "eligible": False,
+                "lane": "skill_improvement",
+                "phase": "precheck",
+                "reasons": ["auto_apply_incident_pause_active"],
+            },
+        )
+
+    summary = summarize_sidecar_observability(repo)
+
+    assert summary["auto_apply_lanes"]["docs_hygiene"] == {
+        "shadowed": 0,
+        "eligible": 1,
+        "rejected": 0,
+        "staged": 1,
+        "applied": 0,
+        "rolled_back": 0,
+        "paused": 1,
+    }
+    assert summary["auto_apply_lanes"]["skill_improvement"] == {
+        "shadowed": 0,
+        "eligible": 0,
+        "rejected": 0,
+        "staged": 0,
+        "applied": 0,
+        "rolled_back": 0,
+        "paused": 1,
+    }
+
+
 def test_sidecar_observability_counts_llmff_job_failure_without_events(
     tmp_path: Path,
 ):
