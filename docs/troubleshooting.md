@@ -103,6 +103,10 @@ Inspect `policy-gate.json` and `decision-trace.json`. Common causes are protecte
 
 Resolve or abort the VCS revert state manually, preserve `.sidecar/runs/<run-id>/rollback-plan.json` if present, then rerun after the repository is clean.
 
+`rollback blocked: simulated rollback plan publish failure` or another rollback-plan publication error
+
+Check `.sidecar/runs/<run-id>/rollback-incident.json`. When it records `rollback_applied: true` and `rollback_plan_written: false`, the Git revert commit exists but the success plan evidence is missing. Preserve the incident artifact, keep the repository clean, and repair or reconstruct the missing rollback evidence before closing the incident.
+
 ## MCP
 
 MCP tools return repo allowlist errors when `.sidecar/policy.yaml` lacks the absolute repo path under `mcp.allowed_repositories`.

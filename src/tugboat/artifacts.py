@@ -3068,6 +3068,13 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "failure_kind": {"type": "string"},
             "failure_message": {"type": "string"},
             "commit_sha": {"type": "string"},
+            "revert_commit": {"type": "string"},
+            "rollback_plan": {"type": "string"},
+            "post_rollback_hashes": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+            "restored_pre_hashes": {"type": "boolean"},
             "target_files": {"type": "array", "items": {"type": "string"}},
             "rollback_plan_written": {"type": "boolean"},
             "rollback_applied": {"type": "boolean"},
@@ -3077,6 +3084,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "required": ["apply_plan"],
                 "properties": {
                     "apply_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path", "sha256"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "sha256": {"type": "string"},
+                        },
+                    },
+                    "provenance_bundle": {
                         "type": "object",
                         "additionalProperties": False,
                         "required": ["path", "sha256"],

@@ -2943,14 +2943,22 @@ def test_validate_rollback_incident_accepts_current_schema():
             "failure_kind": "git_revert_failed",
             "failure_message": "git revert failed",
             "commit_sha": "abc123",
+            "revert_commit": "def456",
+            "rollback_plan": ".sidecar/runs/20260525T000000000000Z/rollback-plan.json",
+            "post_rollback_hashes": {"CODEX.md": "e" * 64},
+            "restored_pre_hashes": True,
             "target_files": ["CODEX.md"],
             "rollback_plan_written": False,
-            "rollback_applied": False,
+            "rollback_applied": True,
             "source_artifacts": {
                 "apply_plan": {
                     "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
                     "sha256": "d" * 64,
-                }
+                },
+                "provenance_bundle": {
+                    "path": ".sidecar/runs/20260525T000000000000Z/provenance-bundle.json",
+                    "sha256": "e" * 64,
+                },
             },
         },
     )

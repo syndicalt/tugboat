@@ -1179,7 +1179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = latest_run_dir(repo) if args.decision == "latest" else runs_dir(repo) / args.decision
         try:
             rollback_path = _write_rollback_plan(repo, run_dir, execute=args.execute)
-        except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+        except (FileNotFoundError, KeyError, OSError, SecretScanError, VcsStateError, ValueError) as error:
             print(f"rollback blocked: {error}")
             return 1
         print(f"rollback plan: {rollback_path}")
@@ -4116,7 +4116,7 @@ def _auto_apply_incident_artifact_status(
         return False, "candidate_mismatch"
     if incident_candidate_id != candidate_id:
         return False, "candidate_mismatch"
-    if payload.get("rollback_applied") is not False or payload.get("rollback_plan_written") is not False:
+    if payload.get("rollback_plan_written") is not False:
         return False, "not_active"
     return True, "valid"
 
@@ -5582,7 +5582,37 @@ def _write_rollback_plan(repo: Path, run_dir: Path, *, execute: bool = False) ->
     }
     path = run_dir / "rollback-plan.json"
     rollback_plan = _relative_repo_path(repo, path)
-    _write_secret_scanned_json_artifact(path, "rollback-plan.json", payload)
+    try:
+        _write_secret_scanned_json_artifact(path, "rollback-plan.json", payload)
+    except Exception as error:
+        path.unlink(missing_ok=True)
+        if execute and revert_commit:
+            _write_rollback_incident(
+                repo,
+                run_dir,
+                apply_plan=apply_plan,
+                commit_sha=commit_sha,
+                target_files=target_files,
+                failure_kind="rollback_plan_publication_failed",
+                failure_message=str(error),
+                source_artifacts=source_artifacts,
+                rollback_applied=True,
+                revert_commit=revert_commit,
+                rollback_plan=rollback_plan,
+                post_rollback_hashes=post_rollback_hashes,
+                restored_pre_hashes=restored_pre_hashes,
+                applied_event_payload={
+                    "candidate_id": int(apply_plan["candidate_id"]),
+                    "commit_sha": commit_sha,
+                    "decision_id": str(apply_plan["decision_id"]),
+                    "revert_commit": revert_commit,
+                    "rollback_plan": "",
+                    "rollback_plan_written": False,
+                    "source_artifacts": source_artifacts,
+                    "target_files": list(target_files),
+                },
+            )
+        raise
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         rollback_decision_id = _latest_decision_id_for_candidate(
             store,
@@ -5643,6 +5673,12 @@ def _write_rollback_incident(
     failure_kind: str,
     failure_message: str,
     source_artifacts: dict[str, object],
+    rollback_applied: bool = False,
+    revert_commit: str = "",
+    rollback_plan: str = "",
+    post_rollback_hashes: dict[str, str] | None = None,
+    restored_pre_hashes: bool | None = None,
+    applied_event_payload: dict[str, object] | None = None,
 ) -> Path:
     redacted_failure_message = _bounded_rollback_failure_message(failure_message)
     payload: dict[str, object] = {
@@ -5654,13 +5690,23 @@ def _write_rollback_incident(
         "commit_sha": commit_sha,
         "target_files": list(target_files),
         "rollback_plan_written": False,
-        "rollback_applied": False,
+        "rollback_applied": rollback_applied,
         "source_artifacts": source_artifacts,
     }
+    if revert_commit:
+        payload["revert_commit"] = revert_commit
+    if rollback_plan:
+        payload["rollback_plan"] = rollback_plan
+    if post_rollback_hashes is not None:
+        payload["post_rollback_hashes"] = post_rollback_hashes
+    if restored_pre_hashes is not None:
+        payload["restored_pre_hashes"] = restored_pre_hashes
     path = run_dir / "rollback-incident.json"
     incident = _relative_repo_path(repo, path)
     _write_secret_scanned_json_artifact(path, "rollback-incident.json", payload)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        if applied_event_payload is not None:
+            store.append_audit_event("rollback.applied", applied_event_payload)
         store.append_audit_event(
             "rollback.failed",
             {
@@ -5669,7 +5715,7 @@ def _write_rollback_incident(
                 "decision_id": str(apply_plan["decision_id"]),
                 "failure_kind": failure_kind,
                 "incident": incident,
-                "rollback_applied": False,
+                "rollback_applied": rollback_applied,
                 "rollback_plan_written": False,
                 "target_files": list(target_files),
             },

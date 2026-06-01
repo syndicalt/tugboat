@@ -104,7 +104,7 @@ Execute the rollback after review:
 tugboat rollback --repo . --decision latest --execute
 ```
 
-Rollback execution creates a revert commit, writes `rollback-plan.json`, records `rollback.applied`, stores post-rollback hashes, and updates the decision trace. If Git revert fails during execution, Tugboat writes `.sidecar/runs/<run-id>/rollback-incident.json` and records `rollback.failed` without writing a success rollback plan or marking the rollback applied. Repos with `auto_apply.pause_for_incident: true` treat that failed rollback as active incident evidence and pause auto-apply until a later `rollback.applied` event for the same candidate supersedes it.
+Rollback execution creates a revert commit, writes `rollback-plan.json`, records `rollback.applied`, stores post-rollback hashes, and updates the decision trace. If Git revert fails during execution, Tugboat writes `.sidecar/runs/<run-id>/rollback-incident.json` with `rollback_applied: false` and records `rollback.failed` without writing a success rollback plan. If the revert commit succeeds but `rollback-plan.json` cannot be published, Tugboat writes `rollback-incident.json` with `rollback_applied: true`, `rollback_plan_written: false`, the `revert_commit`, attempted `rollback_plan`, post-rollback hashes, and restored-pre-hash status; it records `rollback.applied` followed by `rollback.failed` so metrics see the real rollback while incident handling stays fail-closed. Repos with `auto_apply.pause_for_incident: true` treat either failed rollback incident as active evidence and pause auto-apply until a later successful rollback event supersedes it.
 
 ## Safety Stops
 
@@ -119,4 +119,4 @@ Stop and investigate when Tugboat prints:
 - `rollback blocked: apply plan`
 - `rollback blocked: git revert`
 
-Preserve `.sidecar/runs/<run-id>/` until the review closes. If `rollback-incident.json` exists, treat it as the incident record for the failed rollback attempt and resolve or abort the Git revert state before retrying.
+Preserve `.sidecar/runs/<run-id>/` until the review closes. If `rollback-incident.json` exists with `rollback_applied: false`, resolve or abort the Git revert state before retrying. If it has `rollback_applied: true` and `rollback_plan_written: false`, preserve the incident artifact and reconstruct or repair the missing rollback plan evidence before closing the incident.

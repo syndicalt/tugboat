@@ -122,7 +122,7 @@ Every successful auto-apply must record a one-command rollback:
 tugboat rollback --repo . --decision latest --execute
 ```
 
-Review `rollback-plan.json` and `decision-trace.json` after execution. If rollback execution fails before a revert commit is recorded, Tugboat writes `rollback-incident.json` and records `rollback.failed` so the failed recovery is auditable.
+Review `rollback-plan.json` and `decision-trace.json` after execution. If rollback execution fails before a revert commit is recorded, Tugboat writes `rollback-incident.json` with `rollback_applied: false` and records `rollback.failed`. If the revert commit succeeds but rollback-plan publication fails, Tugboat writes `rollback-incident.json` with `rollback_applied: true`, `rollback_plan_written: false`, and the `revert_commit`; it records `rollback.applied` followed by `rollback.failed` so rollback-rate metrics and incident pause checks both remain accurate.
 
 ## Monitoring
 
