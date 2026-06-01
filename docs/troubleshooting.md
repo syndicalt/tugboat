@@ -71,6 +71,12 @@ Inspect `.sidecar/runs/<run-id>/<manifest>/llmff-inspect.json`. Provider-backed 
 
 Inspect `.sidecar/runs/<run-id>/patch-eval/llmff-events.jsonl`, `.sidecar/runs/<run-id>/eval-report.raw.json`, and `.sidecar/runs/<run-id>/policy-decision.raw.json`.
 
+## Daemon
+
+`daemon user service is not processing jobs`
+
+Run `tugboat daemon status --repo .` first. If `read_only: enabled` or `.sidecar/read-only.kill` exists, review the incident and leave the service stopped until write paths are safe. For Linux, inspect `systemctl --user status tugboat.service` and `journalctl --user -u tugboat.service`; for macOS, inspect `launchctl print "gui/$(id -u)/com.example.tugboat"`. Confirm the service working directory is the repository root and the command is a bounded `tugboat daemon cycle --repo .`, not a public listener. After review, run one manual `tugboat daemon run-once --repo .` to recover stale leases before restarting the user service.
+
 ## Eval And Acceptance
 
 `eval rejected: llmff eval_report cannot accept without validation split provenance`

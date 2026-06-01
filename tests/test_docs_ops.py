@@ -589,6 +589,7 @@ DOC_CONTRACTS = {
             "## Cycle And Watch Traces",
             "## Local Socket",
             "## Worktree Profile",
+            "## User Services",
             "## Recovery",
         ],
         "required_text": [
@@ -598,6 +599,9 @@ DOC_CONTRACTS = {
             "tugboat daemon cycle --repo .",
             "tugboat daemon serve --repo . --socket .sidecar/daemon.sock",
             "tugboat daemon profile --repo .",
+            "systemd --user",
+            "launchctl",
+            ".sidecar/read-only.kill",
             "local-only",
             "stale leases",
         ],
@@ -622,6 +626,7 @@ DOC_CONTRACTS = {
             "skill_improvement",
             "7 burn-in days",
             "3% maximum rollback rate",
+            "skill_held_out_behavior_failed",
             "auto-apply-shadow.json",
             "source_artifacts",
             "candidate_preview_manifest",
@@ -1040,6 +1045,7 @@ def test_github_actions_ci_workflow_enforces_proposal_only_release_gates() -> No
     [
         ".github/workflows/ci.yml",
         "docs/ci/github-actions-template.yml",
+        "docs/ci/ci-guide.md",
     ],
 )
 def test_github_actions_release_evidence_path_retains_v1_manifest_inputs(

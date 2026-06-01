@@ -273,6 +273,7 @@ def test_validate_eval_report_artifact_accepts_skill_report():
             "overfit_risk_score": 0.75,
             "token_footprint_score": 1.0,
             "safety_preservation_score": 0.0,
+            "held_out_behavior_score": 0.0,
             "required_sections_passed": 0,
             "forbidden_sections_found": 1,
             "non_goals_passed": 1,

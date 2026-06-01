@@ -613,6 +613,8 @@ def test_run_offline_eval_suite_all_reports_skill_rewrite_checks(
     assert report.skill_report["metrics"]["skill_token_delta"] > 0
     assert report.metrics["skill_rewrite_cases"] == 1
     assert report.metrics["skill_rewrite_failures"] == 0
+    assert report.metrics["skill_held_out_behavior_cases"] == 1
+    assert report.metrics["skill_held_out_behavior_failures"] == 0
     assert report.metrics["skill_trigger_preservation_failures"] == 0
     assert report.metrics["skill_executability_failures"] == 0
     assert report.metrics["skill_ambiguity_failures"] == 0
@@ -625,6 +627,11 @@ def test_run_offline_eval_suite_all_reports_skill_rewrite_checks(
     assert "skill-rewrite:candidate-preview:SKILL.md" in [
         case.case_id for case in report.eval_cases
     ]
+    assert "skill-held-out:candidate-preview:SKILL.md" in [
+        case.case_id for case in report.eval_cases
+    ]
+    assert report.validation_splits is not None
+    assert "skill-held-out:candidate-preview:SKILL.md" in report.validation_splits["held_out"]
 
 
 def test_run_offline_eval_suite_all_rejects_skill_rewrite_without_explicit_non_goals(

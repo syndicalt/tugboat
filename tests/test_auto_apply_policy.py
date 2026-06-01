@@ -320,6 +320,20 @@ def test_skill_improvement_auto_apply_requires_passing_skill_report():
     assert decision.reasons == ("skill_report_failed",)
 
 
+def test_skill_improvement_auto_apply_requires_held_out_skill_behavior():
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(
+            categories=("skill_improvement",),
+            skill_report_passed=True,
+            skill_held_out_behavior_passed=False,
+        ),
+        readiness=_ready(),
+    )
+
+    assert decision.eligible is False
+    assert decision.reasons == ("skill_held_out_behavior_failed",)
+
+
 def test_auto_apply_blocks_candidates_that_exceed_token_growth_limit():
     at_limit = evaluate_auto_apply(
         candidate=_passing_candidate(instruction_token_delta=50),

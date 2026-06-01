@@ -353,6 +353,8 @@ def _skill_rewrite_eval(
     metrics = {
         "skill_rewrite_cases": 0,
         "skill_rewrite_failures": 0,
+        "skill_held_out_behavior_cases": 0,
+        "skill_held_out_behavior_failures": 0,
         "skill_trigger_preservation_failures": 0,
         "skill_executability_failures": 0,
         "skill_ambiguity_failures": 0,
@@ -378,10 +380,13 @@ def _skill_rewrite_eval(
         skill_reports.append(report)
         metrics["skill_rewrite_cases"] += 1
         metrics["skill_token_footprint_cases"] += 1
+        metrics["skill_held_out_behavior_cases"] += 1
         if not bool(report["passed"]):
             metrics["skill_rewrite_failures"] += 1
         report_metrics = report["metrics"]
         if isinstance(report_metrics, dict):
+            if report_metrics.get("held_out_behavior_score") == 0.0:
+                metrics["skill_held_out_behavior_failures"] += 1
             if report_metrics.get("trigger_preservation_score") == 0.0:
                 metrics["skill_trigger_preservation_failures"] += 1
             if report_metrics.get("executability_score") == 0.0:
@@ -407,6 +412,13 @@ def _skill_rewrite_eval(
                 case_id=f"skill-rewrite:candidate-preview:{relative_path}",
                 case_hash=_text_hash(after),
                 split_name="governance",
+            )
+        )
+        cases.append(
+            EvalCaseRecord(
+                case_id=f"skill-held-out:candidate-preview:{relative_path}",
+                case_hash=_text_hash(after + "\nheld-out-skill-behavior"),
+                split_name="held_out",
             )
         )
 
@@ -559,6 +571,7 @@ def evaluate_skill_rewrite_pair(
             else 1.0,
             "token_footprint_score": 0.0 if token_footprint_exceeded else 1.0,
             "safety_preservation_score": 0.0 if safety_weakening else 1.0,
+            "held_out_behavior_score": 1.0 if passed else 0.0,
             "required_sections_passed": 0 if missing_required_sections else 1,
             "forbidden_sections_found": len(forbidden_sections),
             "non_goals_passed": 0 if non_goals_missing else 1,
@@ -608,6 +621,7 @@ def _combined_skill_report(reports: list[dict[str, object]]) -> dict[str, object
             "safety_preservation_score": 0.0
             if any(finding.get("code") == "skill.safety.weakened" for finding in findings)
             else 1.0,
+            "held_out_behavior_score": 0.0 if findings else 1.0,
             "required_sections_passed": 0
             if any(finding.get("code") == "skill.required_section.removed" for finding in findings)
             else 1,
