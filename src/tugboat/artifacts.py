@@ -2992,6 +2992,74 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "apply-incident.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "mode",
+            "phase",
+            "candidate_id",
+            "decision_id",
+            "run_id",
+            "failure_kind",
+            "failure_message",
+            "target_files",
+            "branch_name",
+            "applied_commit",
+            "rollback_command",
+            "pre_hashes",
+            "post_hashes",
+            "remote",
+            "remote_branch_state",
+            "pr_state",
+            "pr_created",
+            "pr_metadata",
+            "pr_result",
+            "apply_plan_written",
+            "provenance_bundle_written",
+            "remote_cleanup_attempted",
+            "manual_cleanup",
+            "source_artifacts",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "mode": {"type": "string"},
+            "phase": {"type": "string"},
+            "candidate_id": {"type": "integer"},
+            "decision_id": {"type": "string"},
+            "run_id": {"type": "string"},
+            "failure_kind": {"type": "string"},
+            "failure_message": {"type": "string"},
+            "target_files": {"type": "array", "items": {"type": "string"}},
+            "branch_name": {"type": "string"},
+            "applied_commit": {"type": "string"},
+            "rollback_command": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": "string"}},
+            },
+            "pre_hashes": {"type": "object"},
+            "post_hashes": {"type": "object"},
+            "remote": {"type": "string"},
+            "remote_branch_state": {
+                "type": "string",
+                "enum": ["not_pushed", "pushed", "unknown"],
+            },
+            "pr_state": {
+                "type": "string",
+                "enum": ["not_created", "created", "uncertain"],
+            },
+            "pr_created": {"type": "boolean"},
+            "pr_metadata": {"type": "object"},
+            "pr_result": {"type": "object"},
+            "apply_plan_written": {"type": "boolean"},
+            "provenance_bundle_written": {"type": "boolean"},
+            "remote_cleanup_attempted": {"type": "boolean", "const": False},
+            "manual_cleanup": {"type": "array", "items": {"type": "string"}},
+            "source_artifacts": {"type": "object"},
+        },
+    },
     "rollback-plan.json": {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
@@ -3174,7 +3242,12 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
             ):
             if field not in payload:
                 raise ArtifactValidationError(f"{name} missing required field: {field}")
-    if name in {"provenance-bundle.json", "rollback-plan.json", "rollback-incident.json"}:
+    if name in {
+        "apply-incident.json",
+        "provenance-bundle.json",
+        "rollback-plan.json",
+        "rollback-incident.json",
+    }:
         source_artifacts = payload.get("source_artifacts", {})
         if isinstance(source_artifacts, dict):
             for artifact_name, artifact_ref in source_artifacts.items():

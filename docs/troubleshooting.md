@@ -99,6 +99,18 @@ Regenerate the candidate from the current file state. Do not hand-edit candidate
 
 Inspect `policy-gate.json` and `decision-trace.json`. Common causes are protected headings, Class C review requirements, Class D prohibited topics, or rejected-edit memory suppression.
 
+`apply blocked: git push failed`
+
+Inspect `.sidecar/runs/<run-id>/apply-incident.json`. A failed push after local commit records `remote_branch_state: unknown`; check the remote before deleting anything, preserve the incident artifact, then remove any generated local or remote branch only after evidence is retained.
+
+`apply blocked: gh pr create failed`
+
+Inspect `apply-incident.json`. When `remote_branch_state: pushed` and `pr_state: uncertain`, check the provider for a created PR before retrying. Do not delete the remote branch or close a PR until the incident artifact and any provider evidence are preserved.
+
+`apply blocked: simulated apply plan publish failure` or another PR artifact publication error
+
+If `apply-incident.json` records `pr_state: created`, the PR exists but Tugboat could not publish complete local apply evidence. Preserve `.sidecar/runs/<run-id>/`, review or close the PR manually, and delete the remote branch only after evidence is retained.
+
 `rollback blocked: git revert`
 
 Resolve or abort the VCS revert state manually, preserve `.sidecar/runs/<run-id>/rollback-plan.json` if present, then rerun after the repository is clean.

@@ -2220,6 +2220,52 @@ def test_validate_apply_plan_artifact_accepts_vcs_backed_apply_payload():
     )
 
 
+def test_validate_apply_incident_artifact_accepts_pr_remote_side_effect_payload():
+    validate_json_artifact(
+        "apply-incident.json",
+        {
+            "schema_version": 1,
+            "mode": "pr",
+            "phase": "publish_apply_plan",
+            "candidate_id": 7,
+            "decision_id": "run-1",
+            "run_id": "run-1",
+            "failure_kind": "apply_plan_publication_failed",
+            "failure_message": "simulated apply plan publish failure",
+            "target_files": ["CODEX.md"],
+            "branch_name": "tugboat/run-1/candidate-7/codex-md",
+            "applied_commit": "abc123",
+            "rollback_command": [["git", "revert", "--no-edit", "abc123"]],
+            "pre_hashes": {"CODEX.md": "before"},
+            "post_hashes": {"CODEX.md": "after"},
+            "remote": "upstream",
+            "remote_branch_state": "pushed",
+            "pr_state": "created",
+            "pr_created": True,
+            "pr_metadata": {"title": "tugboat: apply candidate 7"},
+            "pr_result": {
+                "created": True,
+                "number": 42,
+                "provider": "github_cli",
+                "url": "https://github.com/syndicalt/tugboat/pull/42",
+            },
+            "apply_plan_written": False,
+            "provenance_bundle_written": False,
+            "remote_cleanup_attempted": False,
+            "manual_cleanup": [
+                "review or close PR https://github.com/syndicalt/tugboat/pull/42",
+                "delete remote branch upstream/tugboat/run-1/candidate-7/codex-md only after preserving evidence",
+            ],
+            "source_artifacts": {
+                "candidate_diff": {
+                    "path": ".sidecar/runs/run-1/candidate.diff",
+                    "sha256": "1" * 64,
+                }
+            },
+        },
+    )
+
+
 def test_validate_decision_trace_artifact_accepts_provenance_payload():
     validate_json_artifact(
         "decision-trace.json",

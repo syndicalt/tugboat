@@ -3007,6 +3007,9 @@ def _write_apply_plan(
     auto_apply_approval: dict[str, object] | None = None
     pr_metadata: dict[str, object] = {}
     pr_result: dict[str, object] = {}
+    pr_remote = policy.vcs_pull_request_remote if mode == "pr" else ""
+    pr_remote_branch_state = "not_pushed"
+    pr_created = False
     branch_created = False
     applied_worktree_change = False
 
@@ -3031,6 +3034,11 @@ def _write_apply_plan(
 
     def cleanup_generated_local_commit() -> None:
         if branch_created and applied_commit and mode == "commit":
+            adapter.switch_branch(base_branch)
+            adapter.delete_branch(branch_name)
+
+    def cleanup_generated_pr_local_commit() -> None:
+        if branch_created and applied_commit and mode == "pr":
             adapter.switch_branch(base_branch)
             adapter.delete_branch(branch_name)
 
@@ -3095,6 +3103,7 @@ def _write_apply_plan(
             ]
             pr_metadata = planned_pr_metadata
             adapter.push_branch(policy.vcs_pull_request_remote, branch_name)
+            pr_remote_branch_state = "pushed"
             if planned_pr_metadata_obj is None:
                 raise ValueError("PR metadata was not prepared")
             created_pr: PullRequestResult = adapter.create_pull_request(
@@ -3102,11 +3111,53 @@ def _write_apply_plan(
                 provider=policy.vcs_pull_request_provider,
             )
             pr_result = created_pr.to_json_dict()
+            pr_created = bool(pr_result.get("created"))
     except KeyboardInterrupt:
         cleanup_generated_branch_without_commit()
         raise
-    except VcsStateError:
-        cleanup_generated_branch_without_commit()
+    except VcsStateError as error:
+        if mode == "pr" and applied_commit:
+            phase = (
+                "create_pull_request"
+                if pr_remote_branch_state == "pushed"
+                else "push_branch"
+            )
+            failure_kind = (
+                "pull_request_creation_failed"
+                if phase == "create_pull_request"
+                else "push_failed"
+            )
+            _write_apply_incident(
+                repo,
+                run_dir,
+                candidate_id=candidate_id,
+                mode=mode,
+                phase=phase,
+                failure_kind=failure_kind,
+                failure_message=str(error),
+                target_files=target_files,
+                branch_name=branch_name,
+                applied_commit=applied_commit,
+                rollback_command=rollback_command,
+                pre_hashes=pre_hashes,
+                post_hashes=post_hashes,
+                remote=pr_remote,
+                remote_branch_state=(
+                    "pushed" if phase == "create_pull_request" else "unknown"
+                ),
+                pr_state=(
+                    "uncertain" if phase == "create_pull_request" else "not_created"
+                ),
+                pr_created=False,
+                pr_metadata=pr_metadata,
+                pr_result=pr_result,
+                apply_plan_written=False,
+                provenance_bundle_written=False,
+                source_artifacts=_apply_incident_source_artifacts(repo, run_dir),
+            )
+            cleanup_generated_pr_local_commit()
+        else:
+            cleanup_generated_branch_without_commit()
         raise
     except ValueError:
         if auto_apply and branch_created:
@@ -3155,7 +3206,7 @@ def _write_apply_plan(
             apply_plan_path=path,
             recorded_provenance=recorded_provenance,
         )
-    except Exception:
+    except Exception as error:
         if not applied_commit:
             cleanup_generated_branch_without_commit()
             path.unlink(missing_ok=True)
@@ -3163,6 +3214,43 @@ def _write_apply_plan(
         elif mode == "commit":
             cleanup_generated_local_commit()
             path.unlink(missing_ok=True)
+            (run_dir / "provenance-bundle.json").unlink(missing_ok=True)
+        elif mode == "pr":
+            _write_apply_incident(
+                repo,
+                run_dir,
+                candidate_id=candidate_id,
+                mode=mode,
+                phase=(
+                    "publish_apply_plan"
+                    if not path.exists()
+                    else "publish_provenance_bundle"
+                ),
+                failure_kind=(
+                    "apply_plan_publication_failed"
+                    if not path.exists()
+                    else "provenance_bundle_publication_failed"
+                ),
+                failure_message=str(error),
+                target_files=target_files,
+                branch_name=branch_name,
+                applied_commit=applied_commit,
+                rollback_command=rollback_command,
+                pre_hashes=pre_hashes,
+                post_hashes=post_hashes,
+                remote=pr_remote,
+                remote_branch_state=pr_remote_branch_state,
+                pr_state="created" if pr_created else "uncertain",
+                pr_created=pr_created,
+                pr_metadata=pr_metadata,
+                pr_result=pr_result,
+                apply_plan_written=path.exists(),
+                provenance_bundle_written=(run_dir / "provenance-bundle.json").exists(),
+                source_artifacts=_apply_incident_source_artifacts(repo, run_dir),
+            )
+            cleanup_generated_pr_local_commit()
+            if not path.exists():
+                path.unlink(missing_ok=True)
             (run_dir / "provenance-bundle.json").unlink(missing_ok=True)
         raise
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -3527,6 +3615,105 @@ def _write_provenance_bundle(
     path = run_dir / "provenance-bundle.json"
     _write_secret_scanned_json_artifact(path, "provenance-bundle.json", payload)
     return path
+
+
+def _write_apply_incident(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    mode: str,
+    phase: str,
+    failure_kind: str,
+    failure_message: str,
+    target_files: tuple[str, ...],
+    branch_name: str,
+    applied_commit: str,
+    rollback_command: list[list[str]],
+    pre_hashes: dict[str, str],
+    post_hashes: dict[str, str],
+    remote: str,
+    remote_branch_state: str,
+    pr_state: str,
+    pr_created: bool,
+    pr_metadata: dict[str, object],
+    pr_result: dict[str, object],
+    apply_plan_written: bool,
+    provenance_bundle_written: bool,
+    source_artifacts: dict[str, object],
+) -> Path:
+    pr_url = str(pr_result.get("url", "")).strip()
+    manual_cleanup = [
+        f"review or close PR {pr_url}" if pr_url else "review PR state before cleanup",
+        f"delete remote branch {remote}/{branch_name} only after preserving evidence",
+    ]
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": mode,
+        "phase": phase,
+        "candidate_id": candidate_id,
+        "decision_id": run_dir.name,
+        "run_id": run_dir.name,
+        "failure_kind": failure_kind,
+        "failure_message": _bounded_rollback_failure_message(failure_message),
+        "target_files": list(target_files),
+        "branch_name": branch_name,
+        "applied_commit": applied_commit,
+        "rollback_command": rollback_command,
+        "pre_hashes": pre_hashes,
+        "post_hashes": post_hashes,
+        "remote": remote,
+        "remote_branch_state": remote_branch_state,
+        "pr_state": pr_state,
+        "pr_created": pr_created,
+        "pr_metadata": pr_metadata,
+        "pr_result": pr_result,
+        "apply_plan_written": apply_plan_written,
+        "provenance_bundle_written": provenance_bundle_written,
+        "remote_cleanup_attempted": False,
+        "manual_cleanup": manual_cleanup,
+        "source_artifacts": source_artifacts,
+    }
+    path = run_dir / "apply-incident.json"
+    incident = _relative_repo_path(repo, path)
+    _write_secret_scanned_json_artifact(path, "apply-incident.json", payload)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "apply.failed",
+            {
+                "candidate_id": candidate_id,
+                "run_id": run_dir.name,
+                "mode": mode,
+                "phase": phase,
+                "failure_kind": failure_kind,
+                "incident": incident,
+                "branch_name": branch_name,
+                "applied_commit": applied_commit,
+                "remote": remote,
+                "remote_branch_state": remote_branch_state,
+                "pr_state": pr_state,
+                "pr_created": pr_created,
+            },
+        )
+    return path
+
+
+def _apply_incident_source_artifacts(repo: Path, run_dir: Path) -> dict[str, object]:
+    refs: dict[str, object] = {}
+    for name, path in (
+        ("candidate_diff", run_dir / "candidate.diff"),
+        ("candidate_metadata", run_dir / "candidate.json"),
+        ("eval_report", run_dir / "eval-report.json"),
+        ("policy_gate", run_dir / "policy-gate.json"),
+        ("apply_plan", run_dir / "apply-plan.json"),
+        ("provenance_bundle", run_dir / "provenance-bundle.json"),
+    ):
+        if path.exists():
+            refs[name] = {
+                "path": _relative_repo_path(repo, path),
+                "sha256": CandidatePatch.hash_file(path),
+            }
+    return refs
 
 
 def _assert_auto_apply_precheck(

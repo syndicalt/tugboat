@@ -87,7 +87,7 @@ Then run:
 tugboat apply --repo . --candidate latest --mode pr --human-review --review-actor <name>
 ```
 
-PR mode is fail-closed. If branch, commit, push, or provider execution fails, Tugboat cleans up generated state where possible and records the failure.
+PR mode is fail-closed. The local flow is: create generated branch, apply diff, commit, push remote branch, create PR, publish `apply-plan.json` and `provenance-bundle.json`, then record ledger events. If branch, diff, or commit fails before remote work, Tugboat cleans up local generated state. If push, PR creation, or artifact publication fails after a local commit, Tugboat writes `.sidecar/runs/<run-id>/apply-incident.json`, records `apply.failed`, returns the local repo to the original branch where possible, and does not delete remote branches or close PRs automatically. Operators should preserve the incident artifact, inspect any pushed branch or created PR, and clean up remote state only after evidence is retained.
 Generated PR bodies contain structured review metadata, validation status, rollback readiness, and artifact references. They do not include raw trace snippets or candidate rationale text.
 
 ## Rollback Plan

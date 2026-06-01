@@ -4215,6 +4215,257 @@ def test_apply_pr_mode_creates_configured_pull_request_and_records_result(
     assert json.loads(event[0])["pr_result"] == apply_plan["pr_result"]
 
 
+def test_apply_pr_mode_records_incident_when_plan_publish_fails_after_pr_created(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    _write_pr_policy(repo, remote="upstream", base_branch="trunk", draft=False)
+    original_branch = _git(repo, "branch", "--show-current")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    original_replace = Path.replace
+    target = run_dir / "apply-plan.json"
+
+    def record_push(self, remote: str, branch_name: str) -> None:
+        del self, remote, branch_name
+
+    def record_pr(self, metadata, *, provider: str):
+        return cli_module.PullRequestResult(
+            provider=provider,
+            created=True,
+            url="https://github.com/syndicalt/tugboat/pull/42",
+            number=42,
+        )
+
+    def fail_apply_plan_replace(self: Path, replacement_target: Path):
+        if replacement_target == target:
+            raise OSError("simulated apply plan publish failure")
+        return original_replace(self, replacement_target)
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "push_branch", record_push)
+    monkeypatch.setattr(cli_module.VcsAdapter, "create_pull_request", record_pr)
+    monkeypatch.setattr(Path, "replace", fail_apply_plan_replace)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: simulated apply plan publish failure" in output
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    incident = json.loads((run_dir / "apply-incident.json").read_text(encoding="utf-8"))
+    assert incident["failure_kind"] == "apply_plan_publication_failed"
+    assert incident["failure_message"] == "simulated apply plan publish failure"
+    assert incident["phase"] == "publish_apply_plan"
+    assert incident["mode"] == "pr"
+    assert incident["remote"] == "upstream"
+    assert incident["remote_branch_state"] == "pushed"
+    assert incident["pr_state"] == "created"
+    assert incident["pr_created"] is True
+    assert incident["pr_result"] == {
+        "created": True,
+        "number": 42,
+        "provider": "github_cli",
+        "url": "https://github.com/syndicalt/tugboat/pull/42",
+    }
+    assert incident["apply_plan_written"] is False
+    assert incident["provenance_bundle_written"] is False
+    assert incident["applied_commit"] != original_head
+    assert incident["manual_cleanup"] == [
+        "review or close PR https://github.com/syndicalt/tugboat/pull/42",
+        f"delete remote branch upstream/{incident['branch_name']} only after preserving evidence",
+    ]
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        success = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type IN ('apply.planned', 'apply.applied')"
+        ).fetchone()
+        failed = connection.execute(
+            """
+            SELECT payload_json FROM audit_events
+            WHERE event_type = 'apply.failed'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert success is None
+    assert failed is not None
+    failed_payload = json.loads(failed[0])
+    assert failed_payload["failure_kind"] == "apply_plan_publication_failed"
+    assert failed_payload["incident"] == ".sidecar/runs/20260525T000000000000Z/apply-incident.json"
+    assert failed_payload["remote_branch_state"] == "pushed"
+    assert failed_payload["pr_state"] == "created"
+    assert failed_payload["pr_created"] is True
+
+
+def test_apply_pr_mode_records_incident_when_provenance_publish_fails_after_pr_created(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    _write_pr_policy(repo, remote="upstream", base_branch="trunk", draft=False)
+    original_branch = _git(repo, "branch", "--show-current")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    original_replace = Path.replace
+    target = run_dir / "provenance-bundle.json"
+
+    def record_push(self, remote: str, branch_name: str) -> None:
+        del self, remote, branch_name
+
+    def record_pr(self, metadata, *, provider: str):
+        return cli_module.PullRequestResult(
+            provider=provider,
+            created=True,
+            url="https://github.com/syndicalt/tugboat/pull/42",
+            number=42,
+        )
+
+    def fail_provenance_replace(self: Path, replacement_target: Path):
+        if replacement_target == target:
+            raise OSError("simulated provenance publish failure")
+        return original_replace(self, replacement_target)
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "push_branch", record_push)
+    monkeypatch.setattr(cli_module.VcsAdapter, "create_pull_request", record_pr)
+    monkeypatch.setattr(Path, "replace", fail_provenance_replace)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: simulated provenance publish failure" in output
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    incident = json.loads((run_dir / "apply-incident.json").read_text(encoding="utf-8"))
+    assert incident["failure_kind"] == "provenance_bundle_publication_failed"
+    assert incident["phase"] == "publish_provenance_bundle"
+    assert incident["remote_branch_state"] == "pushed"
+    assert incident["pr_state"] == "created"
+    assert incident["pr_created"] is True
+    assert incident["apply_plan_written"] is True
+    assert incident["provenance_bundle_written"] is False
+    assert incident["source_artifacts"]["apply_plan"] == {
+        "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+        "sha256": _hash(run_dir / "apply-plan.json"),
+    }
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        success = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type IN ('apply.planned', 'apply.applied')"
+        ).fetchone()
+        failed = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE event_type = 'apply.failed'"
+        ).fetchone()
+    assert success is None
+    assert failed is not None
+
+
+def test_apply_pr_mode_records_incident_when_push_fails_after_local_commit(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    _write_pr_policy(repo, remote="upstream", base_branch="trunk", draft=False)
+    original_branch = _git(repo, "branch", "--show-current")
+    original_head = _git(repo, "rev-parse", "HEAD")
+
+    def fail_push(self, remote: str, branch_name: str) -> None:
+        del self, remote, branch_name
+        raise VcsStateError("git push failed: simulated network failure")
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "push_branch", fail_push)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: git push failed: simulated network failure" in output
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    incident = json.loads((run_dir / "apply-incident.json").read_text(encoding="utf-8"))
+    assert incident["failure_kind"] == "push_failed"
+    assert incident["phase"] == "push_branch"
+    assert incident["remote"] == "upstream"
+    assert incident["remote_branch_state"] == "unknown"
+    assert incident["pr_state"] == "not_created"
+    assert incident["pr_created"] is False
+    assert incident["pr_result"] == {}
+    assert incident["apply_plan_written"] is False
+    assert incident["provenance_bundle_written"] is False
+    assert incident["applied_commit"] != original_head
+    assert incident["manual_cleanup"] == [
+        "review PR state before cleanup",
+        f"delete remote branch upstream/{incident['branch_name']} only after preserving evidence",
+    ]
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        success = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type IN ('apply.planned', 'apply.applied')"
+        ).fetchone()
+        failed = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE event_type = 'apply.failed'"
+        ).fetchone()
+    assert success is None
+    assert failed is not None
+
+
+def test_apply_pr_mode_records_incident_when_pr_creation_fails_after_push(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    _write_pr_policy(repo, remote="upstream", base_branch="trunk", draft=False)
+    original_branch = _git(repo, "branch", "--show-current")
+    original_head = _git(repo, "rev-parse", "HEAD")
+
+    def record_push(self, remote: str, branch_name: str) -> None:
+        del self, remote, branch_name
+
+    def fail_create_pr(self, metadata, *, provider: str):
+        del self, metadata, provider
+        raise VcsStateError("gh pr create failed: simulated auth failure")
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "push_branch", record_push)
+    monkeypatch.setattr(cli_module.VcsAdapter, "create_pull_request", fail_create_pr)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "pr"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: gh pr create failed: simulated auth failure" in output
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    incident = json.loads((run_dir / "apply-incident.json").read_text(encoding="utf-8"))
+    assert incident["failure_kind"] == "pull_request_creation_failed"
+    assert incident["phase"] == "create_pull_request"
+    assert incident["remote"] == "upstream"
+    assert incident["remote_branch_state"] == "pushed"
+    assert incident["pr_state"] == "uncertain"
+    assert incident["pr_created"] is False
+    assert incident["pr_result"] == {}
+    assert incident["apply_plan_written"] is False
+    assert incident["provenance_bundle_written"] is False
+    assert incident["applied_commit"] != original_head
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        success = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type IN ('apply.planned', 'apply.applied')"
+        ).fetchone()
+        failed = connection.execute(
+            "SELECT payload_json FROM audit_events WHERE event_type = 'apply.failed'"
+        ).fetchone()
+    assert success is None
+    assert failed is not None
+
+
 def test_apply_pr_mode_cleans_generated_branch_when_commit_fails(
     tmp_path: Path,
     monkeypatch,
