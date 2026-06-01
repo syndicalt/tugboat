@@ -3178,7 +3178,19 @@ def test_apply_pr_mode_creates_configured_pull_request_and_records_result(
         "provider": "github_cli",
         "url": "https://github.com/syndicalt/tugboat/pull/42",
     }
-    assert "Candidate: 7" in apply_plan["pr_metadata"]["body"]
+    body = apply_plan["pr_metadata"]["body"]
+    assert "Candidate: 7" in body
+    assert "Run: 20260525T000000000000Z" in body
+    assert "Eval all: passed" in body
+    assert "Policy gate: allowed" in body
+    assert "Rollback ready: yes" in body
+    assert "candidate_diff: .sidecar/runs/20260525T000000000000Z/candidate.diff" in body
+    assert "eval_report: .sidecar/runs/20260525T000000000000Z/eval-report.json" in body
+    assert "policy_gate: .sidecar/runs/20260525T000000000000Z/policy-gate.json" in body
+    assert "apply_plan: .sidecar/runs/20260525T000000000000Z/apply-plan.json" in body
+    assert "provenance_bundle: .sidecar/runs/20260525T000000000000Z/provenance-bundle.json" in body
+    assert "Rationale:" not in body
+    assert "Keep rollback provenance visible" not in body
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         event = connection.execute(
             """

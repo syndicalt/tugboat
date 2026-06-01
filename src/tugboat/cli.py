@@ -2272,6 +2272,12 @@ def _write_apply_plan(
             base_branch=pr_base_branch,
             draft=policy.vcs_pull_request_draft,
             rationale=candidate.rationale,
+            run_id=run_dir.name,
+            eval_suite_id=str(eval_report["suite_id"]),
+            eval_passed=bool(eval_report["passed"]),
+            policy_gate_allowed=bool(policy_gate["allowed"]),
+            rollback_ready=True,
+            artifacts=_pull_request_artifact_refs(repo, run_dir),
         )
         if mode == "pr"
         else None
@@ -3409,6 +3415,16 @@ def _apply_applied_event_payload(
 
 def _relative_repo_path(repo: Path, path: Path) -> str:
     return path.resolve().relative_to(repo.resolve()).as_posix()
+
+
+def _pull_request_artifact_refs(repo: Path, run_dir: Path) -> tuple[tuple[str, str], ...]:
+    return (
+        ("candidate_diff", _relative_repo_path(repo, run_dir / "candidate.diff")),
+        ("eval_report", _relative_repo_path(repo, run_dir / "eval-report.json")),
+        ("policy_gate", _relative_repo_path(repo, run_dir / "policy-gate.json")),
+        ("apply_plan", _relative_repo_path(repo, run_dir / "apply-plan.json")),
+        ("provenance_bundle", _relative_repo_path(repo, run_dir / "provenance-bundle.json")),
+    )
 
 
 def _read_optional_json_object(path: Path) -> dict[str, object] | None:

@@ -111,6 +111,53 @@ def test_commit_message_generation_is_deterministic(tmp_path: Path):
     )
 
 
+def test_pull_request_metadata_uses_artifact_refs_without_raw_rationale(tmp_path: Path):
+    adapter = VcsAdapter(tmp_path)
+
+    metadata = adapter.pull_request_metadata(
+        candidate_id=7,
+        base_file="CODEX.md",
+        branch_name="tugboat/run/candidate-7/codex-md",
+        base_branch="main",
+        draft=True,
+        rationale="raw trace says sk-thissecretkeyvalue1234567890",
+        run_id="run-42",
+        eval_suite_id="all",
+        eval_passed=True,
+        policy_gate_allowed=True,
+        rollback_ready=True,
+        artifacts=(
+            ("candidate_diff", ".sidecar/runs/run-42/candidate.diff"),
+            ("eval_report", ".sidecar/runs/run-42/eval-report.json"),
+            ("apply_plan", ".sidecar/runs/run-42/apply-plan.json"),
+        ),
+    )
+
+    assert metadata.body == "\n".join(
+        [
+            "Candidate: 7",
+            "Run: run-42",
+            "Base file: CODEX.md",
+            "Branch: tugboat/run/candidate-7/codex-md",
+            "Base branch: main",
+            "",
+            "Validation:",
+            "- Eval all: passed",
+            "- Policy gate: allowed",
+            "- Rollback ready: yes",
+            "",
+            "Artifacts:",
+            "- candidate_diff: .sidecar/runs/run-42/candidate.diff",
+            "- eval_report: .sidecar/runs/run-42/eval-report.json",
+            "- apply_plan: .sidecar/runs/run-42/apply-plan.json",
+            "",
+            "This pull request was generated from Tugboat review artifacts.",
+        ]
+    )
+    assert "raw trace" not in metadata.body
+    assert "sk-thissecret" not in metadata.body
+
+
 def test_rollback_metadata_contains_revert_commands_without_mutating_repo(tmp_path: Path):
     repo = _init_repo(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")

@@ -162,20 +162,43 @@ class VcsAdapter:
         base_branch: str,
         draft: bool,
         rationale: str,
+        run_id: str = "",
+        eval_suite_id: str = "",
+        eval_passed: bool | None = None,
+        policy_gate_allowed: bool | None = None,
+        rollback_ready: bool | None = None,
+        artifacts: tuple[tuple[str, str], ...] = (),
     ) -> PullRequestMetadata:
         title = f"tugboat: apply candidate {candidate_id} for {base_file}"
-        body = "\n".join(
+        _ = rationale
+        lines = [
+            f"Candidate: {candidate_id}",
+        ]
+        if run_id:
+            lines.append(f"Run: {run_id}")
+        lines.extend(
             [
-                f"Candidate: {candidate_id}",
                 f"Base file: {base_file}",
                 f"Branch: {branch_name}",
+                f"Base branch: {base_branch}",
                 "",
-                "Rationale:",
-                rationale.rstrip(),
-                "",
-                "This pull request was generated from Tugboat review artifacts.",
+                "Validation:",
             ]
         )
+        if eval_suite_id:
+            eval_status = "passed" if eval_passed is True else "failed"
+            lines.append(f"- Eval {eval_suite_id}: {eval_status}")
+        if policy_gate_allowed is not None:
+            policy_status = "allowed" if policy_gate_allowed else "blocked"
+            lines.append(f"- Policy gate: {policy_status}")
+        if rollback_ready is not None:
+            rollback_status = "yes" if rollback_ready else "no"
+            lines.append(f"- Rollback ready: {rollback_status}")
+        if artifacts:
+            lines.extend(["", "Artifacts:"])
+            lines.extend(f"- {kind}: {path}" for kind, path in artifacts)
+        lines.extend(["", "This pull request was generated from Tugboat review artifacts."])
+        body = "\n".join(lines)
         return PullRequestMetadata(
             title=title,
             body=body,

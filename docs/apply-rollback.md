@@ -85,6 +85,7 @@ tugboat apply --repo . --candidate latest --mode pr --human-review --review-acto
 ```
 
 PR mode is fail-closed. If branch, commit, push, or provider execution fails, Tugboat cleans up generated state where possible and records the failure.
+Generated PR bodies contain structured review metadata, validation status, rollback readiness, and artifact references. They do not include raw trace snippets or candidate rationale text.
 
 ## Rollback Plan
 
