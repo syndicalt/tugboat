@@ -2537,6 +2537,7 @@ def test_validate_ci_report_artifact_requires_check_results():
                     "orphaned_runbooks": [],
                     "recurring_failures_without_docs": [],
                     "doc_gardening_tasks": [],
+                    "token_budget_violations": [],
                 },
                 "manifest_contracts": {"passed": True, "findings": []},
                 "semantic_policy_lint": {"passed": True, "findings": []},

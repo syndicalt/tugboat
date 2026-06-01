@@ -769,6 +769,8 @@ def test_harness_health_returns_sanitized_read_only_report(tmp_path: Path):
         "orphaned_runbook_count": 0,
         "recurring_failure_without_doc_count": 1,
         "doc_gardening_task_count": 2,
+        "token_budget_violation_count": 0,
+        "blocking_token_budget_violation_count": 0,
     }
     assert result["knowledge_map"] == {"AGENTS.md": ["docs/MISSING.md"]}
     assert result["missing_docs"] == ["docs/MISSING.md"]
@@ -781,6 +783,28 @@ def test_harness_health_returns_sanitized_read_only_report(tmp_path: Path):
     assert "sk-thissecret" not in serialized
     assert not (sidecar_dir(repo) / "harness-report.json").exists()
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_harness_health"
+
+
+def test_harness_health_fails_closed_on_token_budget_violations(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    duplicated_rule = "MUST " + " ".join(f"token{i}" for i in range(120)) + "."
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\n"
+        f"{duplicated_rule}\n"
+        f"{duplicated_rule}\n",
+        encoding="utf-8",
+    )
+
+    result = tugboat_harness_health(repo)
+
+    assert result["passed"] is False
+    assert result["summary"]["token_budget_violation_count"] == 1
+    assert result["summary"]["blocking_token_budget_violation_count"] == 1
+    assert result["token_metrics"]["token_budget_violations"] == [
+        "duplicate instruction rules estimated at 121 tokens exceeds duplicate rule budget 100."
+    ]
+    assert not (sidecar_dir(repo) / "harness-report.json").exists()
 
 
 def test_bound_read_only_mcp_stdio_includes_harness_health(tmp_path: Path):
@@ -1140,6 +1164,15 @@ def test_latest_failed_gates_includes_sanitized_ci_check_failures(tmp_path: Path
                         "report_path": ".sidecar/harness-report.json",
                         "report_sha256": "a" * 64,
                         "doc_gardening_task_count": 0,
+                    },
+                    "harness_report": {
+                        "passed": True,
+                        "missing_docs": [],
+                        "stale_docs": [],
+                        "orphaned_runbooks": [],
+                        "recurring_failures_without_docs": [],
+                        "doc_gardening_tasks": [],
+                        "token_budget_violations": [],
                     },
                     "manifest_contracts": {"passed": True, "findings": []},
                     "semantic_policy_lint": {

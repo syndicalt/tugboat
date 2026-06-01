@@ -208,6 +208,7 @@ def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_pat
                 "orphaned_runbooks": [],
                 "recurring_failures_without_docs": [],
                 "doc_gardening_tasks": [],
+                "token_budget_violations": [],
             },
             "index": {"passed": True, "indexed_documents": 1},
             "manifest_contracts": {"passed": True, "findings": []},
@@ -329,7 +330,82 @@ def test_ci_check_returns_nonzero_for_report_only_harness_debt(
         "doc_gardening_tasks": [
             "Either reference docs/orphan.md from an instruction map or remove/archive it."
         ],
+        "token_budget_violations": [],
     }
+
+
+def test_ci_check_returns_nonzero_for_token_budget_violations(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n# Runbook\n",
+        encoding="utf-8",
+    )
+    large_instruction = " ".join(f"token{i}" for i in range(4001))
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\n"
+        "See [runbook](docs/runbook.md).\n"
+        f"{large_instruction}\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 1
+
+    output = capsys.readouterr().out
+    assert "ci: failed" in output
+    assert "harness report failed" in output
+    assert (
+        "AGENTS.md estimated at 4016 tokens exceeds instruction file budget 4000."
+        in output
+    )
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["harness"]["passed"] is True
+    assert report["checks"]["harness_report"] == {
+        "passed": False,
+        "missing_docs": [],
+        "stale_docs": [],
+        "orphaned_runbooks": [],
+        "recurring_failures_without_docs": [],
+        "doc_gardening_tasks": [],
+        "token_budget_violations": [
+            "AGENTS.md estimated at 4016 tokens exceeds instruction file budget 4000."
+        ],
+    }
+
+
+def test_ci_check_reports_nonblocking_context_token_budget_warnings(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path
+    docs = repo / "docs"
+    docs.mkdir()
+    large_runbook = " ".join(f"token{i}" for i in range(12001))
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: current\n---\n"
+        "# Runbook\n\n"
+        f"{large_runbook}\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+
+    assert main(["ci", "--repo", str(repo)]) == 0
+
+    output = capsys.readouterr().out
+    assert "ci: ok" in output
+    report = json.loads((sidecar_dir(repo) / "ci" / "ci-report.json").read_text(encoding="utf-8"))
+    assert report["checks"]["harness_report"]["passed"] is True
+    assert report["checks"]["harness_report"]["token_budget_violations"] == [
+        "active context estimated at 12030 tokens exceeds active context budget 12000.",
+        "retrieval pack estimated at 12030 tokens exceeds retrieval pack budget 12000.",
+    ]
 
 
 def test_ci_check_returns_nonzero_for_semantic_policy_lint_findings(tmp_path: Path, capsys):

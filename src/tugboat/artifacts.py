@@ -2040,7 +2040,13 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "checks": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["index", "harness", "manifest_contracts", "semantic_policy_lint"],
+                "required": [
+                    "index",
+                    "harness",
+                    "harness_report",
+                    "manifest_contracts",
+                    "semantic_policy_lint",
+                ],
                 "properties": {
                     "index": {
                         "type": "object",
@@ -2082,6 +2088,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                             "orphaned_runbooks",
                             "recurring_failures_without_docs",
                             "doc_gardening_tasks",
+                            "token_budget_violations",
                         ],
                         "properties": {
                             "passed": {"type": "boolean"},
@@ -2096,6 +2103,10 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                                 "items": {"type": "string"},
                             },
                             "doc_gardening_tasks": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "token_budget_violations": {
                                 "type": "array",
                                 "items": {"type": "string"},
                             },

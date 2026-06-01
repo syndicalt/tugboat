@@ -36,6 +36,34 @@ class HarnessReport:
     token_metrics: dict[str, object]
 
 
+def token_budget_violations(report: HarnessReport) -> list[str]:
+    violations = report.token_metrics.get("token_budget_violations", [])
+    if not isinstance(violations, list):
+        return ["token budget violations are malformed."]
+    return [str(violation) for violation in violations]
+
+
+def blocking_token_budget_violations(report: HarnessReport) -> list[str]:
+    return [
+        violation
+        for violation in token_budget_violations(report)
+        if not (
+            violation.startswith("active context estimated at ")
+            or violation.startswith("retrieval pack estimated at ")
+        )
+    ]
+
+
+def harness_report_passed(report: HarnessReport) -> bool:
+    return not (
+        report.missing_docs
+        or report.stale_docs
+        or report.orphaned_runbooks
+        or report.recurring_failures_without_docs
+        or blocking_token_budget_violations(report)
+    )
+
+
 @dataclass(frozen=True)
 class CleanupCandidate:
     candidate_id: str

@@ -64,6 +64,8 @@ from tugboat.harness.checks import (
     check_harness_legibility,
     generate_cleanup_candidates,
     generate_harness_report,
+    harness_report_passed,
+    token_budget_violations,
 )
 from tugboat.llmff.contracts import LlmffRunFailed
 from tugboat.llmff.runner import MissingOutputError, command_prefix, inspect_manifest, run_manifest
@@ -966,6 +968,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("harness report failed")
             for finding in harness_report["doc_gardening_tasks"]:
                 print(finding)
+            for violation in harness_report["token_budget_violations"]:
+                print(violation)
         if eval_check is not None and not eval_check["passed"]:
             print(f"eval suite {eval_check['suite_id']} failed")
         print(f"report: {report_path}")
@@ -2353,17 +2357,13 @@ def _write_ci_report(
 
 def _ci_harness_report_check_payload(report) -> dict[str, Any]:
     return {
-        "passed": not (
-            report.missing_docs
-            or report.stale_docs
-            or report.orphaned_runbooks
-            or report.recurring_failures_without_docs
-        ),
+        "passed": harness_report_passed(report),
         "missing_docs": list(report.missing_docs),
         "stale_docs": list(report.stale_docs),
         "orphaned_runbooks": list(report.orphaned_runbooks),
         "recurring_failures_without_docs": list(report.recurring_failures_without_docs),
         "doc_gardening_tasks": list(report.doc_gardening_tasks),
+        "token_budget_violations": token_budget_violations(report),
     }
 
 

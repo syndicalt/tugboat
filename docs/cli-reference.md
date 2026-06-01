@@ -149,7 +149,7 @@ tugboat ci --repo .
 python -m pytest --cov=src --cov-report=term-missing -q
 ```
 
-`harness report` writes `.sidecar/harness-report.json` with knowledge-map, doc-gardening, recurring-failure, and estimated token-efficiency metrics for the instruction corpus and active context. Token metrics include deterministic instruction-file, active-context, and retrieval-pack budgets plus violation messages for large instruction corpora. `harness cleanup` writes review-only cleanup candidates and is blocked by `.sidecar/read-only.kill`. `ci` writes `.sidecar/ci/ci-report.json` and checks manifest contracts, semantic policy lint, harness health, and optional eval evidence.
+`harness report` writes `.sidecar/harness-report.json` with knowledge-map, doc-gardening, recurring-failure, and estimated token-efficiency metrics for the instruction corpus and active context. Token metrics include deterministic instruction-file, active-context, and retrieval-pack budgets plus violation messages for large instruction corpora. `harness cleanup` writes review-only cleanup candidates and is blocked by `.sidecar/read-only.kill`. `ci` writes `.sidecar/ci/ci-report.json` and checks manifest contracts, semantic policy lint, harness health, blocking token-budget violations, and optional eval evidence.
 
 ## MCP And Daemon
 

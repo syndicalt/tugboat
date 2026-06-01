@@ -21,7 +21,13 @@ from tugboat.corpus.indexer import (
 from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
-from tugboat.harness.checks import check_harness_legibility, generate_harness_report
+from tugboat.harness.checks import (
+    check_harness_legibility,
+    blocking_token_budget_violations,
+    generate_harness_report,
+    harness_report_passed,
+    token_budget_violations,
+)
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.migrations import assert_supported_sidecar_marker
 from tugboat.ops.retention import RetentionScanBudgetExceeded, apply_retention_policy
@@ -446,14 +452,10 @@ def tugboat_harness_health(repo: str | Path) -> dict[str, Any]:
 
     def read() -> dict[str, Any]:
         report = generate_harness_report(repo_path)
-        passed = not (
-            report.missing_docs
-            or report.stale_docs
-            or report.orphaned_runbooks
-            or report.recurring_failures_without_docs
-        )
+        violations = token_budget_violations(report)
+        blocking_violations = blocking_token_budget_violations(report)
         return {
-            "passed": passed,
+            "passed": harness_report_passed(report),
             "summary": {
                 "missing_doc_count": len(report.missing_docs),
                 "stale_doc_count": len(report.stale_docs),
@@ -462,6 +464,8 @@ def tugboat_harness_health(repo: str | Path) -> dict[str, Any]:
                     report.recurring_failures_without_docs
                 ),
                 "doc_gardening_task_count": len(report.doc_gardening_tasks),
+                "token_budget_violation_count": len(violations),
+                "blocking_token_budget_violation_count": len(blocking_violations),
             },
             "knowledge_map": redact_payload(report.knowledge_map),
             "missing_docs": _sanitize_harness_items(report.missing_docs),
