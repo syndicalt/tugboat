@@ -209,7 +209,13 @@ if args[:1] == ["run"]:
             "decision_recommendation": "needs_review",
             "reasons": ["held-out score improved"],
             "evidence": ["eval-report.json: held_out_score improved"],
-            "reviewer_checklist": ["Review candidate diff", "Run rollback if rejected"],
+            "reviewer_checklist": [
+                "Review candidate diff and proposal rationale against trace evidence.",
+                "Confirm risk classification matches the bounded edit.",
+                "Verify source evidence supports the recommendation.",
+                "Confirm expected behavior change is narrow and intentional.",
+                "Confirm rollback command before applying.",
+            ],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         }) + "\\n", encoding="utf-8")
     raise SystemExit(0)

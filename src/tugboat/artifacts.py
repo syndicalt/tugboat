@@ -2898,6 +2898,8 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
         _validate_schema_value(name, field, field_schema, value)
     if name == "drift.raw.json":
         _validate_drift_raw_artifact(payload)
+    if name == "acceptance-summary.raw.json":
+        _validate_acceptance_summary_raw_artifact(payload)
     if name == "optimization-summary.json" and payload.get("decision") == "needs_review":
         for field in (
             "acceptance_decision_recommendation",
@@ -2938,6 +2940,44 @@ def _validate_drift_raw_artifact(payload: dict[str, Any]) -> None:
         if cluster_id in seen_cluster_ids:
             raise ArtifactValidationError(f"drift.raw.json duplicate cluster_id: {cluster_id}")
         seen_cluster_ids.add(cluster_id)
+
+
+_ACCEPTANCE_REVIEW_CHECKLIST_REQUIREMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("candidate diff", ("candidate diff", "bounded edit")),
+    ("rationale", ("rationale",)),
+    ("risk", ("risk",)),
+    ("source evidence", ("source evidence", "evidence")),
+    ("expected behavior change", ("expected behavior change", "behavior change")),
+    ("rollback", ("rollback",)),
+)
+
+
+def _validate_acceptance_summary_raw_artifact(payload: dict[str, Any]) -> None:
+    if payload.get("decision_recommendation") != "needs_review":
+        return
+    checklist = payload.get("reviewer_checklist")
+    if not isinstance(checklist, list):
+        return
+    for index, item in enumerate(checklist):
+        if isinstance(item, str) and not item.strip():
+            raise ArtifactValidationError(
+                "acceptance-summary.raw.json reviewer_checklist "
+                f"has blank item at index {index}"
+            )
+    normalized_items = [
+        " ".join(item.casefold().split())
+        for item in checklist
+        if isinstance(item, str) and item.strip()
+    ]
+    for requirement, accepted_phrases in _ACCEPTANCE_REVIEW_CHECKLIST_REQUIREMENTS:
+        if not any(
+            any(phrase in item for phrase in accepted_phrases)
+            for item in normalized_items
+        ):
+            raise ArtifactValidationError(
+                "acceptance-summary.raw.json reviewer_checklist "
+                f"missing {requirement} review item"
+            )
 
 
 def validate_report_markdown(text: str) -> None:

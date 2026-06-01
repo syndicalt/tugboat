@@ -197,7 +197,13 @@ def _run_manifest(args: argparse.Namespace) -> int:
                 "decision_recommendation": "needs_review",
                 "reasons": ["policy gate and eval report passed"],
                 "evidence": ["audit:1"],
-                "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+                "reviewer_checklist": [
+                    "Review candidate diff and proposal rationale against trace evidence.",
+                    "Confirm risk classification matches the bounded edit.",
+                    "Verify source evidence supports the recommendation.",
+                    "Confirm expected behavior change is narrow and intentional.",
+                    "Confirm rollback command before applying.",
+                ],
                 "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
             },
         )

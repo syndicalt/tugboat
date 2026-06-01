@@ -418,7 +418,13 @@ if args[:1] == ["run"]:
             "decision_recommendation": "needs_review",
             "reasons": ["policy gate and eval report passed"],
             "evidence": ["audit:1"],
-            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+            "reviewer_checklist": [
+                "Review candidate diff and proposal rationale against trace evidence.",
+                "Confirm risk classification matches the bounded edit.",
+                "Verify source evidence supports the recommendation.",
+                "Confirm expected behavior change is narrow and intentional.",
+                "Confirm rollback command before applying.",
+            ],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         }) + "\\n", encoding="utf-8")
     raise SystemExit(0)
@@ -592,7 +598,12 @@ llmff:
     ):
         assert artifact_ref in report
     assert "- acceptance_reason: policy gate and eval report passed" in report
-    assert "- reviewer_checklist: Review candidate diff; Confirm rollback command" in report
+    assert (
+        "- reviewer_checklist: Review candidate diff and proposal rationale against trace evidence.; "
+        "Confirm risk classification matches the bounded edit.; Verify source evidence supports "
+        "the recommendation.; Confirm expected behavior change is narrow and intentional.; "
+        "Confirm rollback command before applying."
+    ) in report
     assert "- rollback_command: tugboat rollback --decision latest" in report
     assert json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8")) == {
         "schema_version": 1,

@@ -1076,7 +1076,13 @@ def test_validate_optimization_summary_artifact_accepts_current_schema():
                     "section": "Testing",
                 }
             ],
-            "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+            "reviewer_checklist": [
+                "Review candidate diff and proposal rationale against trace evidence.",
+                "Confirm risk classification matches the bounded edit.",
+                "Verify source evidence supports the recommendation.",
+                "Confirm expected behavior change is narrow and intentional.",
+                "Confirm rollback command before applying.",
+            ],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         },
     )
@@ -2185,7 +2191,13 @@ def test_validate_acceptance_summary_raw_artifact_requires_review_bundle():
             "decision_recommendation": "needs_review",
             "reasons": ["policy gate and eval report passed"],
             "evidence": ["audit:1"],
-            "reviewer_checklist": ["Review candidate diff"],
+            "reviewer_checklist": [
+                "Review candidate diff and proposal rationale against trace evidence.",
+                "Confirm risk classification matches the bounded edit.",
+                "Verify source evidence supports the recommendation.",
+                "Confirm expected behavior change is narrow and intentional.",
+                "Confirm rollback command before applying.",
+            ],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         },
     )
@@ -2201,6 +2213,46 @@ def test_validate_acceptance_summary_raw_artifact_requires_review_bundle():
         )
 
 
+def test_validate_acceptance_summary_raw_artifact_requires_complete_review_checklist():
+    with pytest.raises(ArtifactValidationError, match="expected behavior change"):
+        validate_json_artifact(
+            "acceptance-summary.raw.json",
+            {
+                "decision_recommendation": "needs_review",
+                "reasons": ["policy gate and eval report passed"],
+                "evidence": ["audit:1"],
+                "reviewer_checklist": [
+                    "Review candidate diff and proposal rationale against trace evidence.",
+                    "Confirm risk classification matches the bounded edit.",
+                    "Verify source evidence supports the recommendation.",
+                    "Confirm rollback command before applying.",
+                ],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+            },
+        )
+
+
+def test_validate_acceptance_summary_raw_artifact_rejects_blank_review_checklist_items():
+    with pytest.raises(ArtifactValidationError, match="blank item"):
+        validate_json_artifact(
+            "acceptance-summary.raw.json",
+            {
+                "decision_recommendation": "needs_review",
+                "reasons": ["policy gate and eval report passed"],
+                "evidence": ["audit:1"],
+                "reviewer_checklist": [
+                    "Review candidate diff and proposal rationale against trace evidence.",
+                    "Confirm risk classification matches the bounded edit.",
+                    "Verify source evidence supports the recommendation.",
+                    "Confirm expected behavior change is narrow and intentional.",
+                    "Confirm rollback command before applying.",
+                    "   ",
+                ],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+            },
+        )
+
+
 def test_validate_acceptance_summary_raw_artifact_rejects_empty_review_fields():
     with pytest.raises(ArtifactValidationError, match="evidence"):
         validate_json_artifact(
@@ -2209,7 +2261,13 @@ def test_validate_acceptance_summary_raw_artifact_rejects_empty_review_fields():
                 "decision_recommendation": "needs_review",
                 "reasons": ["policy gate and eval report passed"],
                 "evidence": [],
-                "reviewer_checklist": ["Review candidate diff"],
+                "reviewer_checklist": [
+                    "Review candidate diff and proposal rationale against trace evidence.",
+                    "Confirm risk classification matches the bounded edit.",
+                    "Verify source evidence supports the recommendation.",
+                    "Confirm expected behavior change is narrow and intentional.",
+                    "Confirm rollback command before applying.",
+                ],
                 "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
             },
         )

@@ -498,7 +498,13 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
                         "section": "Testing",
                     }
                 ],
-                "reviewer_checklist": ["Review candidate diff", "Confirm rollback command"],
+                "reviewer_checklist": [
+                    "Review candidate diff and proposal rationale against trace evidence.",
+                    "Confirm risk classification matches the bounded edit.",
+                    "Verify source evidence supports the recommendation.",
+                    "Confirm expected behavior change is narrow and intentional.",
+                    "Confirm rollback command before applying.",
+                ],
                 "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
             }
         )
@@ -569,7 +575,7 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- optimization_governance_passed: true",
             "- optimization_recommendation: accept",
             "- acceptance_reason: policy gate and eval report passed",
-            "- reviewer_checklist: Review candidate diff; Confirm rollback command",
+            "- reviewer_checklist: Review candidate diff and proposal rationale against trace evidence.; Confirm risk classification matches the bounded edit.; Verify source evidence supports the recommendation.; Confirm expected behavior change is narrow and intentional.; Confirm rollback command before applying.",
             "- rollback_command: tugboat rollback --decision latest",
             "",
             "## Rationale",
