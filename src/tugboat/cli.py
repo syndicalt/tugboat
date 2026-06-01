@@ -392,31 +392,52 @@ def _apply_blocked_artifact_ref(repo: Path, run_dir: Path, artifact_name: str) -
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
     subcommands = parser.add_subparsers(dest="command", required=True)
-    doctor = subcommands.add_parser("doctor")
+    doctor = subcommands.add_parser(
+        "doctor",
+        help="inspect local installation and repo policy posture",
+    )
     doctor.add_argument("--repo", default=".")
 
-    init = subcommands.add_parser("init")
+    init = subcommands.add_parser(
+        "init",
+        help="bootstrap proposal-only sidecar policy",
+    )
     init.add_argument("--repo", default=".")
 
-    status = subcommands.add_parser("status")
+    status = subcommands.add_parser(
+        "status",
+        help="write sidecar status report and print latest state",
+    )
     status.add_argument("--repo", required=True)
 
-    retention = subcommands.add_parser("retention")
+    retention = subcommands.add_parser(
+        "retention",
+        help="inspect or apply local artifact retention policy",
+    )
     retention.add_argument("--repo", required=True)
     retention.add_argument("--apply", action="store_true")
     retention.add_argument("--redact-output")
 
-    ci = subcommands.add_parser("ci")
+    ci = subcommands.add_parser(
+        "ci",
+        help="run CI readiness checks for manifests and harness health",
+    )
     ci.add_argument("--repo", required=True)
     ci.add_argument("--max-instruction-lines", type=int, default=100)
     ci.add_argument("--candidate")
     ci.add_argument("--suite", default="all")
 
-    index = subcommands.add_parser("index")
+    index = subcommands.add_parser(
+        "index",
+        help="parse instruction files and optionally dry-run with --check",
+    )
     index.add_argument("--repo", required=True)
     index.add_argument("--check", action="store_true")
 
-    audit = subcommands.add_parser("audit")
+    audit = subcommands.add_parser(
+        "audit",
+        help="ingest a trace and write audit evidence",
+    )
     audit.add_argument("--repo", required=True)
     audit.add_argument("--trace", required=True)
     audit.add_argument(
@@ -426,16 +447,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument("--mock-llmff-inspect", action="store_true")
 
-    propose = subcommands.add_parser("propose")
+    propose = subcommands.add_parser(
+        "propose",
+        help="generate a bounded candidate from audit evidence",
+    )
     propose.add_argument("--repo", required=True)
     propose.add_argument("--audit", required=True)
 
-    evaluate = subcommands.add_parser("eval")
+    evaluate = subcommands.add_parser(
+        "eval",
+        help="evaluate a candidate against a named suite",
+    )
     evaluate.add_argument("--repo", required=True)
     evaluate.add_argument("--candidate", required=True)
     evaluate.add_argument("--suite", required=True)
 
-    optimize = subcommands.add_parser("optimize")
+    optimize = subcommands.add_parser(
+        "optimize",
+        help="run audit, propose, eval, and acceptance summary",
+    )
     optimize.add_argument("--repo", required=True)
     optimize.add_argument("--trace", required=True)
     optimize.add_argument("--train-trace", action="append", default=[])
@@ -483,7 +513,10 @@ def build_parser() -> argparse.ArgumentParser:
     auto_apply.add_argument("--preflight", action="store_true")
     auto_apply.add_argument("--shadow", action="store_true")
 
-    review = subcommands.add_parser("review")
+    review = subcommands.add_parser(
+        "review",
+        help="record reviewer decisions and rejected-edit memory",
+    )
     review_subcommands = review.add_subparsers(dest="review_command", required=True)
     review_reject = review_subcommands.add_parser("reject")
     review_reject.add_argument("--repo", required=True)
@@ -507,7 +540,10 @@ def build_parser() -> argparse.ArgumentParser:
     rollback.add_argument("--decision", required=True)
     rollback.add_argument("--execute", action="store_true")
 
-    mcp = subcommands.add_parser("mcp")
+    mcp = subcommands.add_parser(
+        "mcp",
+        help="serve read-first MCP tools for a bounded repo",
+    )
     mcp_subcommands = mcp.add_subparsers(dest="mcp_command", required=True)
     mcp_stdio = mcp_subcommands.add_parser("stdio")
     mcp_stdio.add_argument("--repo")
@@ -556,16 +592,25 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_profile.add_argument("--app-boot-json", required=True)
     daemon_profile.add_argument("--observability-ref", action="append", default=[])
 
-    report = subcommands.add_parser("report")
+    report = subcommands.add_parser(
+        "report",
+        help="write an operator report for a run",
+    )
     report.add_argument("--repo", required=True)
     report.add_argument("--run", required=True)
 
-    inspect_decision = subcommands.add_parser("inspect-decision")
+    inspect_decision = subcommands.add_parser(
+        "inspect-decision",
+        help="write decision trace and print bounded review metadata",
+    )
     inspect_decision.add_argument("--repo", required=True)
     inspect_decision.add_argument("--decision", required=True)
     inspect_decision.add_argument("--compare")
 
-    harness = subcommands.add_parser("harness")
+    harness = subcommands.add_parser(
+        "harness",
+        help="check instruction harness health and cleanup candidates",
+    )
     harness_subcommands = harness.add_subparsers(dest="harness_command", required=True)
     harness_check = harness_subcommands.add_parser("check")
     harness_check.add_argument("--repo", required=True)
@@ -598,7 +643,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ops_migrate.add_argument("--repo", required=True)
     ops_migrate.add_argument("--apply", action="store_true")
-    ops_observability = ops_subcommands.add_parser("observability")
+    ops_observability = ops_subcommands.add_parser(
+        "observability",
+        description=(
+            "write local operations observability artifacts. The summary JSON remains "
+            "the review source of truth. --metrics-output writes Prometheus text "
+            "metrics. --event-log-output writes JSONL operational events without raw "
+            "trace payloads."
+        ),
+        help="write local operations observability artifacts",
+    )
     ops_observability.add_argument("--repo", required=True)
     ops_observability.add_argument("--output")
     ops_observability.add_argument("--metrics-output")
@@ -654,6 +708,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "status":
         repo = Path(args.repo)
+        if _policy_preflight_blocked("status", repo):
+            return 1
         policy = load_policy(repo)
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             latest = store.connection.execute(
@@ -734,6 +790,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "retention":
         repo = Path(args.repo)
+        if _policy_preflight_blocked("retention", repo):
+            return 1
         policy = load_policy(repo)
         redaction_export = None
         if args.redact_output is not None:

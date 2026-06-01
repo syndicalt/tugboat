@@ -63,3 +63,23 @@ def test_ops_subcommand_help_explains_dry_run_boundaries(capsys):
     assert "plans backup unless --execute is supplied" in backup
     assert "dry-run migration unless --apply is supplied" in migrate
     assert "plans restore unless --execute is supplied" in restore
+
+
+def test_top_level_help_lists_core_workflow_command_summaries(capsys):
+    output = _normalized(_help_for(capsys=capsys))
+
+    assert "doctor inspect local installation and repo policy posture" in output
+    assert "index parse instruction files and optionally dry-run with --check" in output
+    assert "optimize run audit, propose, eval, and acceptance summary" in output
+    assert "inspect-decision write decision trace and print bounded review metadata" in output
+
+
+def test_ops_observability_help_explains_local_outputs(capsys):
+    output = _normalized(_help_for("ops", "observability", capsys=capsys))
+
+    assert "write local operations observability artifacts" in output
+    assert "summary JSON remains the review source of truth" in output
+    assert "--metrics-output" in output
+    assert "Prometheus text metrics" in output
+    assert "--event-log-output" in output
+    assert "JSONL operational events without raw trace payloads" in output

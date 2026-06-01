@@ -45,6 +45,19 @@ def test_status_reports_empty_sidecar_state(tmp_path: Path, capsys):
     }
 
 
+def test_status_reports_invalid_policy_without_traceback(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    assert main(["status", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "status blocked: policy invalid:" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "status-report.json").exists()
+
+
 def test_status_reports_indexed_documents_and_latest_run(tmp_path: Path, capsys):
     (tmp_path / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     trace = tmp_path / "trace.jsonl"

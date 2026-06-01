@@ -49,6 +49,19 @@ def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_
     assert (run_dir / "audit.json").exists()
 
 
+def test_retention_reports_invalid_policy_without_traceback(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    assert main(["retention", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "retention blocked: policy invalid:" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "ops" / "retention" / "retention-report.json").exists()
+
+
 def test_retention_policy_dry_run_reports_secret_bearing_runtime_artifacts(
     tmp_path: Path,
 ):
