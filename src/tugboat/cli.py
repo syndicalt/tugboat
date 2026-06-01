@@ -1815,11 +1815,13 @@ def _write_release_artifact_manifest(
     current_head = _current_git_head(resolved_repo)
     if commit != current_head:
         raise ValueError(f"commit does not match current HEAD: {current_head}")
+    package_metadata = _project_package_metadata(resolved_repo)
+    _validate_release_wheel_matches_package(resolved_wheel.name, package_metadata)
 
     payload = {
         "schema_version": SCHEMA_VERSION,
         "artifact_kind": "release_artifact_manifest",
-        "package": _project_package_metadata(resolved_repo),
+        "package": package_metadata,
         "commit": commit,
         "ci_url": ci_url,
         "approver": approver,
@@ -2134,6 +2136,28 @@ def _project_package_metadata(repo: Path) -> dict[str, str]:
     if not isinstance(version, str) or not version:
         raise ValueError("pyproject.toml missing project.version")
     return {"name": name, "version": version}
+
+
+def _validate_release_wheel_matches_package(
+    wheel_filename: str,
+    package_metadata: dict[str, str],
+) -> None:
+    wheel_name, wheel_version = _wheel_filename_package_identity(wheel_filename)
+    project_name = package_metadata["name"].replace("_", "-").lower()
+    project_version = package_metadata["version"]
+    if wheel_name != project_name:
+        raise ValueError(f"wheel package does not match project.name: {package_metadata['name']}")
+    if wheel_version != project_version:
+        raise ValueError(f"wheel version does not match project.version: {project_version}")
+
+
+def _wheel_filename_package_identity(wheel_filename: str) -> tuple[str, str]:
+    if not wheel_filename.endswith(".whl"):
+        raise ValueError("wheel filename must end with .whl")
+    parts = wheel_filename[:-4].split("-")
+    if len(parts) < 5:
+        raise ValueError("wheel filename is malformed")
+    return parts[0].replace("_", "-").lower(), parts[1]
 
 
 def _write_retention_report(

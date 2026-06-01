@@ -23,5 +23,7 @@ def test_changelog_and_release_notes_are_published_for_v1() -> None:
 
     assert "Draft release notes live in" not in changelog
     assert "Planned v1 highlights" not in changelog
+    assert "before publication" not in changelog
+    assert "verification_status: verified" in release_notes
     assert "# Tugboat 1.0.0 Release Notes" in release_notes
     assert "planned stable release" not in release_notes

@@ -98,6 +98,19 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
     return evidence
 
 
+def _rewrite_release_evidence_wheel_filename(
+    evidence: dict[str, Path],
+    *,
+    from_filename: str,
+    to_filename: str,
+) -> None:
+    for evidence_path in (evidence["build"], evidence["twine"], evidence["install"]):
+        evidence_path.write_text(
+            evidence_path.read_text(encoding="utf-8").replace(from_filename, to_filename),
+            encoding="utf-8",
+        )
+
+
 def _passing_ci_report() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -419,6 +432,115 @@ def test_ops_release_manifest_accepts_real_installed_index_smoke_output(
     output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
     assert f"release manifest: {output_path}" in capsys.readouterr().out
     assert output_path.exists()
+
+
+def test_ops_release_manifest_blocks_wheel_version_that_differs_from_project_metadata(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"1.0.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: wheel version does not match project.version: 1.0.0"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_wheel_package_that_differs_from_project_metadata(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "other-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    _rewrite_release_evidence_wheel_filename(
+        evidence,
+        from_filename="tugboat-0.1.0-py3-none-any.whl",
+        to_filename=wheel.name,
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: wheel package does not match project.name: tugboat"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_malformed_wheel_filename(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    _rewrite_release_evidence_wheel_filename(
+        evidence,
+        from_filename="tugboat-0.1.0-py3-none-any.whl",
+        to_filename=wheel.name,
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: wheel filename is malformed" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 
 def test_ops_release_manifest_rejects_index_success_from_unrelated_smoke_step(

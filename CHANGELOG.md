@@ -18,7 +18,7 @@ Highlights:
 - The read-only kill switch covers write paths including apply, auto-apply, retention deletion, migration apply, restore execution, and harness cleanup.
 - Migration guide and compatibility policy for v1 adoption.
 - The migration guide and compatibility policy are release-blocking v1 docs.
-- Release notes keep known limitations documented before publication.
+- Release notes keep known limitations documented for operators.
 
 ## 0.1.0
 
