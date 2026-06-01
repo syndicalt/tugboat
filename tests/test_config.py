@@ -67,6 +67,31 @@ llmff:
     assert policy.llmff_binary == DEFAULT_FIXTURE_LLMFF_BINARY
 
 
+def test_load_policy_yaml_rejects_non_mapping_payload(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text("- nope\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=".sidecar/policy.yaml must contain a mapping"):
+        load_policy(tmp_path)
+
+
+@pytest.mark.parametrize("version", ("true", "0"))
+def test_load_policy_yaml_rejects_invalid_policy_version(
+    tmp_path: Path,
+    version: str,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(f"version: {version}\n", encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match=".sidecar/policy.yaml version must be a positive integer",
+    ):
+        load_policy(tmp_path)
+
+
 def test_load_policy_yaml_overrides_instruction_files(tmp_path: Path):
     policy_dir = tmp_path / ".sidecar"
     policy_dir.mkdir()

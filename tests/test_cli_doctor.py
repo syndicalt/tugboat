@@ -150,6 +150,23 @@ def test_doctor_blocks_malformed_policy_without_traceback(tmp_path, capsys):
     assert "Traceback" not in captured.out
 
 
+def test_doctor_blocks_non_mapping_policy_without_traceback(tmp_path, capsys):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text("- nope\n", encoding="utf-8")
+
+    exit_code = main(["doctor", "--repo", str(tmp_path)])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert (
+        "doctor blocked: policy invalid: .sidecar/policy.yaml must contain a mapping"
+        in captured.out
+    )
+    assert "Traceback" not in captured.out
+
+
 def test_doctor_blocks_invalid_policy_values_with_actionable_path(tmp_path, capsys):
     policy_dir = tmp_path / ".sidecar"
     policy_dir.mkdir()

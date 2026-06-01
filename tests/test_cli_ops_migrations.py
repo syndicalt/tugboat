@@ -101,3 +101,75 @@ def test_ops_migrate_blocks_newer_sidecar_schema_without_traceback(
     assert "migration blocked: sidecar schema version 999 is newer than supported" in output
     assert "Traceback" not in output
     assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_ops_migrate_blocks_malformed_version_marker_without_traceback(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text('{"version": 3}\n', encoding="utf-8")
+
+    assert main(["ops", "migrate", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "migration blocked: .sidecar/version.json missing schema_version" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
+    assert json.loads((sidecar / "version.json").read_text(encoding="utf-8")) == {
+        "version": 3,
+    }
+
+
+def test_ops_migrate_blocks_malformed_policy_yaml_without_traceback(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    assert main(["ops", "migrate", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "migration blocked: .sidecar/policy.yaml invalid YAML" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "version.json").exists()
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_ops_migrate_blocks_non_mapping_policy_yaml_without_traceback(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("- nope\n", encoding="utf-8")
+
+    assert main(["ops", "migrate", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "migration blocked: .sidecar/policy.yaml must contain a mapping" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "version.json").exists()
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_ops_migrate_rejects_zero_version_marker_without_traceback(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text('{"schema_version": 0}\n', encoding="utf-8")
+
+    assert main(["ops", "migrate", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert (
+        "migration blocked: .sidecar/version.json schema_version must be a positive integer"
+        in output
+    )
+    assert "Traceback" not in output
+    assert not (sidecar / "migrations" / "migration-report.json").exists()

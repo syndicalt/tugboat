@@ -54,6 +54,20 @@ def _as_positive_int(raw: Any, field_name: str) -> int:
     return value
 
 
+def as_positive_version(raw: Any, field_name: str) -> int:
+    if isinstance(raw, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, str) and raw.isdecimal():
+        value = int(raw)
+    else:
+        raise ValueError(f"{field_name} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return value
+
+
 def _as_operator_risk_limits(raw: Any) -> dict[str, int]:
     if raw is None:
         return {}
@@ -174,6 +188,8 @@ def load_policy(repo: Path) -> Policy:
         return Policy(instruction_files=DEFAULT_INSTRUCTION_FILES)
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(".sidecar/policy.yaml must contain a mapping")
     auto_apply = raw.get("auto_apply", {}) or {}
     llmff = raw.get("llmff", {}) or {}
     mcp = raw.get("mcp", {}) or {}
@@ -192,7 +208,7 @@ def load_policy(repo: Path) -> Policy:
     )
 
     return Policy(
-        version=int(raw.get("version", 1)),
+        version=as_positive_version(raw.get("version", 1), ".sidecar/policy.yaml version"),
         mode=str(raw.get("mode", "proposal_only")),
         instruction_files=entries or DEFAULT_INSTRUCTION_FILES,
         auto_apply_enabled=bool(auto_apply.get("enabled", False)),

@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.config import as_positive_version
 
 
 @dataclass(frozen=True)
@@ -75,17 +76,32 @@ def current_sidecar_version(repo: Path) -> int:
     version_json = sidecar / "version.json"
     if version_json.exists():
         payload = json.loads(version_json.read_text(encoding="utf-8"))
-        return int(payload["schema_version"])
+        if not isinstance(payload, dict):
+            raise ValueError(".sidecar/version.json must contain a JSON object")
+        if "schema_version" not in payload:
+            raise ValueError(".sidecar/version.json missing schema_version")
+        return as_positive_version(
+            payload["schema_version"],
+            ".sidecar/version.json schema_version",
+        )
 
     version_text = sidecar / "VERSION"
     if version_text.exists():
-        return int(version_text.read_text(encoding="utf-8").strip())
+        return as_positive_version(
+            version_text.read_text(encoding="utf-8").strip(),
+            ".sidecar/VERSION",
+        )
 
     policy_yaml = sidecar / "policy.yaml"
     if policy_yaml.exists():
-        payload = yaml.safe_load(policy_yaml.read_text(encoding="utf-8")) or {}
-        if isinstance(payload, dict) and "version" in payload:
-            return int(payload["version"])
+        try:
+            payload = yaml.safe_load(policy_yaml.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as error:
+            raise ValueError(f".sidecar/policy.yaml invalid YAML: {error}") from error
+        if not isinstance(payload, dict):
+            raise ValueError(".sidecar/policy.yaml must contain a mapping")
+        if "version" in payload:
+            return as_positive_version(payload["version"], ".sidecar/policy.yaml version")
 
     return 1
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,33 @@ def test_dry_run_migration_plan_blocks_newer_sidecar_schema(
         dry_run_migration_plan(tmp_path)
 
     assert json.loads(marker.read_text(encoding="utf-8")) == {"schema_version": 999}
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"version": 3}, ".sidecar/version.json missing schema_version"),
+        (
+            {"schema_version": "current"},
+            ".sidecar/version.json schema_version must be a positive integer",
+        ),
+        (["schema_version", 3], ".sidecar/version.json must contain a JSON object"),
+    ],
+)
+def test_current_sidecar_version_rejects_malformed_version_json_cleanly(
+    tmp_path: Path,
+    payload: object,
+    message: str,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    marker = sidecar / "version.json"
+    marker.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        current_sidecar_version(tmp_path)
+
+    assert marker.read_text(encoding="utf-8") == json.dumps(payload)
 
 
 def test_execute_migration_plan_updates_older_policy_yaml_to_current_version(
