@@ -79,6 +79,8 @@ _PATH_SUFFIXES = (
     ".sh",
 )
 _INSTRUCTION_FILENAMES = ("CODEX.md", "AGENTS.md", "CLAUDE.md", "SKILL.md")
+_MAX_SKILL_REWRITE_TOKEN_GROWTH_RATIO = 3.0
+_MAX_SKILL_REWRITE_TOKEN_GROWTH_ABSOLUTE = 200
 _REQUIRED_PHASE_4_FIXTURE_METRICS = (
     "incident_replay_cases",
     "held_out_cases",
@@ -329,6 +331,7 @@ def _skill_rewrite_eval(
         "skill_ambiguity_failures": 0,
         "skill_overfit_failures": 0,
         "skill_token_footprint_cases": 0,
+        "skill_token_footprint_failures": 0,
         "skill_required_section_failures": 0,
         "skill_forbidden_section_failures": 0,
         "skill_safety_weakening_failures": 0,
@@ -358,6 +361,8 @@ def _skill_rewrite_eval(
                 metrics["skill_ambiguity_failures"] += 1
             if report_metrics.get("overfit_risk_score") == 0.0:
                 metrics["skill_overfit_failures"] += 1
+            if report_metrics.get("token_footprint_score") == 0.0:
+                metrics["skill_token_footprint_failures"] += 1
             if report_metrics.get("required_sections_passed") == 0:
                 metrics["skill_required_section_failures"] += 1
             if int(report_metrics.get("forbidden_sections_found", 0)) > 0:
@@ -463,6 +468,16 @@ def evaluate_skill_rewrite_pair(
 
     before_tokens = _estimated_tokens(before)
     after_tokens = _estimated_tokens(after)
+    token_growth_limit = _skill_token_growth_limit(before_tokens)
+    token_footprint_exceeded = after_tokens > token_growth_limit
+    if token_footprint_exceeded:
+        findings.append(
+            _skill_finding(
+                "skill.token_footprint.exceeded",
+                "Skill rewrite exceeds the bounded token-growth limit for reviewable changes.",
+                path,
+            )
+        )
     passed = not findings
     return {
         "schema_version": 1,
@@ -482,12 +497,14 @@ def evaluate_skill_rewrite_pair(
             "overfit_risk_score": 0.0
             if any(finding["code"] == "skill.overfit.trace_specific" for finding in findings)
             else 1.0,
+            "token_footprint_score": 0.0 if token_footprint_exceeded else 1.0,
             "safety_preservation_score": 0.0 if safety_weakening else 1.0,
             "required_sections_passed": 0 if missing_required_sections else 1,
             "forbidden_sections_found": len(forbidden_sections),
             "skill_tokens_before": before_tokens,
             "skill_tokens_after": after_tokens,
             "skill_token_delta": after_tokens - before_tokens,
+            "skill_token_growth_limit": token_growth_limit,
         },
         "required_sections": ["frontmatter.name", "frontmatter.description", *required_sections],
         "forbidden_sections": ["Secrets", "Credentials", "Approval Bypass"],
@@ -523,6 +540,9 @@ def _combined_skill_report(reports: list[dict[str, object]]) -> dict[str, object
             "overfit_risk_score": 0.0
             if any(finding.get("code") == "skill.overfit.trace_specific" for finding in findings)
             else 1.0,
+            "token_footprint_score": 0.0
+            if any(finding.get("code") == "skill.token_footprint.exceeded" for finding in findings)
+            else 1.0,
             "safety_preservation_score": 0.0
             if any(finding.get("code") == "skill.safety.weakened" for finding in findings)
             else 1.0,
@@ -547,6 +567,11 @@ def _combined_skill_report(reports: list[dict[str, object]]) -> dict[str, object
                 for report in reports
                 if isinstance(report.get("metrics"), dict)
             ),
+            "skill_token_growth_limit": sum(
+                int(report.get("metrics", {}).get("skill_token_growth_limit", 0))
+                for report in reports
+                if isinstance(report.get("metrics"), dict)
+            ),
         },
         "required_sections": ["frontmatter.name", "frontmatter.description"],
         "forbidden_sections": ["Secrets", "Credentials", "Approval Bypass"],
@@ -564,6 +589,12 @@ def _skill_finding(code: str, message: str, target: str) -> dict[str, str]:
         "message": message,
         "target": target,
     }
+
+
+def _skill_token_growth_limit(before_tokens: int) -> int:
+    ratio_limit = int(before_tokens * _MAX_SKILL_REWRITE_TOKEN_GROWTH_RATIO)
+    absolute_limit = before_tokens + _MAX_SKILL_REWRITE_TOKEN_GROWTH_ABSOLUTE
+    return min(ratio_limit, absolute_limit)
 
 
 def _frontmatter_fields(markdown: str) -> dict[str, str]:
