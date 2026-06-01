@@ -31,6 +31,8 @@ def _candidate(
     *,
     base_hash: str = "abc123",
     diff: str = "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,0 +1,1 @@\n+Clarify this.\n",
+    expected_behavior_change: str = "Not specified.",
+    sources: tuple[SourceRef, ...] = (SourceRef("trace-1", trusted=True),),
 ) -> CandidatePatch:
     return CandidatePatch(
         audit_id=2,
@@ -39,7 +41,8 @@ def _candidate(
         diff=diff,
         risk_class="instruction_clarification",
         rationale="Clarify ambiguous guidance.",
-        sources=(SourceRef("trace-1", trusted=True),),
+        expected_behavior_change=expected_behavior_change,
+        sources=sources,
         bounded_edit_metadata=BOUNDED_EDIT_METADATA,
     )
 
@@ -541,6 +544,8 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- policy_reasons: modal_weakening,new_external_endpoint",
             "- risk_explanation: class=instruction_clarification policy_allowed=false policy_reasons=modal_weakening,new_external_endpoint review_required=none",
             "- rollback_readiness: state=planned command=tugboat rollback --decision latest artifact=.sidecar/runs/run-1/optimization-summary.json applied_commit=missing",
+            "- source_evidence: trace-1 trusted=true",
+            "- expected_behavior_change: Not specified.",
             "- trace_input: .sidecar/runs/run-1/trace-input.jsonl",
             "- instruction_snapshot: .sidecar/runs/run-1/instruction-snapshot",
             "- instruction_graph: .sidecar/runs/run-1/instruction-graph.json",
@@ -584,6 +589,56 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "",
         ]
     )
+
+
+def test_write_report_summarizes_source_evidence_and_expected_behavior_without_payloads(
+    tmp_path: Path,
+):
+    eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    eval_report_path.parent.mkdir(parents=True)
+    eval_report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 5,
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "metrics": {},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "all",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    candidate = _candidate(
+        expected_behavior_change="Require regression test guidance for bug fixes.",
+        sources=(
+            SourceRef("audit:run-1:ev_user_correction", trusted=True),
+            SourceRef("drift-cluster:testing", trusted=False),
+        ),
+    )
+
+    report_path = write_report(
+        tmp_path,
+        "run-1",
+        candidate=candidate,
+        decision=PolicyDecision(True, ()),
+        eval_report_path=eval_report_path,
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert (
+        "- source_evidence: audit:run-1:ev_user_correction trusted=true; "
+        "drift-cluster:testing trusted=false"
+    ) in report
+    assert (
+        "- expected_behavior_change: Require regression test guidance for bug fixes."
+    ) in report
+    assert "user_correction" in report
+    assert "You skipped" not in report
 
 
 def test_write_report_degrades_review_readiness_without_optional_artifacts(tmp_path: Path):
@@ -803,6 +858,28 @@ def test_write_report_rejects_secret_in_rationale(tmp_path: Path):
         diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
         risk_class="instruction_clarification",
         rationale="Leaked token ghp_abcdefghijklmnopqrstuvwx",
+        sources=(SourceRef("trace-1", trusted=True),),
+    )
+
+    with pytest.raises(SecretScanError, match="ghp_token"):
+        write_report(
+            tmp_path,
+            "run-1",
+            candidate=candidate,
+            decision=PolicyDecision(True, ()),
+            eval_report_path=tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json",
+        )
+
+
+def test_write_report_rejects_secret_in_expected_behavior_change(tmp_path: Path):
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="CODEX.md",
+        base_hash="abc123",
+        diff="--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Clarify this.\n",
+        risk_class="instruction_clarification",
+        rationale="Clarify ambiguous guidance.",
+        expected_behavior_change="Use token ghp_abcdefghijklmnopqrstuvwx.",
         sources=(SourceRef("trace-1", trusted=True),),
     )
 

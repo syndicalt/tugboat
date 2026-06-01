@@ -827,6 +827,10 @@ llmff:
     assert decision_trace["artifacts"]["candidate_diff"].endswith("candidate.diff")
     assert decision_trace["artifacts"]["decision_artifact"].endswith("decision.json")
     report = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "- source_evidence: " in report
+    assert "- expected_behavior_change: " in report
+    assert "payload_snippet" not in report
+    assert "You skipped the regression test" not in report
     for artifact_ref in (
         "trace_input: .sidecar/runs/",
         "instruction_snapshot: .sidecar/runs/",

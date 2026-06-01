@@ -6,7 +6,7 @@ from typing import Any
 
 from tugboat.artifacts import validate_json_artifact, validate_report_markdown
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
-from tugboat.policy.gate import CandidatePatch, PolicyDecision
+from tugboat.policy.gate import CandidatePatch, PolicyDecision, SourceRef
 from tugboat.security.secrets import SecretScanError, scan_text
 
 
@@ -45,6 +45,7 @@ def write_report(
             f"- policy_allowed: {str(decision.allowed).lower()}",
             f"- policy_reasons: {','.join(decision.reasons)}",
             *review_summary,
+            *_candidate_review_context_lines(candidate),
             *evidence_chain,
             *eval_summary,
             *impact_summary,
@@ -63,6 +64,23 @@ def write_report(
     report_path.write_text(text, encoding="utf-8")
     mark_private_file(report_path)
     return report_path
+
+
+def _candidate_review_context_lines(candidate: CandidatePatch) -> list[str]:
+    return [
+        f"- source_evidence: {_source_evidence_summary(candidate.sources)}",
+        f"- expected_behavior_change: {_report_single_line(candidate.expected_behavior_change)}",
+    ]
+
+
+def _source_evidence_summary(sources: tuple[Any, ...]) -> str:
+    if not sources:
+        return "none"
+    return "; ".join(
+        f"{_report_single_line(source.source_id)} trusted={_report_scalar(source.trusted)}"
+        for source in sources
+        if isinstance(source, SourceRef)
+    ) or "none"
 
 
 def _evidence_chain_lines(repo: Path, run_dir: Path, eval_report_path: Path) -> list[str]:
@@ -389,6 +407,10 @@ def _report_scalar(value: object) -> str:
     if isinstance(value, bool):
         return str(value).lower()
     return str(value)
+
+
+def _report_single_line(value: object) -> str:
+    return " ".join(_report_scalar(value).split())
 
 
 def _format_rollback_command(value: object) -> str:
