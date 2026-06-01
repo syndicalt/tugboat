@@ -560,6 +560,7 @@ def test_generate_harness_report_includes_token_efficiency_metrics(tmp_path: Pat
         "retrieval_pack_file_count": 2,
         "token_budget": {
             "active_context_estimated_tokens": 12000,
+            "duplicate_rule_estimated_tokens": 100,
             "instruction_file_estimated_tokens": 4000,
             "retrieval_pack_estimated_tokens": 12000,
         },
@@ -580,11 +581,33 @@ def test_generate_harness_report_flags_large_instruction_token_budget(
 
     assert report.token_metrics["token_budget"] == {
         "active_context_estimated_tokens": 12000,
+        "duplicate_rule_estimated_tokens": 100,
         "instruction_file_estimated_tokens": 4000,
         "retrieval_pack_estimated_tokens": 12000,
     }
     assert report.token_metrics["token_budget_violations"] == [
         "AGENTS.md estimated at 4004 tokens exceeds instruction file budget 4000."
+    ]
+
+
+def test_generate_harness_report_flags_duplicate_rule_token_budget(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    duplicated_rule = "MUST " + " ".join(f"token{i}" for i in range(120)) + "."
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\n"
+        f"{duplicated_rule}\n"
+        f"{duplicated_rule}\n",
+        encoding="utf-8",
+    )
+
+    report = generate_harness_report(repo)
+
+    assert report.token_metrics["duplicate_rule_estimated_tokens"] == 121
+    assert report.token_metrics["token_budget"]["duplicate_rule_estimated_tokens"] == 100
+    assert report.token_metrics["token_budget_violations"] == [
+        "duplicate instruction rules estimated at 121 tokens exceeds duplicate rule budget 100."
     ]
 
 

@@ -36,4 +36,28 @@ def test_harness_report_cli_writes_knowledge_map_and_tasks(tmp_path: Path, capsy
     assert "retrieval_pack_file_count:" in output
     assert "retrieval_pack_estimated_tokens:" in output
     assert "duplicate_rule_estimated_tokens:" in output
+    assert "duplicate_rule_token_budget:" in output
     assert "- Add ownership metadata to docs/runbook.md." in output
+
+
+def test_harness_report_cli_prints_duplicate_rule_token_budget_violation(
+    tmp_path: Path,
+    capsys,
+):
+    duplicated_rule = "MUST " + " ".join(f"token{i}" for i in range(120)) + "."
+    (tmp_path / "AGENTS.md").write_text(
+        "# Agent Map\n\n"
+        f"{duplicated_rule}\n"
+        f"{duplicated_rule}\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["harness", "report", "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "duplicate_rule_token_budget: 100" in output
+    assert (
+        "token_budget_violation: duplicate instruction rules estimated at 121 "
+        "tokens exceeds duplicate rule budget 100."
+    ) in output

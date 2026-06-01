@@ -245,6 +245,7 @@ TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]")
 INSTRUCTION_FILE_TOKEN_BUDGET = 4000
 ACTIVE_CONTEXT_TOKEN_BUDGET = 12000
 RETRIEVAL_PACK_TOKEN_BUDGET = 12000
+DUPLICATE_RULE_TOKEN_BUDGET = 100
 
 
 def _token_metrics(repo: Path, knowledge_map: dict[str, list[str]]) -> dict[str, object]:
@@ -291,11 +292,13 @@ def _token_metrics(repo: Path, knowledge_map: dict[str, list[str]]) -> dict[str,
         "instruction_file_estimated_tokens": INSTRUCTION_FILE_TOKEN_BUDGET,
         "active_context_estimated_tokens": ACTIVE_CONTEXT_TOKEN_BUDGET,
         "retrieval_pack_estimated_tokens": RETRIEVAL_PACK_TOKEN_BUDGET,
+        "duplicate_rule_estimated_tokens": DUPLICATE_RULE_TOKEN_BUDGET,
     }
     budget_violations = _token_budget_violations(
         instruction_files=instruction_files,
         active_context_tokens=retrieval_pack_tokens,
         retrieval_pack_tokens=retrieval_pack_tokens,
+        duplicate_rule_tokens=duplicate_rule_tokens,
         budget=budget,
     )
     return {
@@ -316,6 +319,7 @@ def _token_budget_violations(
     instruction_files: list[dict[str, object]],
     active_context_tokens: int,
     retrieval_pack_tokens: int,
+    duplicate_rule_tokens: int,
     budget: dict[str, int],
 ) -> list[str]:
     violations: list[str] = []
@@ -338,6 +342,12 @@ def _token_budget_violations(
         violations.append(
             f"retrieval pack estimated at {retrieval_pack_tokens} tokens exceeds "
             f"retrieval pack budget {retrieval_pack_budget}."
+        )
+    duplicate_rule_budget = budget["duplicate_rule_estimated_tokens"]
+    if duplicate_rule_tokens > duplicate_rule_budget:
+        violations.append(
+            f"duplicate instruction rules estimated at {duplicate_rule_tokens} tokens exceeds "
+            f"duplicate rule budget {duplicate_rule_budget}."
         )
     return violations
 

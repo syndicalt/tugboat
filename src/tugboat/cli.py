@@ -1315,6 +1315,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             "duplicate_rule_estimated_tokens: "
             f"{token_metrics['duplicate_rule_estimated_tokens']}"
         )
+        print(
+            "duplicate_rule_token_budget: "
+            f"{token_metrics['token_budget']['duplicate_rule_estimated_tokens']}"
+        )
+        for violation in token_metrics["token_budget_violations"]:
+            print(f"token_budget_violation: {violation}")
         return 0
 
     if args.command == "harness" and args.harness_command == "cleanup":

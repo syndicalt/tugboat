@@ -1375,6 +1375,7 @@ def test_validate_harness_report_artifact_accepts_current_schema():
                     "instruction_file_estimated_tokens": 4000,
                     "active_context_estimated_tokens": 12000,
                     "retrieval_pack_estimated_tokens": 12000,
+                    "duplicate_rule_estimated_tokens": 100,
                 },
                 "token_budget_violations": [],
                 "instruction_files": [
