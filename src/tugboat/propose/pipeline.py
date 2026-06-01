@@ -856,6 +856,7 @@ def _rejected_edit_artifact_payload(record: RejectedEditRecord) -> dict[str, obj
         "category",
         "failure_pattern",
         "review_actor",
+        "review_template",
     ):
         value = getattr(record, field_name)
         if value is not None:

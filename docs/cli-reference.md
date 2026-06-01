@@ -81,11 +81,21 @@ tugboat apply --repo . --candidate latest --mode proposal
 tugboat apply --repo . --candidate latest --mode branch --human-review --review-actor <name>
 tugboat apply --repo . --candidate latest --mode commit --human-review --review-actor <name>
 tugboat apply --repo . --candidate latest --mode pr --human-review --review-actor <name>
+tugboat review reject --repo . --candidate latest --actor <name> --template redundant-rule
 tugboat rollback --repo . --decision latest
 tugboat rollback --repo . --decision latest --execute
 ```
 
 `proposal` mode writes an apply plan without mutating instruction files. `branch`, `commit`, and `pr` modes require clean/stale-base checks, policy gate proof, eval evidence, and VCS adapter execution.
+
+`review reject` records a human rejection, updates candidate state, and writes rejected-edit optimizer memory so future matching proposals can be suppressed. Prefer built-in rejection templates for consistent memory:
+
+- `redundant-rule`
+- `too-broad`
+- `weakens-safety`
+- `unsupported-evidence`
+
+Manual `--reason`, `--category`, and `--failure-pattern` fields remain available as a complete triplet. Templates cannot be combined with manual fields.
 
 ## Eval Reports
 

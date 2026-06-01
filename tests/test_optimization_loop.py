@@ -338,6 +338,7 @@ def test_structured_rejected_edit_memory_context_round_trips(tmp_path):
                 "operator": "add",
                 "rejection_reason": "redundant_rule",
                 "review_actor": "reviewer",
+                "review_template": "redundant-rule",
                 "section": "Rules",
                 "semantic_fingerprint": fingerprint,
                 "source_refs": ["candidate:7", "suite:human_review"],
@@ -354,6 +355,7 @@ def test_structured_rejected_edit_memory_context_round_trips(tmp_path):
     assert record.category == "policy_regression"
     assert record.failure_pattern == "duplicates existing guidance"
     assert record.review_actor == "reviewer"
+    assert record.review_template == "redundant-rule"
 
 
 def test_fixture_benchmark_accepts_one_improvement_and_rejects_one_harmful_edit():

@@ -106,6 +106,7 @@ class RejectedEditRecord:
     category: str | None = None
     failure_pattern: str | None = None
     review_actor: str | None = None
+    review_template: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,7 @@ class OptimizationMemory:
                 "category",
                 "failure_pattern",
                 "review_actor",
+                "review_template",
             ):
                 value = getattr(record, field_name)
                 if value is not None:
@@ -249,6 +251,7 @@ class OptimizationMemory:
                     category=_optional_string(payload, "category"),
                     failure_pattern=_optional_string(payload, "failure_pattern"),
                     review_actor=_optional_string(payload, "review_actor"),
+                    review_template=_optional_string(payload, "review_template"),
                 )
             elif memory_type == "slow_update":
                 record = _slow_update_record_from_payload(payload)

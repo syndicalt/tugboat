@@ -98,6 +98,30 @@ from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 from tugboat.vcs import PullRequestResult, VcsAdapter, VcsStateError
 
 
+REVIEW_REJECTION_TEMPLATES: dict[str, dict[str, str]] = {
+    "redundant-rule": {
+        "reason": "redundant_rule",
+        "category": "proposal_quality",
+        "failure_pattern": "duplicates existing guidance",
+    },
+    "too-broad": {
+        "reason": "too_broad",
+        "category": "bounded_edit_quality",
+        "failure_pattern": "edit exceeds requested scope",
+    },
+    "weakens-safety": {
+        "reason": "safety_weakening",
+        "category": "policy_regression",
+        "failure_pattern": "weakens safety or approval constraint",
+    },
+    "unsupported-evidence": {
+        "reason": "unsupported_evidence",
+        "category": "evidence_quality",
+        "failure_pattern": "proposal is not grounded in trusted evidence",
+    },
+}
+
+
 @dataclass(frozen=True)
 class OptimizeWorkflowResult:
     exit_code: int
@@ -326,9 +350,10 @@ def build_parser() -> argparse.ArgumentParser:
     review_reject.add_argument("--repo", required=True)
     review_reject.add_argument("--candidate", required=True)
     review_reject.add_argument("--actor", required=True)
-    review_reject.add_argument("--reason", required=True)
-    review_reject.add_argument("--category", required=True)
-    review_reject.add_argument("--failure-pattern", required=True)
+    review_reject.add_argument("--template")
+    review_reject.add_argument("--reason")
+    review_reject.add_argument("--category")
+    review_reject.add_argument("--failure-pattern")
 
     rollback = subcommands.add_parser("rollback")
     rollback.add_argument("--repo", required=True)
@@ -779,6 +804,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 repo,
                 run_dir,
                 actor=args.actor,
+                template=args.template,
                 reason=args.reason,
                 category=args.category,
                 failure_pattern=args.failure_pattern,
@@ -3991,10 +4017,12 @@ def _write_human_review_rejection(
     run_dir: Path,
     *,
     actor: str,
-    reason: str,
-    category: str,
-    failure_pattern: str,
+    template: str | None,
+    reason: str | None,
+    category: str | None,
+    failure_pattern: str | None,
 ) -> None:
+    resolved = _resolve_review_rejection(template, reason, category, failure_pattern)
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     validate_json_artifact("candidate.json", candidate)
     candidate_id = int(candidate["candidate_id"])
@@ -4002,15 +4030,17 @@ def _write_human_review_rejection(
         candidate,
         candidate_id=candidate_id,
         actor=actor,
-        reason=reason,
-        category=category,
-        failure_pattern=failure_pattern,
+        reason=resolved["reason"],
+        category=resolved["category"],
+        failure_pattern=resolved["failure_pattern"],
+        template=template,
     )
     _scan_human_review_rejection(
         actor=actor,
-        reason=reason,
-        category=category,
-        failure_pattern=failure_pattern,
+        reason=resolved["reason"],
+        category=resolved["category"],
+        failure_pattern=resolved["failure_pattern"],
+        template=template,
         rejected_memory=rejected_memory,
     )
 
@@ -4023,19 +4053,19 @@ def _write_human_review_rejection(
             raise ValueError(f"candidate not found: {candidate_id}")
         if str(row[0]) != "needs_review":
             raise ValueError("candidate is not awaiting review")
-        store.update_candidate_state(candidate_id=candidate_id, state="rejected", reason=reason)
+        store.update_candidate_state(candidate_id=candidate_id, state="rejected", reason=resolved["reason"])
         store.record_review_action(
             candidate_id=candidate_id,
             actor=actor,
             action="rejected",
-            reason=reason,
+            reason=resolved["reason"],
         )
         store.insert_decision(
             candidate_id=candidate_id,
             actor=actor,
             policy="human_review",
             decision="rejected",
-            reason=reason,
+            reason=resolved["reason"],
         )
         for fingerprint, payload in rejected_memory:
             store.record_optimizer_memory(
@@ -4049,10 +4079,11 @@ def _write_human_review_rejection(
             {
                 "actor": actor,
                 "candidate_id": candidate_id,
-                "category": category,
-                "failure_pattern": failure_pattern,
-                "reason": reason,
+                "category": resolved["category"],
+                "failure_pattern": resolved["failure_pattern"],
+                "reason": resolved["reason"],
                 "run_id": run_dir.name,
+                **({"template": template} if template is not None else {}),
             },
         )
     _merge_json(
@@ -4060,8 +4091,9 @@ def _write_human_review_rejection(
         {
             "decision": "rejected",
             "policy_allowed": False,
-            "policy_reasons": [reason],
+            "policy_reasons": [resolved["reason"]],
             "review_actor": actor,
+            **({"review_template": template} if template is not None else {}),
         },
     )
     _transition_originating_daemon_job(
@@ -4073,6 +4105,45 @@ def _write_human_review_rejection(
     )
 
 
+def _resolve_review_rejection(
+    template: str | None,
+    reason: str | None,
+    category: str | None,
+    failure_pattern: str | None,
+) -> dict[str, str]:
+    manual_fields = {
+        "--reason": reason,
+        "--category": category,
+        "--failure-pattern": failure_pattern,
+    }
+    if template is not None and any(value is not None for value in manual_fields.values()):
+        raise ValueError("review rejection template cannot be combined with manual fields")
+    if template is not None and template not in REVIEW_REJECTION_TEMPLATES:
+        raise ValueError(f"unknown review rejection template: {template}")
+    values = dict(REVIEW_REJECTION_TEMPLATES.get(template or "", {}))
+    if reason is not None:
+        values["reason"] = reason
+    if category is not None:
+        values["category"] = category
+    if failure_pattern is not None:
+        values["failure_pattern"] = failure_pattern
+    missing = [
+        flag
+        for flag, field in (
+            ("--reason", "reason"),
+            ("--category", "category"),
+            ("--failure-pattern", "failure_pattern"),
+        )
+        if not values.get(field)
+    ]
+    if missing:
+        raise ValueError(
+            "review rejection requires --template or explicit fields: "
+            + ", ".join(missing)
+        )
+    return values
+
+
 def _human_rejected_edit_memory_payloads(
     candidate: dict[str, object],
     *,
@@ -4081,6 +4152,7 @@ def _human_rejected_edit_memory_payloads(
     reason: str,
     category: str,
     failure_pattern: str,
+    template: str | None = None,
 ) -> list[tuple[str, dict[str, object]]]:
     raw_metadata = candidate.get("bounded_edit_metadata", [])
     if not isinstance(raw_metadata, list):
@@ -4096,23 +4168,21 @@ def _human_rejected_edit_memory_payloads(
         if not operator or not target_file or not section:
             continue
         fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
-        records.append(
-            (
-                fingerprint,
-                {
-                    "category": category,
-                    "failure_pattern": failure_pattern,
-                    "file": target_file,
-                    "future_proposal_suppression_signal": REJECTED_EDIT_SUPPRESSION_SIGNAL,
-                    "operator": operator,
-                    "rejection_reason": reason,
-                    "review_actor": actor,
-                    "section": section,
-                    "semantic_fingerprint": fingerprint,
-                    "source_refs": [f"candidate:{candidate_id}", "suite:human_review"],
-                },
-            )
-        )
+        payload = {
+            "category": category,
+            "failure_pattern": failure_pattern,
+            "file": target_file,
+            "future_proposal_suppression_signal": REJECTED_EDIT_SUPPRESSION_SIGNAL,
+            "operator": operator,
+            "rejection_reason": reason,
+            "review_actor": actor,
+            "section": section,
+            "semantic_fingerprint": fingerprint,
+            "source_refs": [f"candidate:{candidate_id}", "suite:human_review"],
+        }
+        if template is not None:
+            payload["review_template"] = template
+        records.append((fingerprint, payload))
     if not records:
         raise ValueError("candidate bounded_edit_metadata is required for rejected edit memory")
     return records
@@ -4124,6 +4194,7 @@ def _scan_human_review_rejection(
     reason: str,
     category: str,
     failure_pattern: str,
+    template: str | None,
     rejected_memory: list[tuple[str, dict[str, object]]],
 ) -> None:
     payload = {
@@ -4133,6 +4204,8 @@ def _scan_human_review_rejection(
         "reason": reason,
         "rejected_memory": [memory for _, memory in rejected_memory],
     }
+    if template is not None:
+        payload["template"] = template
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     findings = scan_text("review-rejection.json", text)
     if findings:

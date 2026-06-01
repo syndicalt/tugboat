@@ -968,6 +968,7 @@ def test_validate_optimizer_memory_artifact_accepts_structured_rejected_edit_con
                     "category": "policy_regression",
                     "failure_pattern": "duplicates existing guidance",
                     "review_actor": "reviewer",
+                    "review_template": "redundant-rule",
                 }
             ],
             "slow_update_notes": [],

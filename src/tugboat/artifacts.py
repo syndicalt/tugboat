@@ -971,6 +971,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                         "category": {"type": "string"},
                         "failure_pattern": {"type": "string"},
                         "review_actor": {"type": "string"},
+                        "review_template": {"type": "string"},
                     },
                 },
             },

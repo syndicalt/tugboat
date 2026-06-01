@@ -5608,6 +5608,156 @@ llmff:
     assert "review blocked: candidate is not awaiting review" in capsys.readouterr().out
 
 
+def test_review_reject_template_records_structured_memory_without_free_form_fields(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    candidate_id = int(json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))["candidate_id"])
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "review",
+                "reject",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "reviewer",
+                "--template",
+                "redundant-rule",
+            ]
+        )
+        == 0
+    )
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory_row = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'rejected_edit'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        event_row = store.connection.execute(
+            """
+            SELECT payload_json
+            FROM audit_events
+            WHERE event_type = 'review.rejected'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    memory = json.loads(memory_row[0])
+    event = json.loads(event_row[0])
+    assert capsys.readouterr().out == "review: rejected\n"
+    assert memory["rejection_reason"] == "redundant_rule"
+    assert memory["category"] == "proposal_quality"
+    assert memory["failure_pattern"] == "duplicates existing guidance"
+    assert memory["review_template"] == "redundant-rule"
+    assert memory["source_refs"] == [f"candidate:{candidate_id}", "suite:human_review"]
+    assert event["reason"] == "redundant_rule"
+    assert event["category"] == "proposal_quality"
+    assert event["failure_pattern"] == "duplicates existing guidance"
+    assert event["template"] == "redundant-rule"
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    [
+        (["--template", "unknown-template"], "unknown review rejection template"),
+        (
+            ["--template", "redundant-rule", "--reason", "redundant_rule"],
+            "review rejection template cannot be combined with manual fields",
+        ),
+        (
+            ["--reason", "redundant_rule", "--category", "proposal_quality"],
+            "review rejection requires --template or explicit fields: --failure-pattern",
+        ),
+    ],
+)
+def test_review_reject_validates_template_contract_before_writing_memory(
+    tmp_path: Path,
+    capsys,
+    extra_args: list[str],
+    message: str,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"]) == 0
+
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "review",
+                "reject",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "reviewer",
+                *extra_args,
+            ]
+        )
+        == 1
+    )
+    assert f"review blocked: {message}" in capsys.readouterr().out
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        memory_count = store.connection.execute(
+            "SELECT COUNT(*) FROM optimizer_memory WHERE memory_type = 'rejected_edit'"
+        ).fetchone()[0]
+        review_count = store.connection.execute(
+            "SELECT COUNT(*) FROM review_actions"
+        ).fetchone()[0]
+    assert memory_count == 0
+    assert review_count == 0
+
+
 def test_eval_rejects_accept_recommendation_without_held_out_cases(
     tmp_path: Path,
     capsys,
