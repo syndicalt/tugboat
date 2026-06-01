@@ -105,6 +105,7 @@ def test_audit_missing_trace_returns_clear_error_without_traceback(tmp_path: Pat
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace file not found: {missing}" in output
+    assert f"next: create or export the trace file at {missing}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -119,6 +120,7 @@ def test_audit_trace_directory_returns_clear_error_without_traceback(tmp_path: P
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace path is not a file: {trace_dir}" in output
+    assert f"next: pass a trace file path instead of directory {trace_dir}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -132,6 +134,7 @@ def test_optimize_missing_trace_returns_clear_error_without_traceback(tmp_path: 
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace file not found: {missing}" in output
+    assert f"next: create or export the trace file at {missing}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -152,6 +155,7 @@ def test_optimize_trace_directory_returns_clear_error_without_traceback(
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace path is not a file: {trace_dir}" in output
+    assert f"next: pass a trace file path instead of directory {trace_dir}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -189,6 +193,84 @@ def test_optimize_missing_trace_cli_exits_cleanly_without_python_traceback(tmp_p
     assert "Traceback" not in result.stdout
 
 
+def test_optimize_malformed_policy_cli_exits_cleanly_without_python_traceback(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tugboat",
+            "optimize",
+            "--repo",
+            str(repo),
+            "--trace",
+            str(trace),
+            "--suite",
+            "all",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "optimize blocked: policy invalid:" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
+def test_audit_malformed_policy_cli_exits_cleanly_without_python_traceback(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tugboat",
+            "audit",
+            "--repo",
+            str(repo),
+            "--trace",
+            str(trace),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "audit blocked: policy invalid:" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
 def test_optimize_missing_train_trace_returns_clear_error_without_traceback(
     tmp_path: Path,
     capsys,
@@ -218,6 +300,7 @@ def test_optimize_missing_train_trace_returns_clear_error_without_traceback(
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace file not found: {missing_train}" in output
+    assert f"next: create or export the trace file at {missing_train}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -252,6 +335,7 @@ def test_optimize_train_trace_directory_returns_clear_error_without_traceback(
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace path is not a file: {train_dir}" in output
+    assert f"next: pass a trace file path instead of directory {train_dir}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -267,6 +351,7 @@ def test_audit_invalid_trace_returns_clear_error_without_traceback(tmp_path: Pat
 
     output = capsys.readouterr().out
     assert "audit blocked: invalid trace:" in output
+    assert "next: validate the trace as JSONL or JSON and rerun with --trace-format auto" in output
     assert "Traceback" not in output
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
     audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))

@@ -334,6 +334,28 @@ def _print_apply_blocked_next_step(repo: Path, run_dir: Path, reason: str) -> No
         print(f"next: tugboat report --repo {repo_ref} --run {run_id}")
 
 
+def _print_trace_blocked_next_step(trace: Path, message: str) -> None:
+    if message.startswith("audit blocked: trace file not found:"):
+        print(f"next: create or export the trace file at {trace}")
+        return
+    if message.startswith("audit blocked: trace path is not a file:"):
+        print(f"next: pass a trace file path instead of directory {trace}")
+        return
+    if message.startswith("audit blocked: invalid trace:"):
+        if "rerun with --trace-format" in message:
+            return
+        print("next: validate the trace as JSONL or JSON and rerun with --trace-format auto")
+
+
+def _policy_preflight_blocked(command: str, repo: Path) -> bool:
+    try:
+        load_policy(repo)
+    except (OSError, ValueError, YAMLError) as error:
+        print(f"{command} blocked: policy invalid: {error}")
+        return True
+    return False
+
+
 def _apply_blocked_reason_is_eval_related(reason: str) -> bool:
     return (
         reason.startswith("eval ")
@@ -822,6 +844,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "audit":
         repo = Path(args.repo)
+        if _policy_preflight_blocked("audit", repo):
+            return 1
         result = run_audit_pipeline(
             repo,
             Path(args.trace),
@@ -829,6 +853,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             mock_llmff_inspect=args.mock_llmff_inspect,
         )
         print(result.message)
+        if result.exit_code != 0:
+            _print_trace_blocked_next_step(Path(args.trace), result.message)
         return result.exit_code
 
     if args.command == "propose":
@@ -872,6 +898,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "optimize":
         repo = Path(args.repo)
+        if _policy_preflight_blocked("optimize", repo):
+            return 1
         result = run_optimize_workflow(
             repo,
             Path(args.trace),
@@ -3995,6 +4023,7 @@ def run_optimize_workflow(
         train_result = run_audit_pipeline(repo, train_trace, trace_format=trace_format)
         print(train_result.message)
         if train_result.exit_code != 0:
+            _print_trace_blocked_next_step(train_trace, train_result.message)
             return OptimizeWorkflowResult(
                 train_result.exit_code,
                 train_result.run_dir,
@@ -4003,6 +4032,7 @@ def run_optimize_workflow(
     audit_result = run_audit_pipeline(repo, trace, trace_format=trace_format)
     print(audit_result.message)
     if audit_result.exit_code != 0:
+        _print_trace_blocked_next_step(trace, audit_result.message)
         return OptimizeWorkflowResult(
             audit_result.exit_code,
             audit_result.run_dir,
