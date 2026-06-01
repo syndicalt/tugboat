@@ -14,6 +14,9 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.auto_apply_enabled is False
     assert policy.auto_apply_max_changed_lines == 50
     assert policy.auto_apply_minimum_burn_in_days == 14
+    assert policy.auto_apply_production_observation_days == 30
+    assert policy.auto_apply_narrower_observation_risk_decision == ""
+    assert policy.auto_apply_observation_rollback_owner == ""
     assert policy.auto_apply_maximum_rejection_rate == 0.10
     assert policy.auto_apply_maximum_rollback_rate == 0.02
     assert policy.auto_apply_max_instruction_token_delta == 50
@@ -112,6 +115,9 @@ auto_apply:
   enabled: false
   max_changed_lines: 12
   max_instruction_token_delta: 9
+  production_observation_days: 45
+  narrower_observation_risk_decision: approved-docs-hygiene
+  observation_rollback_owner: release-owner@example.com
 llmff:
   binary: llmff
   require_inspect: true
@@ -126,6 +132,9 @@ llmff:
     assert policy.instruction_files[0].path == "CODEX.md"
     assert policy.auto_apply_max_changed_lines == 12
     assert policy.auto_apply_max_instruction_token_delta == 9
+    assert policy.auto_apply_production_observation_days == 45
+    assert policy.auto_apply_narrower_observation_risk_decision == "approved-docs-hygiene"
+    assert policy.auto_apply_observation_rollback_owner == "release-owner@example.com"
 
 
 def test_load_policy_yaml_reads_auto_apply_allowed_risk_classes(tmp_path: Path):

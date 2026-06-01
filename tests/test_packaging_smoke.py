@@ -41,6 +41,7 @@ def test_built_wheel_runs_fresh_repo_proposal_loop(tmp_path: Path):
 
     assert tugboat.exists()
     assert fixture_llmff.exists()
+    version_output = _run_installed(tugboat, "--version")
     doctor_output = _run_installed(tugboat, "doctor", "--repo", str(repo))
     init_output = _run_installed(tugboat, "init", "--repo", str(repo))
     index_output = _run_installed(tugboat, "index", "--repo", str(repo), "--check")
@@ -49,6 +50,7 @@ def test_built_wheel_runs_fresh_repo_proposal_loop(tmp_path: Path):
         tugboat, "optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"
     )
 
+    assert version_output == f"tugboat {RELEASE_VERSION}\n"
     assert "tugboat: ok" in doctor_output
     assert "initialized:" in init_output
     assert "indexed documents: 1" in index_output

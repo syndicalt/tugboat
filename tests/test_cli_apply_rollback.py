@@ -373,7 +373,7 @@ auto_apply:
 def _seed_auto_apply_history(
     repo: Path,
     *,
-    days_ago: int = 15,
+    days_ago: int = 31,
     reviewed: int = 20,
     rejected: int = 0,
     applied: int = 20,
@@ -2454,6 +2454,45 @@ def test_auto_apply_commit_blocks_policy_paused_candidate_before_apply(tmp_path:
     assert decisions[0]["policy"]["paused_lanes"] == ["docs_hygiene"]
 
 
+def test_auto_apply_commit_requires_production_observation_period_without_mutation(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo, days_ago=29)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 1
+    )
+
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["eligible"] is False
+    assert decision["lane"] == "docs_hygiene"
+    assert decision["reasons"] == ["production_observation_period_too_short"]
+    assert decision["policy"]["production_observation_days"] == 30
+
+
 @pytest.mark.parametrize("command", ("apply", "auto-apply"))
 @pytest.mark.parametrize("removed_flag", ("--burn-in-days", "--rejection-rate", "--rollback-rate"))
 def test_auto_apply_thresholds_are_policy_owned_not_runtime_cli_knobs(
@@ -3159,10 +3198,13 @@ def test_auto_apply_rejects_class_a_candidate_without_allowed_change_category(
         ],
         "max_changed_lines": 50,
         "max_instruction_token_delta": 50,
-        "maximum_rejection_rate": 0.10,
-        "maximum_rollback_rate": 0.02,
-        "minimum_burn_in_days": 14,
-        "pause_for_incident": False,
+            "maximum_rejection_rate": 0.10,
+            "maximum_rollback_rate": 0.02,
+            "minimum_burn_in_days": 14,
+            "production_observation_days": 30,
+            "narrower_observation_risk_decision": "",
+            "observation_rollback_owner": "",
+            "pause_for_incident": False,
         "paused_categories": [],
         "paused_lanes": [],
         "paused_repositories": [],

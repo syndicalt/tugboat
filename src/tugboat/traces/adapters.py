@@ -15,6 +15,9 @@ from tugboat.traces.ingest import (
 from tugboat.traces.schema import CanonicalEpisode, TraceBundle, TraceEvent
 
 
+_SOURCE_LINE_KEY = "_tugboat_source_line_number"
+
+
 def ingest_codex_session(path: Path) -> CanonicalEpisode:
     return canonical_episode_from_bundle(ingest_codex_session_bundle(path))
 
@@ -22,22 +25,35 @@ def ingest_codex_session(path: Path) -> CanonicalEpisode:
 def ingest_codex_session_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
     events: list[dict[str, Any]] = []
     tool_names_by_call_id: dict[str, str] = {}
-    for row in _iter_jsonl_objects(path, max_events=max_events):
+    for line_number, row in _iter_jsonl_objects(path, max_events=max_events):
         role = row.get("role")
         if role == "user":
-            events.append({"type": "user_request", "content": row.get("content", "")})
+            events.append(
+                _with_source_line(
+                    {"type": "user_request", "content": row.get("content", "")},
+                    line_number,
+                )
+            )
         elif role == "assistant":
-            events.append({"type": "final_answer", "content": row.get("content", "")})
+            events.append(
+                _with_source_line(
+                    {"type": "final_answer", "content": row.get("content", "")},
+                    line_number,
+                )
+            )
         elif row.get("type") in {"tool_call", "tool_result", "diff", "test_result"}:
-            events.append(_normalize_codex_event(row))
+            events.append(_with_source_line(_normalize_codex_event(row), line_number))
         elif row.get("type") == "session_meta" and isinstance(row.get("payload"), dict):
             event = _normalize_codex_session_meta(row["payload"])
             if event is not None:
-                events.append(event)
+                events.append(_with_source_line(event, line_number))
         elif row.get("type") == "turn_context" and isinstance(row.get("payload"), dict):
-            events.append(_normalize_codex_turn_context(row["payload"]))
+            events.append(_with_source_line(_normalize_codex_turn_context(row["payload"]), line_number))
         elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
-            events.extend(_normalize_codex_response_item(row["payload"], tool_names_by_call_id))
+            events.extend(
+                _with_source_line(event, line_number)
+                for event in _normalize_codex_response_item(row["payload"], tool_names_by_call_id)
+            )
         enforce_trace_event_budget(len(events), max_events)
     return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
@@ -50,9 +66,12 @@ def ingest_claude_transcript_bundle(path: Path, *, max_events: int | None = None
     events: list[dict[str, Any]] = []
     tool_names_by_id: dict[str, str] = {}
     if path.suffix == ".jsonl":
-        for row in _iter_jsonl_objects(path, max_events=max_events):
+        for line_number, row in _iter_jsonl_objects(path, max_events=max_events):
             if isinstance(row.get("message"), dict):
-                events.extend(_normalize_claude_message(row["message"], tool_names_by_id))
+                events.extend(
+                    _with_source_line(event, line_number)
+                    for event in _normalize_claude_message(row["message"], tool_names_by_id)
+                )
             enforce_trace_event_budget(len(events), max_events)
         return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
@@ -125,76 +144,117 @@ def ingest_mcp_session(path: Path) -> CanonicalEpisode:
 
 def ingest_mcp_session_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
     events: list[dict[str, Any]] = []
-    for row in _iter_jsonl_objects(path, max_events=max_events):
+    for line_number, row in _iter_jsonl_objects(path, max_events=max_events):
         event = row.get("event")
         if event == "request":
-            events.append({"type": "user_request", "content": row.get("text", "")})
+            events.append(
+                _with_source_line(
+                    {"type": "user_request", "content": row.get("text", "")},
+                    line_number,
+                )
+            )
         elif event == "instruction.snapshot":
             events.append(
-                {
-                    "type": "instruction_snapshot",
-                    "source": row.get("source", "mcp"),
-                    "text": row.get("text", ""),
-                }
+                _with_source_line(
+                    {
+                        "type": "instruction_snapshot",
+                        "source": row.get("source", "mcp"),
+                        "text": row.get("text", ""),
+                    },
+                    line_number,
+                )
             )
         elif event == "user.correction":
-            events.append({"type": "user_correction", "content": row.get("text", "")})
+            events.append(
+                _with_source_line(
+                    {"type": "user_correction", "content": row.get("text", "")},
+                    line_number,
+                )
+            )
         elif event == "subagent.report":
             events.append(
-                {
-                    "type": "subagent_report",
-                    "agent": row.get("agent", "unknown"),
-                    "summary": row.get("summary", ""),
-                }
+                _with_source_line(
+                    {
+                        "type": "subagent_report",
+                        "agent": row.get("agent", "unknown"),
+                        "summary": row.get("summary", ""),
+                    },
+                    line_number,
+                )
             )
         elif event == "diff.applied":
             events.append(
-                {
-                    "type": "diff",
-                    "path": row.get("path", ""),
-                    "diff": row.get("diff", ""),
-                }
+                _with_source_line(
+                    {
+                        "type": "diff",
+                        "path": row.get("path", ""),
+                        "diff": row.get("diff", ""),
+                    },
+                    line_number,
+                )
             )
         elif event == "test.result":
             events.append(
-                {
-                    "type": "test_result",
-                    "suite": row.get("suite", "unknown"),
-                    "passed": _bool_from_mcp(row.get("passed", False)),
-                    "output": row.get("output", ""),
-                }
+                _with_source_line(
+                    {
+                        "type": "test_result",
+                        "suite": row.get("suite", "unknown"),
+                        "passed": _bool_from_mcp(row.get("passed", False)),
+                        "output": row.get("output", ""),
+                    },
+                    line_number,
+                )
             )
         elif event == "outcome.label":
             events.append(
-                {
-                    "type": "outcome_label",
-                    "label": row.get("label", ""),
-                    "trusted": bool(row.get("trusted", False)),
-                }
+                _with_source_line(
+                    {
+                        "type": "outcome_label",
+                        "label": row.get("label", ""),
+                        "trusted": bool(row.get("trusted", False)),
+                    },
+                    line_number,
+                )
             )
         elif event == "verifier.score":
             verifier_name = row.get("name", row.get("verifier", "unknown"))
             events.append(
-                {
-                    "type": "verifier_score",
-                    "name": verifier_name,
-                    "verifier": row.get("verifier", verifier_name),
-                    "score": float(row.get("score", 0.0)),
-                    "trusted": bool(row.get("trusted", False)),
-                }
+                _with_source_line(
+                    {
+                        "type": "verifier_score",
+                        "name": verifier_name,
+                        "verifier": row.get("verifier", verifier_name),
+                        "score": float(row.get("score", 0.0)),
+                        "trusted": bool(row.get("trusted", False)),
+                    },
+                    line_number,
+                )
             )
         elif event == "tool.started":
-            events.append({"type": "tool_call", "tool": row.get("tool", "unknown")})
+            events.append(
+                _with_source_line(
+                    {"type": "tool_call", "tool": row.get("tool", "unknown")},
+                    line_number,
+                )
+            )
         elif event == "tool.finished":
             events.append(
-                {
-                    "type": "tool_result",
-                    "tool": row.get("tool", "unknown"),
-                    "exit_code": int(row.get("exit_code", 0)),
-                }
+                _with_source_line(
+                    {
+                        "type": "tool_result",
+                        "tool": row.get("tool", "unknown"),
+                        "exit_code": int(row.get("exit_code", 0)),
+                    },
+                    line_number,
+                )
             )
         elif event == "agent.final":
-            events.append({"type": "final_answer", "content": row.get("text", "")})
+            events.append(
+                _with_source_line(
+                    {"type": "final_answer", "content": row.get("text", "")},
+                    line_number,
+                )
+            )
         enforce_trace_event_budget(len(events), max_events)
     return _bundle_from_payloads(path, events, max_events=max_events)
 
@@ -213,7 +273,11 @@ def _bool_from_mcp(value: object, default: bool = False) -> bool:
     return default
 
 
-def _iter_jsonl_objects(path: Path, *, max_events: int | None = None) -> Iterator[dict[str, Any]]:
+def _iter_jsonl_objects(
+    path: Path,
+    *,
+    max_events: int | None = None,
+) -> Iterator[tuple[int, dict[str, Any]]]:
     event_count = 0
     with path.open(encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -227,7 +291,13 @@ def _iter_jsonl_objects(path: Path, *, max_events: int | None = None) -> Iterato
                 raise ValueError(f"trace line {line_number} must be a JSON object")
             event_count += 1
             enforce_trace_event_budget(event_count, max_events)
-            yield row
+            yield line_number, row
+
+
+def _with_source_line(event: dict[str, Any], line_number: int) -> dict[str, Any]:
+    annotated = dict(event)
+    annotated[_SOURCE_LINE_KEY] = line_number
+    return annotated
 
 
 def _normalize_codex_event(row: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +492,8 @@ def _derive_test_results(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif event_type == "tool_result":
             derived = _test_result_from_tool_result(event, calls_by_id, pending_calls_by_tool)
             if derived is not None and _test_key(derived) not in existing_test_keys:
+                if _SOURCE_LINE_KEY in event:
+                    derived[_SOURCE_LINE_KEY] = event[_SOURCE_LINE_KEY]
                 result.append(derived)
                 existing_test_keys.add(_test_key(derived))
     return result
@@ -634,21 +706,34 @@ def _bundle_from_payloads(
     enforce_trace_event_budget(len(payloads), max_events)
     events = tuple(
         TraceEvent(
-            evidence_id=_evidence_id(index, payload),
-            event_type=str(payload.get("type", "unknown")),
+            evidence_id=_evidence_id(index, _trace_payload(payload)),
+            event_type=str(_trace_payload(payload).get("type", "unknown")),
             source_trust=source_trust_for_event_type(
-                str(payload.get("type", "unknown")),
+                str(_trace_payload(payload).get("type", "unknown")),
                 trusted_assertions=_trusted_outcome_assertion(
-                    payload,
+                    _trace_payload(payload),
                     default=trusted_outcome_assertions,
                 ),
             ),
-            line_number=index,
-            payload=payload,
+            line_number=_source_line_number(payload, fallback=index),
+            payload=_trace_payload(payload),
         )
         for index, payload in enumerate(payloads, start=1)
     )
     return TraceBundle(trace_path=path, events=events)
+
+
+def _trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if _SOURCE_LINE_KEY not in payload:
+        return payload
+    return {key: value for key, value in payload.items() if key != _SOURCE_LINE_KEY}
+
+
+def _source_line_number(payload: dict[str, Any], *, fallback: int) -> int:
+    value = payload.get(_SOURCE_LINE_KEY)
+    if isinstance(value, int):
+        return value
+    return fallback
 
 
 def _trusted_outcome_assertion(payload: dict[str, Any], *, default: bool) -> bool:

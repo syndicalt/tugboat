@@ -22,7 +22,8 @@ Auto-apply is only for narrow Class A changes in an enabled policy lane after a 
 
 - explicit repo policy enabling auto-apply;
 - matching policy version confirmation;
-- at least the configured burn-in days;
+- at least the configured lane burn-in days;
+- at least the production observation period, defaulting to 30 days;
 - low rejection rate;
 - low rollback rate;
 - held-out eval pass;
@@ -37,6 +38,8 @@ Default lane thresholds are intentionally usable but still bounded:
 
 - `docs_hygiene`: 3 burn-in days, 20% maximum rejection rate, 5% maximum rollback rate, 50 changed lines, and 50 added instruction tokens.
 - `skill_improvement`: 7 burn-in days, 15% maximum rejection rate, 3% maximum rollback rate, 30 changed lines, and 30 added instruction tokens.
+
+The lane burn-in threshold is not the same as production observation. Final auto-apply remains blocked until `auto_apply.production_observation_days` is satisfied. The default is 30 days of operator-reviewed proposal-only observation. A shorter lane threshold can be used only when `.sidecar/policy.yaml` records both `auto_apply.narrower_observation_risk_decision` and `auto_apply.observation_rollback_owner`; otherwise Tugboat fails closed with `production_observation_period_too_short` or `narrower_observation_risk_decision_required`.
 
 Repos can tighten these values in `.sidecar/policy.yaml`; runtime auto-apply commands cannot override them.
 The global `auto_apply.max_instruction_token_delta` is an absolute cap, and each lane can set an equal or stricter `max_instruction_token_delta`. Auto-apply fails closed with `instruction_token_delta_missing` if the eval artifact does not include `metrics.instruction_token_delta`, and with `max_instruction_token_delta_exceeded` if the evaluated candidate grows the instruction corpus beyond policy.

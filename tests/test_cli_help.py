@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from tugboat import __version__
 from tugboat.cli import build_parser
 
 
@@ -72,6 +73,16 @@ def test_top_level_help_lists_core_workflow_command_summaries(capsys):
     assert "index parse instruction files and optionally dry-run with --check" in output
     assert "optimize run audit, propose, eval, and acceptance summary" in output
     assert "inspect-decision write decision trace and print bounded review metadata" in output
+
+
+def test_top_level_version_flag_reports_runtime_identity(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as raised:
+        parser.parse_args(["--version"])
+
+    assert raised.value.code == 0
+    assert capsys.readouterr().out.strip() == f"tugboat {__version__}"
 
 
 def test_ops_observability_help_explains_local_outputs(capsys):

@@ -118,6 +118,9 @@ class Policy:
     risk_class_changed_line_budgets: dict[str, int] = field(default_factory=dict)
     editable_headings: tuple[str, ...] = field(default_factory=tuple)
     auto_apply_minimum_burn_in_days: int = 14
+    auto_apply_production_observation_days: int = 30
+    auto_apply_narrower_observation_risk_decision: str = ""
+    auto_apply_observation_rollback_owner: str = ""
     auto_apply_maximum_rejection_rate: float = 0.10
     auto_apply_maximum_rollback_rate: float = 0.02
     forbidden_terms: tuple[str, ...] = (

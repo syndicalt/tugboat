@@ -43,6 +43,9 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
             "max_changed_lines": 50,
             "max_instruction_token_delta": 50,
             "minimum_burn_in_days": 14,
+            "production_observation_days": 30,
+            "narrower_observation_risk_decision": "",
+            "observation_rollback_owner": "",
             "maximum_rejection_rate": 0.10,
             "maximum_rollback_rate": 0.02,
             "lanes": {

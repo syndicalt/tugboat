@@ -302,6 +302,25 @@ def load_policy(repo: Path) -> Policy:
             ),
             "auto_apply.minimum_burn_in_days",
         ),
+        auto_apply_production_observation_days=_as_non_negative_days(
+            auto_apply.get(
+                "production_observation_days",
+                Policy().auto_apply_production_observation_days,
+            ),
+            "auto_apply.production_observation_days",
+        ),
+        auto_apply_narrower_observation_risk_decision=str(
+            auto_apply.get(
+                "narrower_observation_risk_decision",
+                Policy().auto_apply_narrower_observation_risk_decision,
+            )
+        ),
+        auto_apply_observation_rollback_owner=str(
+            auto_apply.get(
+                "observation_rollback_owner",
+                Policy().auto_apply_observation_rollback_owner,
+            )
+        ),
         auto_apply_maximum_rejection_rate=float(
             auto_apply.get(
                 "maximum_rejection_rate",

@@ -57,7 +57,7 @@ def _confirmed(**overrides: object) -> AutoApplyConfirmation:
 
 def _ready(**overrides: object) -> AutoApplyReadiness:
     values = {
-        "burn_in_days": 14,
+        "burn_in_days": 30,
         "policy": _enabled_policy(),
         "confirmation": _confirmed(),
         "active_incidents": (),
@@ -69,6 +69,9 @@ def _ready(**overrides: object) -> AutoApplyReadiness:
 def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     assert AutoApplyPolicy().enabled is False
     assert AutoApplyPolicy().minimum_burn_in_days == 14
+    assert AutoApplyPolicy().production_observation_days == 30
+    assert AutoApplyPolicy().narrower_observation_risk_decision == ""
+    assert AutoApplyPolicy().observation_rollback_owner == ""
     assert AutoApplyPolicy().maximum_rejection_rate == 0.10
     assert AutoApplyPolicy().maximum_rollback_rate == 0.02
     assert AutoApplyPolicy().max_changed_lines == 50
@@ -81,7 +84,7 @@ def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     without_policy = evaluate_auto_apply(
         candidate=_passing_candidate(),
         readiness=AutoApplyReadiness(
-            burn_in_days=14,
+            burn_in_days=30,
             policy=None,
             confirmation=_confirmed(),
         ),
@@ -89,7 +92,7 @@ def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     default_policy = evaluate_auto_apply(
         candidate=_passing_candidate(),
         readiness=AutoApplyReadiness(
-            burn_in_days=14,
+            burn_in_days=30,
             policy=AutoApplyPolicy(),
             confirmation=_confirmed(policy_version=1),
         ),
@@ -100,6 +103,54 @@ def test_auto_apply_policy_defaults_off_and_requires_explicit_policy():
     assert "explicit_policy_required" in without_policy.reasons
     assert default_policy.eligible is False
     assert "auto_apply_disabled" in default_policy.reasons
+
+
+def test_auto_apply_requires_default_production_observation_period():
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(burn_in_days=29),
+    )
+    accepted = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(burn_in_days=30),
+    )
+
+    assert decision.eligible is False
+    assert decision.reasons == ("production_observation_period_too_short",)
+    assert accepted.eligible is True
+
+
+def test_auto_apply_allows_shorter_observation_only_with_risk_decision_and_rollback_owner():
+    missing_decision = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(
+            burn_in_days=3,
+            policy=_enabled_policy(observation_rollback_owner="release-owner@example.com"),
+        ),
+    )
+    missing_owner = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(
+            burn_in_days=3,
+            policy=_enabled_policy(narrower_observation_risk_decision="approved-docs-hygiene"),
+        ),
+    )
+    accepted = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(
+            burn_in_days=3,
+            policy=_enabled_policy(
+                narrower_observation_risk_decision="approved-docs-hygiene",
+                observation_rollback_owner="release-owner@example.com",
+            ),
+        ),
+    )
+
+    assert missing_decision.eligible is False
+    assert missing_decision.reasons == ("narrower_observation_risk_decision_required",)
+    assert missing_owner.eligible is False
+    assert missing_owner.reasons == ("narrower_observation_risk_decision_required",)
+    assert accepted.eligible is True
 
 
 def test_auto_apply_requires_cli_confirmation_for_enabled_policy():
@@ -142,6 +193,7 @@ def test_auto_apply_reports_all_auditable_ineligibility_reasons():
     assert decision.eligible is False
     assert decision.approval_bundle is None
     assert decision.reasons == (
+        "production_observation_period_too_short",
         "burn_in_period_too_short",
         "repository_not_allowlisted",
         "change_class_not_allowed",
@@ -191,7 +243,7 @@ def test_forbidden_categories_and_non_class_a_changes_are_never_eligible():
 def test_forbidden_category_blocks_even_when_docs_hygiene_lane_matches():
     decision = evaluate_auto_apply(
         candidate=_passing_candidate(categories=("typo_fix", "secrets")),
-        readiness=_ready(burn_in_days=3),
+        readiness=_ready(),
     )
 
     assert decision.eligible is False
@@ -217,9 +269,13 @@ def test_auto_apply_requires_narrow_allowed_change_type():
 
 
 def test_docs_hygiene_lane_relaxes_small_safe_changes_without_cli_thresholds():
+    policy = _enabled_policy(
+        narrower_observation_risk_decision="approved-docs-hygiene",
+        observation_rollback_owner="release-owner@example.com",
+    )
     decision = evaluate_auto_apply(
         candidate=_passing_candidate(changed_lines=50, rejection_rate=0.20, rollback_rate=0.05),
-        readiness=_ready(burn_in_days=3),
+        readiness=_ready(policy=policy, burn_in_days=3),
     )
 
     assert decision.eligible is True
@@ -227,6 +283,10 @@ def test_docs_hygiene_lane_relaxes_small_safe_changes_without_cli_thresholds():
 
 
 def test_skill_improvement_lane_has_separate_thresholds():
+    policy = _enabled_policy(
+        narrower_observation_risk_decision="approved-skill-improvement",
+        observation_rollback_owner="release-owner@example.com",
+    )
     accepted = evaluate_auto_apply(
         candidate=_passing_candidate(
             categories=("skill_improvement",),
@@ -234,11 +294,11 @@ def test_skill_improvement_lane_has_separate_thresholds():
             rejection_rate=0.15,
             rollback_rate=0.03,
         ),
-        readiness=_ready(burn_in_days=7),
+        readiness=_ready(policy=policy, burn_in_days=7),
     )
     too_large = evaluate_auto_apply(
         candidate=_passing_candidate(categories=("skill_improvement",), changed_lines=31),
-        readiness=_ready(burn_in_days=7),
+        readiness=_ready(policy=policy, burn_in_days=7),
     )
 
     assert accepted.eligible is True
@@ -300,7 +360,7 @@ def test_auto_apply_policy_pause_controls_block_by_repo_lane_and_category():
 
     decision = evaluate_auto_apply(
         candidate=_passing_candidate(),
-        readiness=_ready(policy=policy, burn_in_days=3),
+        readiness=_ready(policy=policy),
     )
 
     assert decision.eligible is False
@@ -365,7 +425,17 @@ def test_auto_apply_lane_can_set_stricter_token_growth_limit():
 
     decision = evaluate_auto_apply(
         candidate=_passing_candidate(instruction_token_delta=6),
-        readiness=_ready(policy=policy, burn_in_days=3),
+        readiness=_ready(
+            policy=AutoApplyPolicy(
+                enabled=True,
+                version=9,
+                allowed_repositories=("allowed/repo",),
+                narrower_observation_risk_decision="approved-docs-hygiene",
+                observation_rollback_owner="release-owner@example.com",
+                lanes=policy.lanes,
+            ),
+            burn_in_days=3,
+        ),
     )
 
     assert decision.eligible is False

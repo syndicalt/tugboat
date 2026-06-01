@@ -35,6 +35,8 @@ REASON_ORDER = (
     "auto_apply_incident_pause_active",
     "cli_confirmation_required",
     "cli_confirmation_policy_version_mismatch",
+    "production_observation_period_too_short",
+    "narrower_observation_risk_decision_required",
     "burn_in_period_too_short",
     "repository_not_allowlisted",
     "change_class_not_allowed",
@@ -110,6 +112,9 @@ class AutoApplyPolicy:
     allowed_repositories: tuple[str, ...] = field(default_factory=tuple)
     allowed_change_classes: tuple[str, ...] = ("A",)
     minimum_burn_in_days: int = 14
+    production_observation_days: int = 30
+    narrower_observation_risk_decision: str = ""
+    observation_rollback_owner: str = ""
     maximum_rejection_rate: float = 0.10
     maximum_rollback_rate: float = 0.02
     max_changed_lines: int = 50
@@ -285,7 +290,27 @@ def evaluate_auto_apply(
         if policy.pause_for_incident and readiness.active_incidents:
             found_reasons.add("auto_apply_incident_pause_active")
         threshold_policy = lane if lane is not None else policy
-        if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
+        has_narrower_observation_approval = bool(
+            policy.narrower_observation_risk_decision.strip()
+            and policy.observation_rollback_owner.strip()
+        )
+        has_partial_narrower_observation_approval = bool(
+            policy.narrower_observation_risk_decision.strip()
+            or policy.observation_rollback_owner.strip()
+        )
+        if readiness.burn_in_days < policy.production_observation_days:
+            if has_narrower_observation_approval:
+                if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
+                    found_reasons.add("burn_in_period_too_short")
+            elif has_partial_narrower_observation_approval:
+                found_reasons.add("narrower_observation_risk_decision_required")
+                if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
+                    found_reasons.add("burn_in_period_too_short")
+            else:
+                found_reasons.add("production_observation_period_too_short")
+                if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
+                    found_reasons.add("burn_in_period_too_short")
+        elif readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
             found_reasons.add("burn_in_period_too_short")
         if candidate.rejection_rate > threshold_policy.maximum_rejection_rate:
             found_reasons.add("rejection_rate_too_high")

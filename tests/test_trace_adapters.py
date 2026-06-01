@@ -123,6 +123,72 @@ def test_ingest_codex_session_maps_response_item_envelopes(tmp_path: Path):
     assert episode.final_answer == "Done"
 
 
+def test_codex_response_item_preserves_source_line_for_multi_event_rows(
+    tmp_path: Path,
+):
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: CODEX.md\n"
+        "@@\n"
+        "-Use tests.\n"
+        "+Use regression tests.\n"
+        "*** End Patch\n"
+    )
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call",
+                            "call_id": "call-1",
+                            "name": "apply_patch",
+                            "input": patch,
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "call_id": "call-2",
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pytest -q"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-2",
+                            "output": "Process exited with code 1",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = ingest_codex_session_bundle(session)
+
+    event_lines = [(event.event_type, event.line_number) for event in bundle.events]
+    assert event_lines == [
+        ("tool_call", 1),
+        ("diff", 1),
+        ("tool_call", 2),
+        ("tool_result", 3),
+        ("test_result", 3),
+    ]
+    assert all("_tugboat_source_line_number" not in event.payload for event in bundle.events)
+
+
 def test_ingest_codex_session_rejects_non_object_jsonl_line_with_line_number(
     tmp_path: Path,
 ):
@@ -539,6 +605,61 @@ def test_ingest_claude_transcript_maps_jsonl_content_blocks(tmp_path: Path):
         "call_id": "toolu_1",
         "derived_from": "toolu_1",
     }
+
+
+def test_claude_jsonl_preserves_source_line_for_multi_event_rows(tmp_path: Path):
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "I'll inspect."},
+                                {
+                                    "type": "tool_use",
+                                    "id": "toolu_1",
+                                    "name": "Bash",
+                                    "input": {"command": "pytest -q"},
+                                },
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "toolu_1",
+                                    "content": "Process exited with code 1",
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = ingest_claude_transcript_bundle(transcript)
+
+    event_lines = [(event.event_type, event.line_number) for event in bundle.events]
+    assert event_lines == [
+        ("final_answer", 1),
+        ("tool_call", 1),
+        ("tool_result", 2),
+        ("test_result", 2),
+    ]
+    assert all("_tugboat_source_line_number" not in event.payload for event in bundle.events)
 
 
 def test_ingest_claude_transcript_derives_diff_evidence_from_edit_tool(

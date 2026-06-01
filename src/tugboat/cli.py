@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import yaml
 from yaml import YAMLError
 
+from tugboat import __version__
 from tugboat.artifacts import (
     ArtifactValidationError,
     SCHEMA_VERSION,
@@ -195,6 +196,9 @@ def _initialize_repo_policy(repo: Path) -> Path:
             "max_changed_lines": Policy().auto_apply_max_changed_lines,
             "max_instruction_token_delta": Policy().auto_apply_max_instruction_token_delta,
             "minimum_burn_in_days": Policy().auto_apply_minimum_burn_in_days,
+            "production_observation_days": Policy().auto_apply_production_observation_days,
+            "narrower_observation_risk_decision": "",
+            "observation_rollback_owner": "",
             "maximum_rejection_rate": Policy().auto_apply_maximum_rejection_rate,
             "maximum_rollback_rate": Policy().auto_apply_maximum_rollback_rate,
             "lanes": {
@@ -418,6 +422,7 @@ def _apply_blocked_artifact_ref(repo: Path, run_dir: Path, artifact_name: str) -
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
+    parser.add_argument("--version", action="version", version=f"tugboat {__version__}")
     subcommands = parser.add_subparsers(dest="command", required=True)
     doctor = subcommands.add_parser(
         "doctor",
@@ -3920,6 +3925,11 @@ def _auto_apply_readiness(
             paused_categories=policy.auto_apply_paused_categories,
             pause_for_incident=policy.auto_apply_pause_for_incident,
             minimum_burn_in_days=policy.auto_apply_minimum_burn_in_days,
+            production_observation_days=policy.auto_apply_production_observation_days,
+            narrower_observation_risk_decision=(
+                policy.auto_apply_narrower_observation_risk_decision
+            ),
+            observation_rollback_owner=policy.auto_apply_observation_rollback_owner,
             maximum_rejection_rate=policy.auto_apply_maximum_rejection_rate,
             maximum_rollback_rate=policy.auto_apply_maximum_rollback_rate,
             max_changed_lines=policy.auto_apply_max_changed_lines,
@@ -4189,6 +4199,9 @@ def _auto_apply_decision_snapshot(
             "paused_categories": list(policy.paused_categories),
             "pause_for_incident": policy.pause_for_incident,
             "minimum_burn_in_days": policy.minimum_burn_in_days,
+            "production_observation_days": policy.production_observation_days,
+            "narrower_observation_risk_decision": policy.narrower_observation_risk_decision,
+            "observation_rollback_owner": policy.observation_rollback_owner,
             "maximum_rejection_rate": policy.maximum_rejection_rate,
             "maximum_rollback_rate": policy.maximum_rollback_rate,
             "max_changed_lines": policy.max_changed_lines,
