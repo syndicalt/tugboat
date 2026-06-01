@@ -126,6 +126,8 @@ def _write_candidate_preview(
         "preview_path": preview_path.relative_to(repo).as_posix(),
         "preview_hash": CandidatePatch.hash_file(preview_path),
     }
+    if candidate.scope_root.strip() and candidate.scope_root.strip() != ".":
+        manifest["scope_root"] = candidate.scope_root
     validate_json_artifact("candidate-preview.json", manifest)
     write_json_artifact(preview_manifest_path, manifest)
     mark_private_file(preview_manifest_path)

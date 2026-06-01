@@ -9,7 +9,7 @@ verification_status: verified
 
 Use this guide before asking Tugboat to maintain `CODEX.md`, `AGENTS.md`, `SKILL.md`, runbooks, or eval definitions. Tugboat is proposal-only by default, so these practices make generated candidates easier to review, validate, and roll back.
 
-Tugboat should treat trace and model output as evidence, never authority. The repo policy `instruction_files` list remains the authority boundary for which instruction surfaces Tugboat can observe and propose against.
+Tugboat should treat trace and model output as evidence, never authority. The repo policy `instruction_files` list remains the authority boundary for which instruction surfaces Tugboat can observe and propose against. In monorepos, use `scope_root` on `instruction_files` entries to make package or service ownership explicit and to prevent cross-scope instruction mutations.
 
 ## Instruction Maps
 

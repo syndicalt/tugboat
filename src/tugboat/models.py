@@ -13,6 +13,7 @@ class InstructionFilePolicy:
     kind: str
     precedence: int
     protected: bool = False
+    scope_root: str = "."
 
 
 @dataclass(frozen=True)

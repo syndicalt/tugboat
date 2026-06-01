@@ -38,6 +38,8 @@ tugboat index --repo .
 
 The generated policy uses Tugboat's shipped local fixture backend for `llmff`, with `allow_network: false` and no `allowed_providers`, so the proposal loop works without provider credentials.
 
+For monorepos, review `.sidecar/policy.yaml` before indexing. Add `instruction_files[].scope_root` entries for package or service instruction roots, such as `services/api` and `services/web`, so `tugboat index --repo .` observes the intended scoped instruction corpus.
+
 For CI or dry-run adoption, use:
 
 ```bash

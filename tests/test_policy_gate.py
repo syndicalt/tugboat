@@ -95,6 +95,57 @@ def test_policy_gate_rejects_bounded_edit_metadata_targeting_different_file(
     assert decision.reasons == ("bounded_edit_target_mismatch",)
 
 
+def test_policy_gate_rejects_candidate_outside_declared_scope_root(tmp_path: Path):
+    api = tmp_path / "services" / "api" / "CODEX.md"
+    web = tmp_path / "services" / "web" / "CODEX.md"
+    api.parent.mkdir(parents=True)
+    web.parent.mkdir(parents=True)
+    api.write_text("# API\n\nUse API fixtures.\n", encoding="utf-8")
+    web.write_text("# Web\n\nUse browser fixtures.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_file="services/web/CODEX.md",
+        base_hash=CandidatePatch.hash_file(web),
+        diff=(
+            "--- a/services/web/CODEX.md\n"
+            "+++ b/services/web/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Web\n"
+            " \n"
+            " Use browser fixtures.\n"
+            "+Clarify API retry guidance.\n"
+        ),
+        scope_root="services/api",
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "services/web/CODEX.md",
+                "section": "Web",
+                "changed_lines": 1,
+                "normative_changes": 0,
+                "scope_root": "services/api",
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(
+                    "CODEX.md", "agent_policy", 70, True, "services/api"
+                ),
+                InstructionFilePolicy(
+                    "CODEX.md", "agent_policy", 70, True, "services/web"
+                ),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is False
+    assert "cross_scope_mutation" in decision.reasons
+
+
 def test_policy_gate_allows_create_diff_when_new_path_matches_candidate_base_file(
     tmp_path: Path,
 ):
@@ -272,6 +323,51 @@ def test_policy_gate_allows_base_file_matching_instruction_file_glob(tmp_path: P
 
     assert decision.allowed is True
     assert "base_file_not_allowed" not in decision.reasons
+
+
+def test_policy_gate_allows_candidate_inside_declared_scope_root(tmp_path: Path):
+    web = tmp_path / "services" / "web" / "CODEX.md"
+    web.parent.mkdir(parents=True)
+    web.write_text("# Web\n\nUse browser fixtures.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_file="services/web/CODEX.md",
+        base_hash=CandidatePatch.hash_file(web),
+        diff=(
+            "--- a/services/web/CODEX.md\n"
+            "+++ b/services/web/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Web\n"
+            " \n"
+            " Use browser fixtures.\n"
+            "+Clarify browser fixture setup.\n"
+        ),
+        scope_root="services/web",
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "services/web/CODEX.md",
+                "section": "Web",
+                "changed_lines": 1,
+                "normative_changes": 0,
+                "scope_root": "services/web",
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(
+        tmp_path,
+        Policy(
+            instruction_files=(
+                InstructionFilePolicy(
+                    "CODEX.md", "agent_policy", 70, True, "services/web"
+                ),
+            ),
+        ),
+        candidate,
+    )
+
+    assert decision.allowed is True
+    assert "cross_scope_mutation" not in decision.reasons
 
 
 def test_policy_gate_rejects_glob_matched_lower_priority_contradiction(

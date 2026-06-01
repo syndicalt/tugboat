@@ -62,10 +62,11 @@ def instruction_paths(
     paths: list[tuple[Path, InstructionFilePolicy]] = []
     seen: set[Path] = set()
     for entry in entries:
+        scope_base = _scope_base(repo, entry)
         if any(char in entry.path for char in _GLOB_CHARS):
-            matches = (path for path in repo.glob(entry.path) if path.is_file())
+            matches = (path for path in scope_base.glob(entry.path) if path.is_file())
         else:
-            path = repo / entry.path
+            path = scope_base / entry.path
             matches = (candidate for candidate in (path,) if candidate.is_file())
         for path in matches:
             if path in seen:
@@ -79,3 +80,10 @@ def instruction_paths(
                 )
             paths.append((path, entry))
     return paths
+
+
+def _scope_base(repo: Path, entry: InstructionFilePolicy) -> Path:
+    scope_root = entry.scope_root.strip()
+    if not scope_root or scope_root == ".":
+        return repo
+    return repo / scope_root

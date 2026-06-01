@@ -2153,6 +2153,7 @@ def test_validate_candidate_artifact_accepts_bounded_edit_metadata():
             "risk_class": "instruction_clarification",
             "rationale": "because",
             "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+            "scope_root": ".",
             "sources": [{"source_id": "ev_1", "trusted": True}],
             "bounded_edit_metadata": [
                 {
@@ -2161,6 +2162,7 @@ def test_validate_candidate_artifact_accepts_bounded_edit_metadata():
                     "section": "Testing",
                     "changed_lines": 1,
                     "normative_changes": 0,
+                    "scope_root": ".",
                 }
             ],
         },

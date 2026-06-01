@@ -111,6 +111,7 @@ instruction_files:
     kind: agent_policy
     precedence: 70
     protected: true
+    scope_root: .
 auto_apply:
   enabled: false
   max_changed_lines: 12
@@ -130,6 +131,7 @@ llmff:
 
     assert len(policy.instruction_files) == 1
     assert policy.instruction_files[0].path == "CODEX.md"
+    assert policy.instruction_files[0].scope_root == "."
     assert policy.auto_apply_max_changed_lines == 12
     assert policy.auto_apply_max_instruction_token_delta == 9
     assert policy.auto_apply_production_observation_days == 45
@@ -154,6 +156,67 @@ auto_apply:
     policy = load_policy(tmp_path)
 
     assert policy.auto_apply_allowed_risk_classes == ("A",)
+
+
+@pytest.mark.parametrize("scope_root", ["/services/api", "../api", "services\\api"])
+def test_load_policy_yaml_rejects_instruction_file_scope_root_escape(
+    tmp_path: Path,
+    scope_root: str,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+instruction_files:
+  - path: CODEX.md
+    scope_root: {scope_root}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="scope_root"):
+        load_policy(tmp_path)
+
+
+def test_load_policy_yaml_defaults_null_instruction_file_scope_root_to_repo_root(
+    tmp_path: Path,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+instruction_files:
+  - path: CODEX.md
+    scope_root:
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.instruction_files[0].scope_root == "."
+
+
+def test_load_policy_yaml_rejects_non_string_instruction_file_scope_root(
+    tmp_path: Path,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+instruction_files:
+  - path: CODEX.md
+    scope_root:
+      - services/api
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="scope_root"):
+        load_policy(tmp_path)
 
 
 def test_load_policy_yaml_reads_auto_apply_lanes(tmp_path: Path):

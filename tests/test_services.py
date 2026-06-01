@@ -176,6 +176,50 @@ def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Pat
     }
 
 
+def test_write_candidate_records_scoped_preview_manifest(tmp_path: Path):
+    base_file = tmp_path / "services" / "web" / "CODEX.md"
+    base_file.parent.mkdir(parents=True)
+    base_file.write_text("# Rules\n", encoding="utf-8")
+    diff = (
+        "--- a/services/web/CODEX.md\n"
+        "+++ b/services/web/CODEX.md\n"
+        "@@ -1,1 +1,2 @@\n"
+        " # Rules\n"
+        "+Clarify scoped browser tests.\n"
+    )
+    candidate = CandidatePatch(
+        audit_id=2,
+        base_file="services/web/CODEX.md",
+        base_hash=CandidatePatch.hash_file(base_file),
+        diff=diff,
+        risk_class="instruction_clarification",
+        rationale="Clarify scoped browser guidance.",
+        scope_root="services/web",
+        sources=(SourceRef("trace-1", trusted=True),),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "services/web/CODEX.md",
+                "section": "Testing",
+                "changed_lines": 1,
+                "normative_changes": 0,
+                "scope_root": "services/web",
+            },
+        ),
+    )
+
+    artifacts = write_candidate(tmp_path, "run-1", candidate)
+
+    candidate_payload = json.loads(artifacts.json_path.read_text(encoding="utf-8"))
+    preview_payload = json.loads(artifacts.preview_manifest_path.read_text(encoding="utf-8"))
+    assert candidate_payload["scope_root"] == "services/web"
+    assert candidate_payload["bounded_edit_metadata"][0]["scope_root"] == "services/web"
+    assert preview_payload["scope_root"] == "services/web"
+    assert preview_payload["preview_path"] == (
+        ".sidecar/runs/run-1/candidate-preview/services/web/CODEX.md"
+    )
+
+
 def test_write_candidate_preserves_bounded_edit_operator_metadata(tmp_path: Path):
     base_file = tmp_path / "CODEX.md"
     base_file.write_text("# Rules\n", encoding="utf-8")

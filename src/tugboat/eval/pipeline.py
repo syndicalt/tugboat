@@ -86,7 +86,12 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
             preview_root = _candidate_preview_root(repo, run_dir)
         except ValueError as error:
             return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
-        offline_report = run_offline_eval_suite(repo, suite_id=suite_id, preview_root=preview_root)
+        offline_report = run_offline_eval_suite(
+            repo,
+            suite_id=suite_id,
+            preview_root=preview_root,
+            policy=policy,
+        )
         passed = offline_report.passed
         metrics = offline_report.metrics
         trigger_score = offline_report.trigger_score
@@ -661,6 +666,7 @@ def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
         expected_behavior_change=str(metadata.get("expected_behavior_change", "Not specified.")),
         evals_required=tuple(str(item) for item in metadata.get("evals_required", [])),
         rollback_plan=tuple(str(item) for item in metadata.get("rollback_plan", [])),
+        scope_root=str(metadata.get("scope_root", ".")),
         sources=tuple(
             SourceRef(str(source["source_id"]), trusted=bool(source["trusted"]))
             for source in metadata.get("sources", [])

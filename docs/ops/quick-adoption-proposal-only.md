@@ -14,6 +14,7 @@ Use this guide to adopt Tugboat in an existing repository in under 15 minutes wi
 - Python 3.11 or newer is available.
 - Tugboat is installed from the source tree or package.
 - The repository has at least one instruction or harness document, such as `AGENTS.md`, `CODEX.md`, `CLAUDE.md`, `SKILL.md`, or `docs/runbook.md`.
+- Monorepos should map service or package instruction roots with `instruction_files[].scope_root` before indexing.
 - The default policy stays `proposal_only`.
 - No live provider credentials are configured or required.
 

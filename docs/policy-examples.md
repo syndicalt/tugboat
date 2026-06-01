@@ -25,6 +25,7 @@ instruction_files:
     kind: agent_policy
     precedence: 70
     protected: true
+    scope_root: .
 auto_apply:
   enabled: false
 roadmap:
@@ -51,7 +52,7 @@ This fixture backend is local, credential-free, and intended for proposal-only a
 
 `retention.max_scan_files` bounds local `.sidecar/runs` retention and redaction scans. When the budget is exceeded, Tugboat blocks cleanup before deletion or export so operators can review sidecar growth instead of running unbounded maintenance work.
 
-`index.max_instruction_files` bounds configured instruction discovery before parsing or index writes. When the budget is exceeded, `tugboat index` blocks without writing `.sidecar/db.sqlite`, which keeps large repository onboarding deterministic.
+`index.max_instruction_files` bounds configured instruction discovery after `scope_root` expansion and dedupe, before parsing or index writes. When the budget is exceeded, `tugboat index` blocks without writing `.sidecar/db.sqlite`, which keeps large repository onboarding deterministic.
 
 `trace.max_input_bytes` bounds audit, optimize, train-trace, and MCP episode trace inputs before Tugboat copies or persists the payload. `trace.max_events` bounds normalized JSONL ingestion before Tugboat builds an unbounded trace bundle. Raise these only for reviewed large-trace workflows.
 
@@ -69,6 +70,26 @@ llmff:
 ```
 
 Provider-backed runs require explicit provider policy, `allow_network: true`, and reviewed manifest hashes. Omit `allowed_providers` for credential-free local and fixture-backed runs.
+
+## Monorepo Scope Roots
+
+Use `scope_root` when instruction files have the same name in multiple services or packages. The `path` is relative to `scope_root`; indexed document refs, candidate files, diffs, previews, apply targets, and audit evidence stay repo-relative.
+
+```yaml
+instruction_files:
+  - path: CODEX.md
+    kind: agent_policy
+    precedence: 70
+    protected: true
+    scope_root: services/api
+  - path: CODEX.md
+    kind: agent_policy
+    precedence: 70
+    protected: true
+    scope_root: services/web
+```
+
+Scoped candidates must declare the same `scope_root` and target files under that root. Tugboat rejects cross-scope mutations before apply.
 
 ## Pull Request Apply Mode
 

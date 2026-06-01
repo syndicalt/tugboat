@@ -1051,6 +1051,7 @@ def _candidate_from_payload(payload: dict[str, object], *, audit_id: int) -> Can
         ),
         evals_required=_required_non_empty_string_list(payload, "evals_required", "candidate"),
         rollback_plan=_required_non_empty_string_list(payload, "rollback_plan", "candidate"),
+        scope_root=_optional_non_empty_string(payload, "scope_root", "candidate") or ".",
         sources=_source_refs_from_payload(payload),
         pending_audit_eval_definition_paths=_optional_string_list(
             payload,
@@ -1117,6 +1118,11 @@ def _bounded_edit_metadata_item_from_payload(item: object, *, index: int) -> dic
         "section": _required_non_empty_string(item, "section", prefix),
         "changed_lines": _required_non_negative_int(item, "changed_lines", prefix),
         "normative_changes": _required_non_negative_int(item, "normative_changes", prefix),
+        **(
+            {"scope_root": scope_root}
+            if (scope_root := _optional_non_empty_string(item, "scope_root", prefix))
+            else {}
+        ),
     }
 
 
@@ -1154,6 +1160,19 @@ def _required_non_empty_string(item: dict[str, object], field: str, prefix: str)
     value = item.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{prefix}.{field} is required")
+    return value
+
+
+def _optional_non_empty_string(
+    item: dict[str, object],
+    field: str,
+    prefix: str,
+) -> str | None:
+    value = item.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{prefix}.{field} must be a non-empty string")
     return value
 
 

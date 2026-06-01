@@ -12,7 +12,9 @@ import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from tugboat.corpus.indexer import instruction_paths
 from tugboat.corpus.markdown import PARSER_VERSION, parse_markdown
+from tugboat.models import Policy
 
 
 class Severity(str, Enum):
@@ -151,11 +153,12 @@ def run_offline_eval_suite(
     *,
     suite_id: str,
     preview_root: Path | None = None,
+    policy: Policy | None = None,
 ) -> OfflineEvalReport:
     if suite_id != "all":
         raise ValueError("only offline suite 'all' is supported")
 
-    policy_files = _instruction_files(root, preview_root=preview_root)
+    policy_files = _instruction_files(root, preview_root=preview_root, policy=policy)
     policy_pairs = tuple(
         _instruction_text_pair(path, root=root, preview_root=preview_root)
         for path in policy_files
@@ -174,7 +177,9 @@ def run_offline_eval_suite(
     fixture_metrics, fixture_cases = _run_fixture_cases(root)
     candidate_preview_files = 0
     if preview_root is not None:
-        candidate_preview_files = len(_instruction_files(preview_root))
+        candidate_preview_files = sum(
+            1 for path in policy_files if _preview_file_exists(path, root=root, preview_root=preview_root)
+        )
     structural_cases = _structural_eval_cases(
         policy_files,
         policy_texts,
@@ -272,7 +277,14 @@ def run_offline_eval_suite(
     )
 
 
-def _instruction_files(root: Path, *, preview_root: Path | None = None) -> tuple[Path, ...]:
+def _instruction_files(
+    root: Path,
+    *,
+    preview_root: Path | None = None,
+    policy: Policy | None = None,
+) -> tuple[Path, ...]:
+    if policy is not None:
+        return tuple(path for path, _ in instruction_paths(root, policy))
     return tuple(
         path
         for filename in _INSTRUCTION_FILENAMES
@@ -289,6 +301,10 @@ def _preview_overlay_path(path: Path, *, root: Path, preview_root: Path | None) 
     if preview_path.exists():
         return preview_path
     return path
+
+
+def _preview_file_exists(path: Path, *, root: Path, preview_root: Path) -> bool:
+    return (preview_root / path.relative_to(root)).exists()
 
 
 def _instruction_text_pair(path: Path, *, root: Path, preview_root: Path | None) -> tuple[str, str]:

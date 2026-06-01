@@ -18,12 +18,28 @@ DEFAULT_INSTRUCTION_FILES = (
 
 
 def _as_instruction_file(raw: dict[str, Any]) -> InstructionFilePolicy:
+    scope_root = _as_scope_root(raw.get("scope_root", "."))
     return InstructionFilePolicy(
         path=str(raw["path"]),
         kind=str(raw.get("kind", "repo_policy")),
         precedence=int(raw.get("precedence", 50)),
         protected=bool(raw.get("protected", False)),
+        scope_root=scope_root,
     )
+
+
+def _as_scope_root(raw: Any) -> str:
+    if raw is None:
+        return "."
+    if not isinstance(raw, str):
+        raise ValueError("instruction_files.scope_root must be a string")
+    value = raw.strip()
+    if value in {"", "."}:
+        return "."
+    path = Path(value)
+    if path.is_absolute() or "\\" in value or any(part == ".." for part in path.parts):
+        raise ValueError("instruction_files.scope_root must be repo-relative")
+    return path.as_posix().rstrip("/")
 
 
 def _as_non_negative_days(raw: Any, field_name: str) -> int:

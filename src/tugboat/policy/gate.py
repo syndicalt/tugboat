@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tugboat.patches import apply_unified_diff, bounded_edit_metadata_mismatch_fields
 
-from tugboat.models import Policy
+from tugboat.models import InstructionFilePolicy, Policy
 from tugboat.security.secrets import scan_text
 
 
@@ -16,6 +16,7 @@ DENIAL_REASON_ORDER = (
     "base_hash_mismatch",
     "base_file_outside_repo",
     "base_file_not_allowed",
+    "cross_scope_mutation",
     "bounded_edit_target_mismatch",
     "bounded_edit_diff_mismatch",
     "pending_eval_definition_edit",
@@ -163,6 +164,7 @@ class CandidatePatch:
     expected_behavior_change: str = "Not specified."
     evals_required: tuple[str, ...] = ("governance-regression",)
     rollback_plan: tuple[str, ...] = ("tugboat", "rollback", "--decision", "latest")
+    scope_root: str = "."
     sources: tuple[SourceRef, ...] = ()
     pending_audit_eval_definition_paths: tuple[str, ...] = ()
     bounded_edit_metadata: tuple[dict[str, object], ...] = ()
@@ -199,6 +201,8 @@ class CandidatePatch:
             payload["pending_audit_eval_definition_paths"] = list(
                 self.pending_audit_eval_definition_paths
             )
+        if _normalize_scope_root(self.scope_root):
+            payload["scope_root"] = self.scope_root
         payload["bounded_edit_metadata"] = list(self.bounded_edit_metadata)
         return payload
 
@@ -226,6 +230,8 @@ def evaluate_candidate(
         found_reasons.add("base_file_outside_repo")
     if not _is_allowed_base_file(candidate.base_file, policy):
         found_reasons.add("base_file_not_allowed")
+    if _has_cross_scope_mutation(candidate, policy):
+        found_reasons.add("cross_scope_mutation")
     if _is_pending_eval_definition_edit(candidate.base_file, policy, candidate):
         found_reasons.add("pending_eval_definition_edit")
     if _is_sidecar_approval_policy(base_path, repo_root):
@@ -412,6 +418,42 @@ def _has_bounded_edit_target_mismatch(candidate: CandidatePatch) -> bool:
         _repo_relative_posix(str(metadata.get("file", ""))) != normalized_base
         for metadata in candidate.bounded_edit_metadata
     )
+
+
+def _has_cross_scope_mutation(candidate: CandidatePatch, policy: Policy) -> bool:
+    candidate_scope = _normalize_scope_root(candidate.scope_root)
+    metadata_scopes = {
+        _normalize_scope_root(str(metadata.get("scope_root", "")))
+        for metadata in candidate.bounded_edit_metadata
+        if str(metadata.get("scope_root", "")).strip()
+    }
+    declared_scopes = {scope for scope in metadata_scopes if scope}
+    if candidate_scope:
+        declared_scopes.add(candidate_scope)
+    if len(declared_scopes) > 1:
+        return True
+    declared_scope = next(iter(declared_scopes), "")
+    matching_entries = _matching_instruction_file_entries(candidate.base_file, policy)
+    matching_scopes = {
+        normalized_scope
+        for entry in matching_entries
+        for normalized_scope in (_normalize_scope_root(entry.scope_root),)
+        if normalized_scope
+    }
+    if declared_scope:
+        if not _path_is_under_scope(candidate.base_file, declared_scope):
+            return True
+        for metadata in candidate.bounded_edit_metadata:
+            metadata_file = str(metadata.get("file", candidate.base_file))
+            if not _path_is_under_scope(metadata_file, declared_scope):
+                return True
+        if matching_scopes and declared_scope not in matching_scopes:
+            return True
+        if not matching_scopes:
+            return True
+    elif matching_scopes:
+        return True
+    return False
 
 
 def _has_bounded_edit_diff_mismatch(repo: Path, candidate: CandidatePatch) -> bool:
@@ -706,16 +748,27 @@ def _is_markdown_file(path: str) -> bool:
 
 def _is_allowed_base_file(base_file: str, policy: Policy) -> bool:
     entries = policy.instruction_files
-    allowed = {entry.path for entry in entries} or {
-        "AGENTS.md",
-        "CODEX.md",
-        "CLAUDE.md",
-        "SKILL.md",
-    }
     normalized_base = _repo_relative_posix(base_file)
+    if entries:
+        return any(
+            fnmatch.fnmatchcase(normalized_base, _effective_instruction_path(entry))
+            for entry in entries
+        )
     return any(
-        fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
-        for pattern in allowed
+        fnmatch.fnmatchcase(normalized_base, pattern)
+        for pattern in {"AGENTS.md", "CODEX.md", "CLAUDE.md", "SKILL.md"}
+    )
+
+
+def _matching_instruction_file_entries(
+    base_file: str,
+    policy: Policy,
+) -> tuple[InstructionFilePolicy, ...]:
+    normalized_base = _repo_relative_posix(base_file)
+    return tuple(
+        entry
+        for entry in policy.instruction_files
+        if fnmatch.fnmatchcase(normalized_base, _effective_instruction_path(entry))
     )
 
 
@@ -723,7 +776,7 @@ def _is_protected_instruction_file(base_file: str, policy: Policy) -> bool:
     normalized_base = _repo_relative_posix(base_file)
     return any(
         entry.protected
-        and fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(entry.path))
+        and fnmatch.fnmatchcase(normalized_base, _effective_instruction_path(entry))
         for entry in policy.instruction_files
     )
 
@@ -736,7 +789,7 @@ def _is_pending_eval_definition_edit(
     normalized_base = _repo_relative_posix(base_file)
     return any(
         entry.kind == "eval_definition"
-        and fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(entry.path))
+        and fnmatch.fnmatchcase(normalized_base, _effective_instruction_path(entry))
         for entry in policy.instruction_files
     ) or any(
         fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(pattern))
@@ -766,7 +819,7 @@ def _has_higher_priority_contradiction(
         (
             entry
             for entry in policy.instruction_files
-            if fnmatch.fnmatchcase(normalized_base, _repo_relative_posix(entry.path))
+            if fnmatch.fnmatchcase(normalized_base, _effective_instruction_path(entry))
         ),
         None,
     )
@@ -776,7 +829,7 @@ def _has_higher_priority_contradiction(
         _modal_rule(line)
         for entry in policy.instruction_files
         if entry.precedence > candidate_entry.precedence
-        for line in _read_policy_lines(repo / entry.path)
+        for line in _read_policy_lines(repo / _effective_instruction_path(entry))
     )
     if not higher_priority_rules:
         return False
@@ -820,6 +873,31 @@ def _modal_rule(line: str) -> tuple[str, str] | None:
 
 def _repo_relative_posix(path: str) -> str:
     return Path(path).as_posix().lstrip("/")
+
+
+def _effective_instruction_path(entry: InstructionFilePolicy) -> str:
+    normalized_scope = _normalize_scope_root(entry.scope_root)
+    normalized_path = _repo_relative_posix(entry.path)
+    if not normalized_scope:
+        return normalized_path
+    return f"{normalized_scope}/{normalized_path}"
+
+
+def _normalize_scope_root(scope_root: str) -> str:
+    normalized = _repo_relative_posix(scope_root).rstrip("/")
+    if normalized == ".":
+        return ""
+    return normalized
+
+
+def _path_is_under_scope(path: str, scope_root: str) -> bool:
+    normalized_path = _repo_relative_posix(path)
+    normalized_scope = _normalize_scope_root(scope_root)
+    if not normalized_scope:
+        return True
+    return normalized_path == normalized_scope or normalized_path.startswith(
+        f"{normalized_scope}/"
+    )
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

@@ -460,6 +460,142 @@ def test_eval_suite_all_uses_candidate_preview_artifact_for_report_and_db_rows(
     assert eval_run[1] is not None
 
 
+def test_eval_suite_all_uses_scoped_instruction_files(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    scoped = repo / "services" / "web" / "CODEX.md"
+    scoped.parent.mkdir(parents=True)
+    scoped.write_text(
+        "# Policy\n\nYou must run browser fixture tests.\n",
+        encoding="utf-8",
+    )
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+instruction_files:
+  - path: CODEX.md
+    kind: agent_policy
+    precedence: 70
+    protected: true
+    scope_root: services/web
+""".lstrip(),
+        encoding="utf-8",
+    )
+    copytree(FIXTURES / "passing", sidecar / "evals")
+    run_dir = sidecar / "runs" / "run-1"
+    preview = run_dir / "candidate-preview" / "services" / "web" / "CODEX.md"
+    preview.parent.mkdir(parents=True)
+    preview_text = "# Policy\n\nYou must run browser fixture tests.\n"
+    preview.write_text(preview_text, encoding="utf-8")
+    diff = (
+        "--- a/services/web/CODEX.md\n"
+        "+++ b/services/web/CODEX.md\n"
+        "@@ -1,3 +1,3 @@\n"
+        " # Policy\n"
+        " \n"
+        "-You must run browser fixture tests.\n"
+        "+You must run browser fixture tests.\n"
+    )
+    (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="proposal",
+            manifest_hash="fixture-manifest",
+            status="completed",
+            run_dir=run_dir,
+        )
+        audit_id = store.insert_audit(
+            run_id=run_dir.name,
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.75,
+            evidence_refs=["ev_fixture"],
+            instruction_refs=["services/web/CODEX.md"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="services/web/CODEX.md",
+            base_hash="base",
+            diff=diff,
+            risk_class="instruction_clarification",
+            rationale="Fixture candidate for scoped offline eval.",
+            scope_root="services/web",
+            sources=(SourceRef("ev_fixture", trusted=True),),
+            bounded_edit_metadata=(
+                {
+                    "operator": "replace",
+                    "file": "services/web/CODEX.md",
+                    "section": "Policy",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
+                    "scope_root": "services/web",
+                },
+            ),
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=run_dir / "candidate.diff",
+            state="needs_review",
+        )
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": candidate_id,
+                "audit_id": audit_id,
+                "base_file": "services/web/CODEX.md",
+                "base_hash": "base",
+                "diff_hash": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+                "expected_behavior_change": "Keeps scoped browser test guidance.",
+                "evals_required": ["all"],
+                "risk_class": "instruction_clarification",
+                "rationale": "Fixture candidate for scoped offline eval.",
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "scope_root": "services/web",
+                "sources": [{"source_id": "ev_fixture", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "replace",
+                        "file": "services/web/CODEX.md",
+                        "section": "Policy",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                        "scope_root": "services/web",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "candidate-preview.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "base_file": "services/web/CODEX.md",
+                "base_hash": "base",
+                "diff_hash": "diff",
+                "scope_root": "services/web",
+                "preview_path": f".sidecar/runs/{run_dir.name}/candidate-preview/services/web/CODEX.md",
+                "preview_hash": hashlib.sha256(preview_text.encode("utf-8")).hexdigest(),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    assert report["metrics"]["candidate_preview_files"] == 1
+    case_ids = {case["case_id"] for case in report["eval_cases"]}
+    assert "structural:candidate-preview:services/web/CODEX.md" in case_ids
+
+
 def test_eval_suite_all_rejects_missing_candidate_preview_without_repo_fallback(
     tmp_path: Path,
 ):

@@ -790,6 +790,8 @@ DOC_CONTRACTS = {
         "required_text": [
             ".sidecar/policy.yaml",
             "instruction_files",
+            "scope_root",
+            "cross-scope",
             "allowed_providers",
             "allow_network: true",
             "allowed_repositories",

@@ -61,6 +61,30 @@ def test_instruction_paths_accepts_legacy_instruction_file_entries(tmp_path: Pat
     assert paths == [(tmp_path / "CODEX.md", entries[0])]
 
 
+def test_index_repo_expands_instruction_file_scope_roots_to_repo_relative_paths(
+    tmp_path: Path,
+):
+    api = tmp_path / "services" / "api"
+    web = tmp_path / "services" / "web"
+    api.mkdir(parents=True)
+    web.mkdir(parents=True)
+    (api / "CODEX.md").write_text("# API\n\nUse API fixtures.\n", encoding="utf-8")
+    (web / "CODEX.md").write_text("# Web\n\nUse browser fixtures.\n", encoding="utf-8")
+    policy = Policy(
+        instruction_files=(
+            InstructionFilePolicy("CODEX.md", "agent_policy", 70, True, "services/api"),
+            InstructionFilePolicy("CODEX.md", "agent_policy", 70, True, "services/web"),
+        ),
+    )
+
+    result = index_repo(tmp_path, policy)
+
+    assert [document.path for document in result.documents] == [
+        "services/api/CODEX.md",
+        "services/web/CODEX.md",
+    ]
+
+
 def test_index_repo_blocks_when_deduped_instruction_file_budget_is_exceeded(
     tmp_path: Path,
 ):
