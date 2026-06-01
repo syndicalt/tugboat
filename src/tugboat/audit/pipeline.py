@@ -37,6 +37,7 @@ from tugboat.traces.adapters import (
     ingest_claude_transcript_bundle,
     ingest_codex_session_bundle,
     ingest_mcp_session_bundle,
+    load_json_trace_payload,
 )
 from tugboat.traces.ingest import (
     TraceEventBudgetExceeded,
@@ -761,10 +762,7 @@ def detect_trace_format(trace: Path) -> str:
 
 def _trace_sample(trace: Path) -> dict | list[dict]:
     if trace.suffix == ".json":
-        payload = json.loads(trace.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            return payload
-        raise ValueError("JSON trace must contain an object")
+        return load_json_trace_payload(trace)
 
     rows: list[dict] = []
     with trace.open(encoding="utf-8") as handle:

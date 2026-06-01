@@ -654,6 +654,48 @@ def test_audit_cli_auto_trace_format_rejects_unknown_json_object_without_traceba
     assert "Traceback" not in output
 
 
+@pytest.mark.parametrize("trace_format", ["auto", "claude"])
+def test_audit_cli_json_trace_reports_normalized_invalid_json_without_traceback(
+    tmp_path: Path,
+    capsys,
+    trace_format: str,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "claude.json"
+    trace.write_text('{"messages": [', encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                trace_format,
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        "audit blocked: invalid trace: JSON trace contains invalid JSON "
+        "at line 1 column 15"
+    ) in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "invalid_trace"
+    assert audit["llmff_failure_message"] == (
+        "JSON trace contains invalid JSON at line 1 column 15"
+    )
+
+
 def test_audit_cli_ingests_codex_local_session_export_fixture(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

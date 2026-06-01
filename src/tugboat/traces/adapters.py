@@ -56,7 +56,7 @@ def ingest_claude_transcript_bundle(path: Path, *, max_events: int | None = None
             enforce_trace_event_budget(len(events), max_events)
         return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = load_json_trace_payload(path)
     messages = payload.get("messages", [])
     for message in messages:
         if not isinstance(message, dict):
@@ -84,7 +84,7 @@ def ingest_ci_failure(path: Path) -> CanonicalEpisode:
 
 
 def ingest_ci_failure_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = load_json_trace_payload(path)
     suite = str(payload.get("suite", "ci"))
     exit_code = int(payload.get("exit_code", 1))
     events = [
@@ -103,6 +103,19 @@ def ingest_ci_failure_bundle(path: Path, *, max_events: int | None = None) -> Tr
         trusted_outcome_assertions=True,
         max_events=max_events,
     )
+
+
+def load_json_trace_payload(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "JSON trace contains invalid JSON "
+            f"at line {error.lineno} column {error.colno}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise ValueError("JSON trace must contain an object")
+    return payload
 
 
 def ingest_mcp_session(path: Path) -> CanonicalEpisode:

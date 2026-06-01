@@ -160,6 +160,33 @@ def test_optimize_trace_directory_returns_clear_error_without_traceback(
     assert not (repo / ".sidecar" / "runs").exists()
 
 
+def test_optimize_malformed_json_trace_returns_actionable_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "claude.json"
+    trace.write_text('{"messages": [', encoding="utf-8")
+
+    assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert (
+        "audit blocked: invalid trace: JSON trace contains invalid JSON "
+        "at line 1 column 15"
+    ) in output
+    assert "next: validate the trace as JSONL or JSON and rerun with --trace-format auto" in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "invalid_trace"
+    assert audit["llmff_failure_message"] == (
+        "JSON trace contains invalid JSON at line 1 column 15"
+    )
+
+
 def test_optimize_index_budget_failure_exits_cleanly_and_records_failed_run(
     tmp_path: Path,
     capsys,
