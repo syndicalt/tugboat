@@ -4043,6 +4043,90 @@ llmff:
     )
 
 
+def test_propose_suppresses_candidate_matching_rejected_cluster_memory(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        bounded_edit_metadata=[
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Rules",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            }
+        ],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    source_id = canonical["events"][0]["evidence_id"]
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_cluster",
+            key="rejected_cluster:drift-1",
+            payload={
+                "category": "policy_regression",
+                "cluster_id": "drift-1",
+                "evidence_refs": [source_id],
+                "failure_pattern": "duplicates existing guidance",
+                "rejection_reason": "redundant_rule",
+                "review_actor": "reviewer",
+                "source_refs": ["candidate:7", "cluster:drift-1", "suite:human_review"],
+            },
+        )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    decision = json.loads((run_dir / "decision.json").read_text(encoding="utf-8"))
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        stored = store.connection.execute(
+            """
+            SELECT c.state, d.decision, d.reason
+            FROM candidates c
+            JOIN decisions d ON d.candidate_id = c.id
+            WHERE c.id = ?
+            """,
+            (candidate["candidate_id"],),
+        ).fetchone()
+
+    assert candidate["sources"] == [{"source_id": source_id, "trusted": True}]
+    assert candidate["bounded_edit_metadata"][0]["operator"] == "add"
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": False,
+        "reasons": ["suppressed_by_rejected_cluster_memory"],
+    }
+    assert decision["decision"] == "rejected"
+    assert decision["policy_allowed"] is False
+    assert decision["policy_reasons"] == ["suppressed_by_rejected_cluster_memory"]
+    assert stored == (
+        "rejected",
+        "rejected",
+        "suppressed_by_rejected_cluster_memory",
+    )
+
+
 def test_propose_candidate_set_skips_suppressed_edit_and_selects_viable_alternative(
     tmp_path: Path,
 ):
@@ -4190,6 +4274,163 @@ llmff:
         ],
     }
     assert "Keep human review" not in ranking_text
+    assert "--- a/CODEX.md" not in ranking_text
+    assert policy_gate == {
+        "schema_version": 1,
+        "allowed": True,
+        "reasons": [],
+    }
+
+
+def test_propose_candidate_set_skips_rejected_cluster_and_selects_viable_alternative(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Rules\n\nUse tests.\n\n# Review\n\nKeep review.\n",
+        encoding="utf-8",
+    )
+    base_hash = hashlib.sha256((repo / "CODEX.md").read_bytes()).hexdigest()
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        '{"type":"user_request","text":"Fix bug"}\n'
+        '{"type":"user_correction","text":"You skipped the docs update"}\n',
+        encoding="utf-8",
+    )
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    canonical = json.loads((run_dir / "canonical-episode.json").read_text(encoding="utf-8"))
+    suppressed_source = canonical["events"][0]["evidence_id"]
+    viable_source = canonical["events"][1]["evidence_id"]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    audit["evidence_refs"] = [suppressed_source, viable_source]
+    (run_dir / "audit.json").write_text(
+        json.dumps(audit, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    candidate_set = {
+        "candidates": [
+            {
+                "candidate_id": "suppressed-cluster-rules-add",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -2,0 +3,1 @@\n+Add rejected cluster guidance.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Rejected cluster guidance was proposed again.",
+                "expected_behavior_change": "Agents repeat a rejected cluster.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": suppressed_source, "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Rules",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+            {
+                "candidate_id": "viable-review-add",
+                "base_file": "CODEX.md",
+                "base_hash": base_hash,
+                "diff": "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -6,0 +7,1 @@\n+Add docs review guidance.\n",
+                "risk_class": "instruction_clarification",
+                "rationale": "Review guidance is supported by a different correction.",
+                "expected_behavior_change": "Agents include docs in review.",
+                "evals_required": ["governance-regression"],
+                "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
+                "sources": [{"source_id": viable_source, "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Review",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            },
+        ]
+    }
+    _write_fake_llmff(tmp_path / "fake-llmff", candidate_set=candidate_set)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_cluster",
+            key="rejected_cluster:drift-1",
+            payload={
+                "category": "review_intelligence",
+                "cluster_id": "drift-1",
+                "evidence_refs": [suppressed_source],
+                "failure_pattern": "manual_rejection",
+                "rejection_reason": "redundant_rule",
+                "review_actor": "maintainer",
+                "review_template": "default",
+                "source_refs": ["candidate:7", "cluster:drift-1", "suite:human_review"],
+            },
+        )
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    ranking = json.loads((run_dir / "candidate-ranking.json").read_text(encoding="utf-8"))
+    policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    ranking_text = json.dumps(ranking, sort_keys=True)
+
+    assert candidate["bounded_edit_metadata"] == [
+        {
+            "operator": "add",
+            "file": "CODEX.md",
+            "section": "Review",
+            "changed_lines": 1,
+            "normative_changes": 0,
+        }
+    ]
+    assert ranking == {
+        "schema_version": 1,
+        "selected_candidate_ids": ["viable-review-add"],
+        "merged": False,
+        "rejected_candidates": [
+            {
+                "candidate_id": "suppressed-cluster-rules-add",
+                "reasons": ["suppressed_by_rejected_cluster_memory"],
+                "suppression_context": [
+                    {
+                        "category": "review_intelligence",
+                        "cluster_id": "drift-1",
+                        "evidence_refs": [suppressed_source],
+                        "failure_pattern": "manual_rejection",
+                        "rejection_reason": "redundant_rule",
+                        "review_actor": "maintainer",
+                        "review_template": "default",
+                        "source_refs": [
+                            "candidate:7",
+                            "cluster:drift-1",
+                            "suite:human_review",
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    assert "Add rejected cluster guidance" not in ranking_text
     assert "--- a/CODEX.md" not in ranking_text
     assert policy_gate == {
         "schema_version": 1,

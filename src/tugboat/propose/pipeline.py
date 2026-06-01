@@ -27,6 +27,7 @@ from tugboat.manifests import (
 from tugboat.optimization import (
     LearningRateBudget,
     OptimizationMemory,
+    RejectedClusterRecord,
     RejectedEditRecord,
     budget_reasons_for_bounded_edit_metadata,
 )
@@ -460,7 +461,43 @@ def _candidate_set_memory_rejection(
             reasons=["suppressed_by_rejected_edit_memory"],
             suppression_context=suppression_context,
         )
+    rejected_clusters = _rejected_clusters_matching_sources(
+        memory,
+        _candidate_set_source_ids(candidate),
+    )
+    if rejected_clusters:
+        return _CandidateSetMemoryRejection(
+            reasons=["suppressed_by_rejected_cluster_memory"],
+            suppression_context=[
+                _rejected_cluster_artifact_payload(record)
+                for record in rejected_clusters
+            ],
+        )
     return _CandidateSetMemoryRejection(reasons=[], suppression_context=[])
+
+
+def _candidate_set_source_ids(candidate: dict[str, object]) -> set[str]:
+    raw_sources = candidate.get("sources", [])
+    if not isinstance(raw_sources, list):
+        return set()
+    return {
+        str(source.get("source_id"))
+        for source in raw_sources
+        if isinstance(source, dict) and source.get("source_id")
+    }
+
+
+def _rejected_clusters_matching_sources(
+    memory: OptimizationMemory,
+    source_ids: set[str],
+) -> tuple[RejectedClusterRecord, ...]:
+    if not source_ids:
+        return ()
+    return tuple(
+        record
+        for _, record in sorted(memory.rejected_clusters.items())
+        if source_ids.intersection(record.evidence_refs)
+    )
 
 
 def _candidate_set_merge_rejection_reasons(
@@ -1179,6 +1216,9 @@ def _rejected_memory_policy_reasons(repo: Path, candidate: CandidatePatch) -> li
         fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
         if fingerprint in memory.rejected_edits:
             return ["suppressed_by_rejected_edit_memory"]
+    source_ids = {source.source_id for source in candidate.sources}
+    if _rejected_clusters_matching_sources(memory, source_ids):
+        return ["suppressed_by_rejected_cluster_memory"]
     return []
 
 

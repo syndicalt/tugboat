@@ -810,6 +810,39 @@ def test_validate_candidate_ranking_artifact_accepts_current_schema():
     )
 
 
+def test_validate_candidate_ranking_artifact_accepts_rejected_cluster_context():
+    validate_json_artifact(
+        "candidate-ranking.json",
+        {
+            "schema_version": 1,
+            "selected_candidate_ids": ["review"],
+            "merged": False,
+            "rejected_candidates": [
+                {
+                    "candidate_id": "rules",
+                    "reasons": ["suppressed_by_rejected_cluster_memory"],
+                    "suppression_context": [
+                        {
+                            "cluster_id": "drift-1",
+                            "evidence_refs": ["ev-1"],
+                            "rejection_reason": "redundant_rule",
+                            "source_refs": [
+                                "candidate:7",
+                                "cluster:drift-1",
+                                "suite:human_review",
+                            ],
+                            "category": "review_intelligence",
+                            "failure_pattern": "manual_rejection",
+                            "review_actor": "maintainer",
+                            "review_template": "default",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+
 def test_validate_candidate_ranking_artifact_rejects_raw_suppression_payload():
     with pytest.raises(ArtifactValidationError, match="raw_trace_payload"):
         validate_json_artifact(
@@ -831,6 +864,61 @@ def test_validate_candidate_ranking_artifact_rejects_raw_suppression_payload():
                                 "rejection_reason": "held_out_not_improved",
                                 "source_refs": ["audit:1"],
                                 "raw_trace_payload": "user asked to remove human review",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("context_value", "expected_error"),
+    (
+        (None, "rejected_candidates\\[0\\].suppression_context"),
+        ("not-a-list", "rejected_candidates\\[0\\].suppression_context"),
+        ([1], "rejected_candidates\\[0\\].suppression_context\\[0\\]"),
+    ),
+)
+def test_validate_candidate_ranking_artifact_rejects_malformed_suppression_context(
+    context_value: object,
+    expected_error: str,
+):
+    with pytest.raises(ArtifactValidationError, match=expected_error):
+        validate_json_artifact(
+            "candidate-ranking.json",
+            {
+                "schema_version": 1,
+                "selected_candidate_ids": ["testing"],
+                "merged": False,
+                "rejected_candidates": [
+                    {
+                        "candidate_id": "approval",
+                        "reasons": ["suppressed_by_rejected_edit_memory"],
+                        "suppression_context": context_value,
+                    }
+                ],
+            },
+        )
+
+
+def test_validate_candidate_ranking_artifact_rejects_incomplete_cluster_context():
+    with pytest.raises(ArtifactValidationError, match="evidence_refs"):
+        validate_json_artifact(
+            "candidate-ranking.json",
+            {
+                "schema_version": 1,
+                "selected_candidate_ids": ["review"],
+                "merged": False,
+                "rejected_candidates": [
+                    {
+                        "candidate_id": "rules",
+                        "reasons": ["suppressed_by_rejected_cluster_memory"],
+                        "suppression_context": [
+                            {
+                                "cluster_id": "drift-1",
+                                "rejection_reason": "redundant_rule",
+                                "source_refs": ["candidate:7"],
                             }
                         ],
                     }

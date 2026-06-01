@@ -650,30 +650,65 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                         "suppression_context": {
                             "type": "array",
                             "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": [
-                                    "future_proposal_suppression_signal",
-                                    "semantic_fingerprint",
-                                    "rejection_reason",
-                                    "source_refs",
-                                ],
-                                "properties": {
-                                    "future_proposal_suppression_signal": {
-                                        "type": "string",
-                                        "const": "suppress_matching_bounded_edit_fingerprint",
+                                "oneOf": [
+                                    {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": [
+                                            "future_proposal_suppression_signal",
+                                            "semantic_fingerprint",
+                                            "rejection_reason",
+                                            "source_refs",
+                                        ],
+                                        "properties": {
+                                            "future_proposal_suppression_signal": {
+                                                "type": "string",
+                                                "const": (
+                                                    "suppress_matching_bounded_edit_fingerprint"
+                                                ),
+                                            },
+                                            "semantic_fingerprint": {"type": "string"},
+                                            "rejection_reason": {"type": "string"},
+                                            "source_refs": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                            "operator": {"type": "string"},
+                                            "file": {"type": "string"},
+                                            "section": {"type": "string"},
+                                            "category": {"type": "string"},
+                                            "failure_pattern": {"type": "string"},
+                                            "review_actor": {"type": "string"},
+                                            "review_template": {"type": "string"},
+                                        },
                                     },
-                                    "semantic_fingerprint": {"type": "string"},
-                                    "rejection_reason": {"type": "string"},
-                                    "source_refs": {"type": "array", "items": {"type": "string"}},
-                                    "operator": {"type": "string"},
-                                    "file": {"type": "string"},
-                                    "section": {"type": "string"},
-                                    "category": {"type": "string"},
-                                    "failure_pattern": {"type": "string"},
-                                    "review_actor": {"type": "string"},
-                                    "review_template": {"type": "string"},
-                                },
+                                    {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": [
+                                            "cluster_id",
+                                            "evidence_refs",
+                                            "rejection_reason",
+                                            "source_refs",
+                                        ],
+                                        "properties": {
+                                            "cluster_id": {"type": "string"},
+                                            "evidence_refs": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                            "rejection_reason": {"type": "string"},
+                                            "source_refs": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                            "category": {"type": "string"},
+                                            "failure_pattern": {"type": "string"},
+                                            "review_actor": {"type": "string"},
+                                            "review_template": {"type": "string"},
+                                        },
+                                    },
+                                ],
                             },
                         },
                     },
@@ -3066,6 +3101,8 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
         _validate_schema_value(name, field, field_schema, value)
     if name == "drift.raw.json":
         _validate_drift_raw_artifact(payload)
+    if name == "candidate-ranking.json":
+        _validate_candidate_ranking_artifact(payload)
     if name == "acceptance-summary.raw.json":
         _validate_acceptance_summary_raw_artifact(payload)
     if name == "optimization-summary.json" and payload.get("decision") == "needs_review":
@@ -3108,6 +3145,97 @@ def _validate_drift_raw_artifact(payload: dict[str, Any]) -> None:
         if cluster_id in seen_cluster_ids:
             raise ArtifactValidationError(f"drift.raw.json duplicate cluster_id: {cluster_id}")
         seen_cluster_ids.add(cluster_id)
+
+
+_REJECTED_EDIT_SUPPRESSION_CONTEXT_REQUIRED = frozenset(
+    (
+        "future_proposal_suppression_signal",
+        "semantic_fingerprint",
+        "rejection_reason",
+        "source_refs",
+    )
+)
+_REJECTED_EDIT_SUPPRESSION_CONTEXT_ALLOWED = _REJECTED_EDIT_SUPPRESSION_CONTEXT_REQUIRED | frozenset(
+    (
+        "operator",
+        "file",
+        "section",
+        "category",
+        "failure_pattern",
+        "review_actor",
+        "review_template",
+    )
+)
+_REJECTED_CLUSTER_SUPPRESSION_CONTEXT_REQUIRED = frozenset(
+    ("cluster_id", "evidence_refs", "rejection_reason", "source_refs")
+)
+_REJECTED_CLUSTER_SUPPRESSION_CONTEXT_ALLOWED = (
+    _REJECTED_CLUSTER_SUPPRESSION_CONTEXT_REQUIRED
+    | frozenset(
+        (
+            "category",
+            "failure_pattern",
+            "review_actor",
+            "review_template",
+        )
+    )
+)
+
+
+def _validate_candidate_ranking_artifact(payload: dict[str, Any]) -> None:
+    for rejected_index, rejected in enumerate(payload.get("rejected_candidates", [])):
+        if not isinstance(rejected, dict):
+            continue
+        contexts = rejected.get("suppression_context", [])
+        if contexts is None:
+            continue
+        if not isinstance(contexts, list):
+            raise ArtifactValidationError(
+                "candidate-ranking.json field has wrong type: "
+                f"rejected_candidates[{rejected_index}].suppression_context"
+            )
+        for context_index, context in enumerate(contexts):
+            field_path = (
+                f"rejected_candidates[{rejected_index}]"
+                f".suppression_context[{context_index}]"
+            )
+            if not isinstance(context, dict):
+                raise ArtifactValidationError(
+                    f"candidate-ranking.json field has wrong type: {field_path}"
+                )
+            if "semantic_fingerprint" in context or "future_proposal_suppression_signal" in context:
+                _validate_suppression_context_shape(
+                    context,
+                    field_path=field_path,
+                    required=_REJECTED_EDIT_SUPPRESSION_CONTEXT_REQUIRED,
+                    allowed=_REJECTED_EDIT_SUPPRESSION_CONTEXT_ALLOWED,
+                )
+            else:
+                _validate_suppression_context_shape(
+                    context,
+                    field_path=field_path,
+                    required=_REJECTED_CLUSTER_SUPPRESSION_CONTEXT_REQUIRED,
+                    allowed=_REJECTED_CLUSTER_SUPPRESSION_CONTEXT_ALLOWED,
+                )
+
+
+def _validate_suppression_context_shape(
+    context: dict[str, object],
+    *,
+    field_path: str,
+    required: frozenset[str],
+    allowed: frozenset[str],
+) -> None:
+    for field in sorted(required):
+        if field not in context:
+            raise ArtifactValidationError(
+                f"candidate-ranking.json missing required field: {field_path}.{field}"
+            )
+    extra = sorted(set(context) - allowed)
+    if extra:
+        raise ArtifactValidationError(
+            f"candidate-ranking.json has additional property: {field_path}.{extra[0]}"
+        )
 
 
 _ACCEPTANCE_REVIEW_CHECKLIST_REQUIREMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
