@@ -464,6 +464,11 @@ def _require_matching_inspect_artifact(manifest_path: Path, *, run_dir: Path, po
     if declared_providers and not allowed_providers.issuperset(declared_providers):
         provider = next(provider for provider in declared_providers if provider not in allowed_providers)
         raise InspectPolicyError(f"provider is not allowed by policy: {provider}")
+    _require_reviewed_provider_manifest_hash(
+        manifest_digest,
+        network_required=network_required,
+        policy=policy,
+    )
 
 
 def _manifest_hash(manifest_path: Path) -> str:
@@ -583,6 +588,11 @@ def inspect_manifest(
     manifest_digest = _manifest_hash(manifest_path)
     if policy.allowed_manifest_hashes and manifest_digest not in policy.allowed_manifest_hashes:
         raise InspectPolicyError("manifest hash is not allowed by policy")
+    _require_reviewed_provider_manifest_hash(
+        manifest_digest,
+        network_required=network_required,
+        policy=policy,
+    )
     artifact_path = _manifest_lifecycle_dir(run_dir, manifest_path) / "llmff-inspect.json"
     ensure_private_dir(artifact_path.parent)
     artifact = {
@@ -608,6 +618,20 @@ def inspect_manifest(
         network_required=network_required,
         external_calls=external_calls,
     )
+
+
+def _require_reviewed_provider_manifest_hash(
+    manifest_digest: str,
+    *,
+    network_required: bool,
+    policy: Policy,
+) -> None:
+    if not network_required:
+        return
+    if manifest_digest not in policy.allowed_manifest_hashes:
+        raise InspectPolicyError(
+            "provider-backed llmff inspect requires reviewed manifest hash"
+        )
 
 
 def _scan_path_or_remove_secret_bearing_files(path: Path) -> None:

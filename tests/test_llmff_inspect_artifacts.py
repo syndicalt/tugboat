@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -292,6 +293,34 @@ def test_inspect_manifest_rejects_provider_missing_from_external_calls(tmp_path:
     ).exists()
 
 
+def test_inspect_manifest_rejects_provider_backed_manifest_without_reviewed_hash(
+    tmp_path: Path,
+):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("name: audit\n", encoding="utf-8")
+    runner = FixtureLlmffRunner(
+        inspect_payload={
+            "network_required": True,
+            "providers": ["openai"],
+            "external_calls": [{"kind": "model_provider", "target": "openai"}],
+        }
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+
+    with pytest.raises(InspectPolicyError, match="reviewed manifest hash"):
+        inspect_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=Policy(
+                llmff_allow_network=True,
+                llmff_allowed_providers=("openai",),
+            ),
+            runner=runner,
+        )
+
+    assert not (run_dir / "manifest" / "llmff-inspect.json").exists()
+
+
 def test_inspect_manifest_allows_declared_provider_when_policy_allowlisted(
     tmp_path: Path,
 ):
@@ -308,7 +337,13 @@ def test_inspect_manifest_allows_declared_provider_when_policy_allowlisted(
     result = inspect_manifest(
         manifest,
         run_dir=tmp_path / ".sidecar" / "runs" / "run-1",
-        policy=Policy(llmff_allow_network=True, llmff_allowed_providers=("openai",)),
+        policy=Policy(
+            llmff_allow_network=True,
+            llmff_allowed_providers=("openai",),
+            allowed_manifest_hashes=(
+                hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            ),
+        ),
         runner=runner,
     )
 

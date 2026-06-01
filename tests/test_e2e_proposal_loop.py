@@ -8,6 +8,7 @@ from pathlib import Path
 from stat import S_IMODE
 
 from tugboat.cli import main
+from tugboat.manifests import materialize_manifests
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1936,6 +1937,9 @@ def test_provider_backed_llmff_opt_in_records_declared_provider_evidence(tmp_pat
     fake_llmff = _write_fake_llmff(tmp_path / "provider-llmff")
     policy_dir = repo / ".sidecar"
     policy_dir.mkdir()
+    reviewed_hashes = "\n".join(
+        f"    - {record.sha256}" for record in materialize_manifests(repo)
+    )
     (policy_dir / "policy.yaml").write_text(
         f"""
 version: 1
@@ -1945,6 +1949,8 @@ llmff:
   allow_network: true
   allowed_providers:
     - openai
+  allowed_manifest_hashes:
+{reviewed_hashes}
 """.lstrip(),
         encoding="utf-8",
     )
