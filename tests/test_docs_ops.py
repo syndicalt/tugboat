@@ -10,6 +10,88 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 DOC_CONTRACTS = {
+    "CONTRIBUTING.md": {
+        "sections": [
+            "## Development Setup",
+            "## Production Bar",
+            "## Testing",
+            "## Pull Requests",
+            "## Security And Secrets",
+        ],
+        "required_text": [
+            'python -m pip install -e ".[dev]"',
+            "tugboat harness check --repo .",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
+            "NO HACKS",
+            "proposal-only by default",
+            "do not commit provider credentials",
+            "Class A auto-apply",
+            "docs/roadmaps/v1.0.0-roadmap.md",
+        ],
+    },
+    "SECURITY.md": {
+        "sections": [
+            "## Supported Versions",
+            "## Reporting A Vulnerability",
+            "## Sensitive Data",
+            "## Security Model",
+            "## Response Expectations",
+        ],
+        "required_text": [
+            "Do not open a public issue for a vulnerability",
+            "do not include provider credentials",
+            ".sidecar",
+            "proposal-only by default",
+            "read-only kill switch",
+            "local-first",
+            "docs/threat-model.md",
+        ],
+    },
+    ".github/ISSUE_TEMPLATE/bug_report.yml": {
+        "sections": [
+            "name: Bug Report",
+            "description:",
+            "body:",
+        ],
+        "required_text": [
+            "Tugboat command",
+            "Expected behavior",
+            "Actual behavior",
+            "Sanitized logs or artifact refs",
+            "Do not paste secrets",
+            "proposal-only",
+        ],
+    },
+    ".github/ISSUE_TEMPLATE/feature_request.yml": {
+        "sections": [
+            "name: Feature Request",
+            "description:",
+            "body:",
+        ],
+        "required_text": [
+            "User-visible outcome",
+            "Affected commands or artifacts",
+            "Safety and rollback considerations",
+            "Non-goals",
+            "v1.0 roadmap",
+        ],
+    },
+    ".github/PULL_REQUEST_TEMPLATE.md": {
+        "sections": [
+            "## Summary",
+            "## Tests",
+            "## Safety",
+            "## Release Notes",
+        ],
+        "required_text": [
+            "tugboat harness check --repo .",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
+            "No provider credentials",
+            "proposal-only",
+            "auto-apply",
+            "rollback",
+        ],
+    },
     "docs/ops/release-checklist.md": {
         "sections": [
             "## Purpose",

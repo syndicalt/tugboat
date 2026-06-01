@@ -1,0 +1,39 @@
+name: Feature Request
+description: Propose a Tugboat improvement aligned with the v1.0 roadmap.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User-visible outcome
+      description: What should a Tugboat user be able to do after this ships?
+    validations:
+      required: true
+  - type: textarea
+    id: surface
+    attributes:
+      label: Affected commands or artifacts
+      description: List CLI commands, MCP tools, daemon behavior, docs, or artifact schemas likely affected.
+      placeholder: tugboat audit, candidate.json, report.md
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and rollback considerations
+      description: Explain authority boundaries, policy gates, rollback behavior, and how this avoids silent mutation.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What should remain explicitly out of scope?
+  - type: input
+    id: roadmap
+    attributes:
+      label: v1.0 roadmap link
+      description: Reference the relevant section of docs/roadmaps/v1.0.0-roadmap.md.
+      placeholder: docs/roadmaps/v1.0.0-roadmap.md#v1-feature-tracks

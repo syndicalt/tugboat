@@ -1,0 +1,57 @@
+name: Bug Report
+description: Report a reproducible Tugboat defect without sharing secrets.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a Tugboat issue. Do not paste secrets, provider credentials, private traces, or raw `.sidecar` databases.
+  - type: input
+    id: command
+    attributes:
+      label: Tugboat command
+      description: The exact command or workflow, such as `tugboat optimize --repo . --trace traces/example.jsonl --suite all`.
+      placeholder: tugboat ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized logs or artifact refs
+      description: Include sanitized output, artifact paths, hashes, or traceback summaries. Do not paste secrets.
+      placeholder: .sidecar/runs/<run-id>/report.md
+  - type: dropdown
+    id: posture
+    attributes:
+      label: Safety posture
+      description: Which mode were you using?
+      options:
+        - proposal-only
+        - apply proposal
+        - branch or commit apply
+        - PR apply
+        - auto-apply preflight or shadow
+        - confirmed auto-apply
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submit checks
+      options:
+        - label: I removed credentials, private traces, and sensitive `.sidecar` artifacts.
+          required: true
