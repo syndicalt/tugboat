@@ -690,6 +690,52 @@ def test_apply_branch_mode_cleans_generated_branch_when_provenance_publish_fails
     assert row is None
 
 
+@pytest.mark.parametrize("artifact_name", ["apply-plan.json", "provenance-bundle.json"])
+def test_apply_commit_mode_cleans_generated_branch_when_evidence_publish_fails(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact_name: str,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    run_dir = _candidate_run(repo)
+    generated_branch = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+    target = run_dir / artifact_name
+    original_replace = Path.replace
+
+    def fail_evidence_replace(self: Path, replacement_target: Path):
+        if replacement_target == target:
+            raise OSError(f"simulated {artifact_name} publish failure")
+        return original_replace(self, replacement_target)
+
+    monkeypatch.setattr(Path, "replace", fail_evidence_replace)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "commit"]) == 1
+
+    output = capsys.readouterr().out
+    assert f"apply blocked: simulated {artifact_name} publish failure" in output
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    assert list(run_dir.glob(".apply-plan.json.*.tmp")) == []
+    assert list(run_dir.glob(".provenance-bundle.json.*.tmp")) == []
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type IN ('apply.planned', 'apply.applied')"
+        ).fetchone()
+    assert row is None
+
+
 def test_apply_rejects_artifact_only_candidate_without_recorded_provenance(
     tmp_path: Path,
     capsys,

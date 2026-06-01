@@ -3029,6 +3029,11 @@ def _write_apply_plan(
             adapter.switch_branch(base_branch)
             adapter.delete_branch(branch_name)
 
+    def cleanup_generated_local_commit() -> None:
+        if branch_created and applied_commit and mode == "commit":
+            adapter.switch_branch(base_branch)
+            adapter.delete_branch(branch_name)
+
     try:
         if mode == "branch":
             adapter.create_branch(branch_name)
@@ -3153,6 +3158,10 @@ def _write_apply_plan(
     except Exception:
         if not applied_commit:
             cleanup_generated_branch_without_commit()
+            path.unlink(missing_ok=True)
+            (run_dir / "provenance-bundle.json").unlink(missing_ok=True)
+        elif mode == "commit":
+            cleanup_generated_local_commit()
             path.unlink(missing_ok=True)
             (run_dir / "provenance-bundle.json").unlink(missing_ok=True)
         raise
