@@ -2925,6 +2925,62 @@ def test_auto_apply_commit_rejects_shadow_when_policy_file_changes_without_mutat
     assert not (run_dir / "auto-apply-approval.json").exists()
 
 
+def test_auto_apply_commit_rejects_tampered_shadow_approval_after_commit_cleanup(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    base_branch = _git(repo, "branch", "--show-current")
+    generated_branch = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    shadow_path = run_dir / "auto-apply-shadow.json"
+    shadow = json.loads(shadow_path.read_text(encoding="utf-8"))
+    shadow["approval_bundle"]["actor"] = "other@example.com"
+    shadow_path.write_text(json.dumps(shadow, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert "apply blocked: auto-apply shadow approval bundle stale" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "branch", "--show-current") == base_branch
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decisions = _auto_apply_decision_payloads(repo)
+    assert decisions[-1]["phase"] == "final"
+    assert decisions[-1]["eligible"] is False
+    assert decisions[-1]["reasons"] == ["shadow_approval_stale"]
+
+
 def test_auto_apply_commit_blocks_when_staged_file_does_not_match_evaluated_preview(
     tmp_path: Path,
     capsys,
@@ -3135,6 +3191,87 @@ def test_auto_apply_shadow_block_reason_accepts_current_shadow(
     )
 
 
+@pytest.mark.parametrize(
+    ("mutator", "kwargs_override"),
+    [
+        (lambda payload: payload.update({"run_id": "other-run"}), {}),
+        (lambda payload: payload.update({"candidate_id": 8}), {}),
+        (lambda payload: payload.update({"mode": "proposal"}), {}),
+        (lambda payload: payload.update({"target_files": ["AGENTS.md"]}), {}),
+        (lambda payload: payload.update({"branch_name": "other-branch"}), {}),
+        (lambda payload: payload.update({"lane": "other_lane"}), {}),
+        (lambda payload: payload.update({"approval_bundle": None}), {}),
+        (lambda payload: payload["approval_bundle"].update({"vcs": None}), {}),
+        (lambda payload: payload["approval_bundle"]["vcs"].update({"commit_sha": "abc123"}), {}),
+        (lambda payload: None, {"candidate_id": 8}),
+        (lambda payload: None, {"target_files": ("AGENTS.md",)}),
+        (lambda payload: None, {"branch_name": "other-branch"}),
+        (lambda payload: None, {"lane": "other_lane"}),
+    ],
+)
+def test_auto_apply_shadow_approval_match_rejects_stale_identity_or_bundle(
+    tmp_path: Path,
+    mutator,
+    kwargs_override: dict[str, object],
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    shadow_path = run_dir / "auto-apply-shadow.json"
+    shadow = json.loads(shadow_path.read_text(encoding="utf-8"))
+    final_approval = json.loads(json.dumps(shadow["approval_bundle"]))
+    final_approval["vcs"]["commit_sha"] = "abc123"
+    mutator(shadow)
+    shadow_path.write_text(json.dumps(shadow, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    branch_name = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+    kwargs = {
+        "candidate_id": 7,
+        "target_files": ("CODEX.md",),
+        "branch_name": branch_name,
+        "lane": "docs_hygiene",
+        "final_approval": final_approval,
+        "applied_commit": "abc123",
+    }
+    kwargs.update(kwargs_override)
+
+    assert not cli_module._auto_apply_shadow_approval_matches(repo, run_dir, **kwargs)
+
+
+def test_auto_apply_shadow_approval_match_accepts_pending_to_committed_transition(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    shadow = json.loads((run_dir / "auto-apply-shadow.json").read_text(encoding="utf-8"))
+    final_approval = json.loads(json.dumps(shadow["approval_bundle"]))
+    final_approval["vcs"]["commit_sha"] = "abc123"
+    branch_name = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+
+    assert cli_module._auto_apply_shadow_approval_matches(
+        repo,
+        run_dir,
+        candidate_id=7,
+        target_files=("CODEX.md",),
+        branch_name=branch_name,
+        lane="docs_hygiene",
+        final_approval=final_approval,
+        applied_commit="abc123",
+    )
+
+
 def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_audit(
     tmp_path: Path,
 ):
@@ -3167,9 +3304,14 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
 
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
     approval = json.loads((run_dir / "auto-apply-approval.json").read_text(encoding="utf-8"))
+    shadow = json.loads((run_dir / "auto-apply-shadow.json").read_text(encoding="utf-8"))
+    expected_from_shadow = json.loads(json.dumps(shadow["approval_bundle"]))
+    assert expected_from_shadow["vcs"]["commit_sha"] == "pending"
+    expected_from_shadow["vcs"]["commit_sha"] = apply_plan["applied_commit"]
     assert apply_plan["mode"] == "commit"
     assert apply_plan["auto_apply"] is True
     assert apply_plan["applied_commit"] == _git(repo, "rev-parse", "HEAD")
+    assert approval == expected_from_shadow
     assert approval == {
         "actor": "operator@example.com",
         "candidate_id": "7",
@@ -3826,9 +3968,13 @@ def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
 
     apply_plan = json.loads((run_dir / "apply-plan.json").read_text(encoding="utf-8"))
     approval = json.loads((run_dir / "auto-apply-approval.json").read_text(encoding="utf-8"))
+    shadow = json.loads((run_dir / "auto-apply-shadow.json").read_text(encoding="utf-8"))
+    expected_from_shadow = json.loads(json.dumps(shadow["approval_bundle"]))
+    expected_from_shadow["vcs"]["commit_sha"] = apply_plan["applied_commit"]
     assert apply_plan["mode"] == "commit"
     assert apply_plan["auto_apply"] is True
     assert approval["actor"] == "operator@example.com"
+    assert approval == expected_from_shadow
 
 
 def test_auto_apply_uses_ledger_burn_in_without_cli_override(tmp_path: Path):

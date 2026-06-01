@@ -3870,6 +3870,8 @@ def _auto_apply_shadow_checks_pass(checks: dict[str, object]) -> bool:
         and eval_report.get("candidate_id_matches") is True
         and eval_report.get("passed") is True
         and eval_report.get("recommendation") == "accept"
+        and isinstance(checks.get("candidate_preview"), dict)
+        and checks["candidate_preview"].get("passed") is True
         and isinstance(vcs, dict)
         and vcs.get("preflight_passed") is True
         and vcs.get("worktree_clean") is True
@@ -4058,6 +4060,45 @@ def _assert_auto_apply_final(
         candidate=auto_apply_candidate,
         readiness=readiness,
     )
+    snapshot = _auto_apply_decision_snapshot(
+        phase="final",
+        candidate=auto_apply_candidate,
+        readiness=readiness,
+        metrics=metrics,
+    )
+    if not decision.eligible or decision.approval_bundle is None:
+        _record_auto_apply_decision(
+            repo,
+            candidate_id,
+            run_dir.name,
+            decision.reasons,
+            review_actor,
+            lane=decision.lane,
+            snapshot=snapshot,
+        )
+        raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
+    bundle = decision.approval_bundle.to_json_dict()
+    bundle["readiness_metrics"] = metrics
+    if not _auto_apply_shadow_approval_matches(
+        repo,
+        run_dir,
+        candidate_id=candidate_id,
+        target_files=(candidate.base_file,),
+        branch_name=branch_name,
+        lane=decision.lane,
+        final_approval=bundle,
+        applied_commit=applied_commit,
+    ):
+        _record_auto_apply_decision(
+            repo,
+            candidate_id,
+            run_dir.name,
+            ("shadow_approval_stale",),
+            review_actor,
+            lane=decision.lane,
+            snapshot=snapshot,
+        )
+        raise ValueError("auto-apply shadow approval bundle stale")
     _record_auto_apply_decision(
         repo,
         candidate_id,
@@ -4065,18 +4106,49 @@ def _assert_auto_apply_final(
         decision.reasons,
         review_actor,
         lane=decision.lane,
-        snapshot=_auto_apply_decision_snapshot(
-            phase="final",
-            candidate=auto_apply_candidate,
-            readiness=readiness,
-            metrics=metrics,
-        ),
+        snapshot=snapshot,
     )
-    if not decision.eligible or decision.approval_bundle is None:
-        raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
-    bundle = decision.approval_bundle.to_json_dict()
-    bundle["readiness_metrics"] = metrics
     return bundle
+
+
+def _auto_apply_shadow_approval_matches(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    target_files: tuple[str, ...],
+    branch_name: str,
+    lane: str | None,
+    final_approval: dict[str, object],
+    applied_commit: str,
+) -> bool:
+    path = run_dir / "auto-apply-shadow.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        validate_json_artifact("auto-apply-shadow.json", payload)
+    except (OSError, json.JSONDecodeError, ArtifactValidationError, ValueError):
+        return False
+    if payload.get("run_id") != run_dir.name:
+        return False
+    if int(payload.get("candidate_id", -1)) != candidate_id:
+        return False
+    if payload.get("mode") != "commit":
+        return False
+    if payload.get("target_files") != list(target_files):
+        return False
+    if payload.get("branch_name") != branch_name:
+        return False
+    if payload.get("lane") != lane:
+        return False
+    shadow_approval = payload.get("approval_bundle")
+    if not isinstance(shadow_approval, dict):
+        return False
+    expected = json.loads(json.dumps(shadow_approval))
+    vcs = expected.get("vcs")
+    if not isinstance(vcs, dict) or vcs.get("commit_sha") != "pending":
+        return False
+    vcs["commit_sha"] = applied_commit
+    return expected == final_approval
 
 
 def _auto_apply_ledger_metrics(

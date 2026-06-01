@@ -100,7 +100,9 @@ tugboat auto-apply --repo . --candidate latest --actor <name> \
 
 Shadow mode evaluates the same auto-apply gates, writes `.sidecar/runs/<run-id>/auto-apply-shadow.json`, and appends a small `auto_apply.shadowed` audit event with candidate id, run id, actor, lane, eligibility, reasons, and report path. It does not apply patches, create branches, commit, write `apply-plan.json`, write `auto-apply-approval.json`, or append `auto_apply.decided`. Operations observability counts shadowed candidates separately from eligible, staged, applied, and rolled-back candidates. The read-only kill switch blocks shadow mode because it writes an artifact and audit event.
 
-Confirmed auto-apply mutation requires a current passing shadow report for the same run and candidate. If `auto-apply-shadow.json` is missing, ineligible, stale, or no longer matches the candidate, eval report, or policy gate artifact hashes, final commit-mode auto-apply blocks before branch creation or patch application.
+Confirmed auto-apply mutation requires a current passing shadow report for the same run and candidate. The shadow report must include `source_artifacts` for `candidate_diff`, `candidate_metadata`, `candidate_preview_manifest`, `candidate_preview_file`, `eval_report`, `policy`, and `policy_gate`, each with the current artifact path and SHA-256 digest. If `auto-apply-shadow.json` is missing, ineligible, malformed, stale, or no longer matches the candidate, eval report, policy, or policy gate artifact hashes, final commit-mode auto-apply blocks before branch creation or patch application with `shadow_evidence_required` or `shadow_evidence_stale`.
+
+Final approval is also bound to the shadow rehearsal. `auto-apply-approval.json` must match the shadow `approval_bundle` after the single expected transition from `vcs.commit_sha: pending` to the committed SHA. If the shadow approval actor, lane, rollback command, policy version, repository, branch, or readiness metrics differ, Tugboat records `shadow_approval_stale`, cleans up the generated local commit, and does not publish success apply artifacts.
 
 ## Confirmed Execution
 

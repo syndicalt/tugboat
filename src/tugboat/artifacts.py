@@ -61,7 +61,7 @@ def _artifact_ref_schema() -> dict[str, Any]:
         "required": ["path", "sha256"],
         "properties": {
             "path": {"type": "string"},
-            "sha256": {"type": "string"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         },
     }
 
