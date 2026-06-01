@@ -244,6 +244,7 @@ tugboat ops release-manifest --repo . \
   --evidence .sidecar/ci/index-check.txt \
   --evidence .sidecar/ci/harness.txt \
   --evidence .sidecar/ci/ci-report.json \
+  --evidence .sidecar/ci/security-review.md \
   --evidence .sidecar/ci/pytest-coverage.log \
   --evidence .sidecar/ci/build-wheel.txt \
   --evidence .sidecar/ci/twine-check.txt \

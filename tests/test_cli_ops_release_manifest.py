@@ -42,6 +42,7 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
         "index": evidence_dir / "index-check.txt",
         "harness": evidence_dir / "harness.txt",
         "ci": evidence_dir / "ci-report.json",
+        "security": evidence_dir / "security-review.md",
         "coverage": evidence_dir / "pytest-coverage.log",
         "build": evidence_dir / "build-wheel.txt",
         "twine": evidence_dir / "twine-check.txt",
@@ -52,6 +53,12 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
     evidence["harness"].write_text("harness: ok\n", encoding="utf-8")
     evidence["ci"].write_text(
         json.dumps(_passing_ci_report(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    evidence["security"].write_text(
+        "# Security Review\n\n"
+        "No open critical or high findings for proposal-only operation.\n\n"
+        "Approved as a release candidate for proposal-only use.\n",
         encoding="utf-8",
     )
     evidence["coverage"].write_text(
@@ -258,6 +265,11 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         b"1226 passed in 75.84s\n"
         b"TOTAL 11164 803 4048 627 90.09%\n"
     )
+    security_review = (
+        b"# Security Review\n\n"
+        b"No open critical or high findings for proposal-only operation.\n\n"
+        b"Approved as a release candidate for proposal-only use.\n"
+    )
     assert payload == {
         "schema_version": 1,
         "artifact_kind": "release_artifact_manifest",
@@ -309,6 +321,11 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
                 "path": str(evidence["ci"].resolve()),
                 "sha256": hashlib.sha256(evidence["ci"].read_bytes()).hexdigest(),
                 "size_bytes": len(evidence["ci"].read_bytes()),
+            },
+            {
+                "path": str(evidence["security"].resolve()),
+                "sha256": hashlib.sha256(security_review).hexdigest(),
+                "size_bytes": len(security_review),
             },
             {
                 "path": str(evidence["coverage"].resolve()),
@@ -1190,6 +1207,111 @@ def test_ops_release_manifest_blocks_failed_ci_evidence(
     )
 
     assert "release manifest blocked: CI evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_requires_security_review_evidence_without_writing(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    current_head = _init_release_repo(repo)
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=[path for key, path in evidence.items() if key != "security"],
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: security review evidence is required" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_unapproved_security_review_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    current_head = _init_release_repo(repo)
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["security"].write_text(
+        "# Security Review\n\n"
+        "Open critical or high findings remain for release.\n\n"
+        "Release approval is pending.\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: security review evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_not_approved_security_review_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    current_head = _init_release_repo(repo)
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["security"].write_text(
+        "# Security Review\n\n"
+        "No open critical or high findings for proposal-only operation.\n\n"
+        "Not approved for release.\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: security review evidence did not pass" in capsys.readouterr().out
     assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 

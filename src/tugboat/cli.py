@@ -1433,6 +1433,7 @@ def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) ->
         ("index-check", "index check"),
         ("harness", "harness check"),
         ("ci-report", "CI"),
+        ("security-review", "security review"),
         ("build-wheel", "wheel build"),
         ("twine-check", "twine check"),
         ("install-smoke", "install smoke"),
@@ -1497,6 +1498,14 @@ def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> No
         if bool(payload.get("auto_apply", True)) or not _ci_payload_passed(payload):
             raise ValueError("CI evidence did not pass")
         return
+    if "security-review" in name:
+        if (
+            not _security_review_evidence_approved(lowered)
+            or "no open critical or high findings" not in lowered
+            or _contains_failed_release_signal(lowered)
+        ):
+            raise ValueError("security review evidence did not pass")
+        return
     if "build-wheel" in name:
         if (
             "python -m build --wheel" not in lowered
@@ -1535,6 +1544,17 @@ def _release_coverage_percent(text: str) -> float:
         if match is not None:
             return float(match.group(1))
     return 0.0
+
+
+def _security_review_evidence_approved(lowered_text: str) -> bool:
+    if re.search(r"\bnot\s+approved\s+(as|for)\b", lowered_text):
+        return False
+    return bool(
+        re.search(
+            r"\bapproved\s+(as|for)\b",
+            lowered_text,
+        )
+    )
 
 
 def _provider_backed_release_evidence(
