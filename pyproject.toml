@@ -28,6 +28,7 @@ pythonpath = ["src"]
 
 [tool.coverage.run]
 branch = true
+patch = ["subprocess"]
 source = ["src/tugboat"]
 
 [tool.coverage.report]

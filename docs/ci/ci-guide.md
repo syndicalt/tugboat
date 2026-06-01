@@ -99,7 +99,9 @@ jobs:
           from pathlib import Path
           repo = Path(".sidecar/ci/proposal-smoke-repo")
           repo.mkdir(parents=True, exist_ok=True)
-          (repo / "AGENTS.md").write_text("# Agent Instructions\n\nKeep changes reviewed.\n", encoding="utf-8")
+          (repo / "CODEX.md").write_text("# Rules\n\nUse tests. See [runbook](docs/runbook.md).\n", encoding="utf-8")
+          (repo / "docs").mkdir(exist_ok=True)
+          (repo / "docs" / "runbook.md").write_text("---\nowner: platform\nverification_status: verified\n---\n# Runbook\n\nUse tests.\n", encoding="utf-8")
           PY
             echo "installed tugboat init --repo .sidecar/ci/proposal-smoke-repo"
             .sidecar/ci/install-smoke-venv/bin/tugboat init --repo .sidecar/ci/proposal-smoke-repo

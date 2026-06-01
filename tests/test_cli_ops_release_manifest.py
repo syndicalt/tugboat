@@ -478,6 +478,38 @@ def test_ops_release_manifest_accepts_real_installed_index_smoke_output(
 
     output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
     assert f"release manifest: {output_path}" in capsys.readouterr().out
+
+
+def test_ops_release_manifest_accepts_real_index_check_output(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["index"].write_text("indexed documents: 2\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 0
+    )
+
+    output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
+    assert f"release manifest: {output_path}" in capsys.readouterr().out
     assert output_path.exists()
 
 

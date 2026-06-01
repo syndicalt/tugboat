@@ -1990,7 +1990,10 @@ def _validate_release_evidence_content(
             raise ValueError("doctor output evidence did not pass")
         return
     if "index-check" in name:
-        if "index: ok" not in lowered or _contains_failed_release_signal(lowered):
+        index_evidence_passed = "index: ok" in lowered or any(
+            _installed_index_success_line(line.strip()) for line in lowered.splitlines()
+        )
+        if not index_evidence_passed or _contains_failed_release_signal(lowered):
             raise ValueError("index check evidence did not pass")
         return
     if "harness" in name:
