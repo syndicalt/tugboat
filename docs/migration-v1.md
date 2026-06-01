@@ -50,7 +50,7 @@ Apply only after review:
 tugboat ops migrate --repo . --apply
 ```
 
-The apply path writes `.sidecar/migrations/migration-report.json` using the `sidecar-migration-report.json` artifact schema. The read-only kill switch blocks migration apply, so disable read-only mode only after incident review is complete.
+The apply path writes `.sidecar/migrations/pre-migration-state.json` before mutation and `.sidecar/migrations/migration-report.json` after migration. Both files use validated artifact schemas. The snapshot records the previous sidecar version marker and policy files so migration review has concrete restore evidence. It is secret-scanned and written owner-only, but it may still contain local policy details; do not share it unredacted. The read-only kill switch blocks migration apply, so disable read-only mode only after incident review is complete.
 
 After applying, run:
 
@@ -86,4 +86,4 @@ tugboat daemon read-only --repo . --enable
 
 Then reinstall the prior package and restore the pre-upgrade `.sidecar` backup using `docs/ops/sidecar-backup-restore.md`.
 
-Do not manually edit `.sidecar/version.json` to force compatibility. Use the recorded backup or a reviewed migration instead.
+Do not manually edit `.sidecar/version.json` to force compatibility. Use the recorded backup, `.sidecar/migrations/pre-migration-state.json`, or a reviewed migration instead.

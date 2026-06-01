@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from stat import S_IMODE
 
 import pytest
 import yaml
@@ -19,6 +20,7 @@ from tugboat.ops.migrations import (
     ordered_migrations_after,
     write_migration_report,
 )
+from tugboat.security.secrets import SecretScanError
 
 
 def _execute_migration_plan(repo: Path):
@@ -183,6 +185,30 @@ def test_execute_migration_plan_persists_audit_report(tmp_path: Path) -> None:
     result = _execute_migration_plan(tmp_path)
 
     assert result.report_path == sidecar / "migrations" / "migration-report.json"
+    snapshot_path = sidecar / "migrations" / "pre-migration-state.json"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert snapshot == {
+        "schema_version": 1,
+        "artifact_kind": "sidecar_migration_snapshot",
+        "captured_version": 1,
+        "captured_files": [
+            {
+                "path": ".sidecar/VERSION",
+                "existed": False,
+                "content": None,
+            },
+            {
+                "path": ".sidecar/policy.yaml",
+                "existed": True,
+                "content": "version: 1\n",
+            },
+            {
+                "path": ".sidecar/version.json",
+                "existed": False,
+                "content": None,
+            },
+        ],
+    }
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report == {
         "schema_version": 1,
@@ -212,7 +238,39 @@ def test_execute_migration_plan_persists_audit_report(tmp_path: Path) -> None:
             },
         ],
         "version_marker": ".sidecar/version.json",
+        "pre_migration_snapshot": ".sidecar/migrations/pre-migration-state.json",
     }
+
+
+def test_execute_migration_plan_writes_owner_only_pre_migration_snapshot(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    _execute_migration_plan(tmp_path)
+
+    snapshot_path = sidecar / "migrations" / "pre-migration-state.json"
+    assert S_IMODE(snapshot_path.stat().st_mode) == 0o600
+
+
+def test_execute_migration_plan_secret_scans_pre_migration_snapshot_before_mutation(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    policy_path = sidecar / "policy.yaml"
+    policy_text = "version: 1\nnotes: sk-" + "a" * 20 + "\n"
+    policy_path.write_text(policy_text, encoding="utf-8")
+
+    with pytest.raises(SecretScanError):
+        execute_migration_plan(tmp_path)
+
+    assert policy_path.read_text(encoding="utf-8") == policy_text
+    assert not (sidecar / "version.json").exists()
+    assert not (sidecar / "migrations" / "pre-migration-state.json").exists()
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
 
 
 def test_write_migration_report_validates_payload_before_writing(

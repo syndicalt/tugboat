@@ -1555,6 +1555,30 @@ def test_validate_sidecar_migration_report_artifact_accepts_current_schema():
                 }
             ],
             "version_marker": ".sidecar/version.json",
+            "pre_migration_snapshot": ".sidecar/migrations/pre-migration-state.json",
+        },
+    )
+
+
+def test_validate_sidecar_migration_snapshot_artifact_accepts_current_schema():
+    validate_json_artifact(
+        "sidecar-migration-snapshot.json",
+        {
+            "schema_version": 1,
+            "artifact_kind": "sidecar_migration_snapshot",
+            "captured_version": 1,
+            "captured_files": [
+                {
+                    "path": ".sidecar/policy.yaml",
+                    "existed": True,
+                    "content": "version: 1\n",
+                },
+                {
+                    "path": ".sidecar/version.json",
+                    "existed": False,
+                    "content": None,
+                },
+            ],
         },
     )
 

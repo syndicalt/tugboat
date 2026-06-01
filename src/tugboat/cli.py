@@ -846,6 +846,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "index":
         repo = Path(args.repo)
+        if _policy_preflight_blocked("index", repo):
+            return 1
         result = index_repo(repo, load_policy(repo))
         if not args.check:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:

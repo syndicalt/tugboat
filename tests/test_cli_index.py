@@ -26,3 +26,31 @@ def test_index_command_writes_sidecar_db(tmp_path: Path, capsys):
         "documents.indexed",
     ]
     assert json.loads(rows[-1][1]) == {"documents": 1, "repo": str(tmp_path)}
+
+
+def test_index_check_reports_invalid_policy_without_traceback(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    exit_code = main(["index", "--repo", str(tmp_path), "--check"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "index blocked: policy invalid:" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "db.sqlite").exists()
+
+
+def test_index_write_reports_invalid_policy_without_traceback(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    exit_code = main(["index", "--repo", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "index blocked: policy invalid:" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "db.sqlite").exists()

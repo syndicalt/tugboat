@@ -1767,6 +1767,36 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 },
             },
             "version_marker": {"type": "string"},
+            "pre_migration_snapshot": {"type": "string"},
+        },
+    },
+    "sidecar-migration-snapshot.json": {
+        "$schema": JSON_SCHEMA_URI,
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "artifact_kind",
+            "captured_version",
+            "captured_files",
+        ],
+        "properties": {
+            "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
+            "artifact_kind": {"type": "string", "const": "sidecar_migration_snapshot"},
+            "captured_version": {"type": "integer"},
+            "captured_files": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "existed", "content"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "existed": {"type": "boolean"},
+                        "content": {"type": ["string", "null"]},
+                    },
+                },
+            },
         },
     },
     "ops-command-bundle.json": {

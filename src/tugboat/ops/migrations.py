@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact, write_json_artifact
 from tugboat.config import as_positive_version
 
 
@@ -158,6 +158,7 @@ def execute_migration_plan(
     if plan.current_version == 0:
         return plan
     validate_migration_report(plan)
+    write_pre_migration_snapshot(repo, plan)
 
     sidecar = repo / ".sidecar"
     policy_path = sidecar / "policy.yaml"
@@ -198,6 +199,14 @@ def write_migration_report(repo: Path, plan: MigrationPlan) -> Path:
     return report_path
 
 
+def write_pre_migration_snapshot(repo: Path, plan: MigrationPlan) -> Path:
+    payload = migration_snapshot_payload(repo, plan.current_version)
+    validate_json_artifact("sidecar-migration-snapshot.json", payload)
+    migrations_dir = repo / ".sidecar" / "migrations"
+    snapshot_path = migrations_dir / "pre-migration-state.json"
+    return write_json_artifact(snapshot_path, payload)
+
+
 def validate_migration_report(plan: MigrationPlan) -> None:
     validate_json_artifact("sidecar-migration-report.json", migration_report_payload(plan))
 
@@ -219,6 +228,31 @@ def migration_report_payload(plan: MigrationPlan) -> dict[str, object]:
             for step in plan.steps
         ],
         "version_marker": ".sidecar/version.json",
+        "pre_migration_snapshot": ".sidecar/migrations/pre-migration-state.json",
+    }
+
+
+def migration_snapshot_payload(repo: Path, current_version: int) -> dict[str, object]:
+    captured_files = []
+    for relative_path in (
+        ".sidecar/VERSION",
+        ".sidecar/policy.yaml",
+        ".sidecar/version.json",
+    ):
+        path = repo / relative_path
+        exists = path.exists()
+        captured_files.append(
+            {
+                "path": relative_path,
+                "existed": exists,
+                "content": path.read_text(encoding="utf-8") if exists else None,
+            }
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_kind": "sidecar_migration_snapshot",
+        "captured_version": current_version,
+        "captured_files": captured_files,
     }
 
 
