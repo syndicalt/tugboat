@@ -11,6 +11,7 @@ from typing import Any, TypeVar
 
 from tugboat import __version__
 from tugboat.artifacts import ArtifactValidationError, validate_json_artifact
+from tugboat.auto_apply.incidents import active_rollback_incidents
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import (
     InstructionIndexBudgetExceeded,
@@ -253,8 +254,11 @@ def tugboat_auto_update_status(repo: str | Path) -> dict[str, Any]:
         )
         paused_lanes = {*policy.auto_apply_paused_lanes}
         paused_lanes.update(lane.name for lane in policy.auto_apply_lanes if not lane.enabled)
+        active_incidents = active_rollback_incidents(repo_path)
         return {
+            "active_incidents": [incident.to_json_dict() for incident in active_incidents],
             "auto_apply_enabled": policy.auto_apply_enabled,
+            "incident_active": bool(active_incidents),
             "kill_switch_enabled": bool(daemon_queue.get("kill_switch_enabled", False)),
             "paused_lanes": sorted(paused_lanes),
             "lanes": lanes,

@@ -816,6 +816,10 @@ DOC_CONTRACTS = {
         "required_text": [
             "tugboat mcp stdio",
             "tugboat_status",
+            "tugboat_auto_update_status",
+            "incident_active",
+            "active_incidents",
+            "rollback.applied",
             "tugboat_request_audit",
             "repo allowlist",
             "direct apply",

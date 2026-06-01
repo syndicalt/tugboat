@@ -2735,6 +2735,8 @@ def test_validate_auto_apply_preflight_accepts_current_schema():
                 "candidate_preview": {"passed": True, "reason": ""},
                 "auto_apply": {
                     "candidate": {"candidate_id": "7"},
+                    "incident_active": False,
+                    "active_incidents": [],
                     "readiness": {"confirmed": False},
                 },
             },
@@ -2807,7 +2809,11 @@ def test_validate_auto_apply_shadow_accepts_current_schema():
                     "reasons": [],
                 },
                 "candidate_preview": {"passed": True, "reason": ""},
-                "auto_apply": {"phase": "shadow"},
+                "auto_apply": {
+                    "phase": "shadow",
+                    "incident_active": False,
+                    "active_incidents": [],
+                },
             },
             "readiness_metrics": {"reviewed_count": 20},
         },
@@ -2863,7 +2869,11 @@ def test_validate_auto_apply_shadow_requires_candidate_preview_refs():
                 "base_hashes_match": True,
                 "reasons": [],
             },
-            "auto_apply": {"phase": "shadow"},
+            "auto_apply": {
+                "phase": "shadow",
+                "incident_active": False,
+                "active_incidents": [],
+            },
         },
         "readiness_metrics": {"reviewed_count": 20},
     }
@@ -2930,7 +2940,11 @@ def test_validate_auto_apply_shadow_requires_policy_source_ref():
                 "reasons": [],
             },
             "candidate_preview": {"passed": True, "reason": ""},
-            "auto_apply": {"phase": "shadow"},
+            "auto_apply": {
+                "phase": "shadow",
+                "incident_active": False,
+                "active_incidents": [],
+            },
         },
         "readiness_metrics": {"reviewed_count": 20},
     }
@@ -3001,7 +3015,11 @@ def test_validate_auto_apply_shadow_rejects_malformed_source_digest():
                 "reasons": [],
             },
             "candidate_preview": {"passed": True, "reason": ""},
-            "auto_apply": {"phase": "shadow"},
+            "auto_apply": {
+                "phase": "shadow",
+                "incident_active": False,
+                "active_incidents": [],
+            },
         },
         "readiness_metrics": {"reviewed_count": 20},
     }
@@ -3010,6 +3028,77 @@ def test_validate_auto_apply_shadow_rejects_malformed_source_digest():
         ArtifactValidationError,
         match=r"source_artifacts\.candidate_diff\.sha256",
     ):
+        validate_json_artifact("auto-apply-shadow.json", payload)
+
+
+def test_validate_auto_apply_shadow_requires_incident_watch_fields():
+    payload = {
+        "schema_version": 1,
+        "run_id": "20260531T120000Z",
+        "candidate_id": 7,
+        "mode": "commit",
+        "target_files": ["CODEX.md"],
+        "branch_name": "tugboat/run-7-codex",
+        "shadow_mode": True,
+        "eligible": True,
+        "would_apply": True,
+        "lane": "docs_hygiene",
+        "reasons": [],
+        "approval_bundle": {"actor": "operator@example.com"},
+        "source_artifacts": {
+            "candidate_diff": {
+                "path": ".sidecar/runs/run-1/candidate.diff",
+                "sha256": "a" * 64,
+            },
+            "candidate_metadata": {
+                "path": ".sidecar/runs/run-1/candidate.json",
+                "sha256": "b" * 64,
+            },
+            "candidate_preview_manifest": {
+                "path": ".sidecar/runs/run-1/candidate-preview.json",
+                "sha256": "e" * 64,
+            },
+            "candidate_preview_file": {
+                "path": ".sidecar/runs/run-1/candidate-preview/CODEX.md",
+                "sha256": "f" * 64,
+            },
+            "eval_report": {
+                "path": ".sidecar/runs/run-1/eval-report.json",
+                "sha256": "c" * 64,
+            },
+            "policy": {
+                "path": ".sidecar/policy.yaml",
+                "sha256": "0" * 64,
+            },
+            "policy_gate": {
+                "path": ".sidecar/runs/run-1/policy-gate.json",
+                "sha256": "d" * 64,
+            },
+        },
+        "checks": {
+            "policy_gate": {"allowed": True, "reasons": []},
+            "stored_policy_gate": {"allowed": True, "reasons": []},
+            "eval_report": {
+                "candidate_id_matches": True,
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "all",
+            },
+            "vcs": {
+                "preflight_passed": True,
+                "worktree_clean": True,
+                "dirty_paths": [],
+                "target_files_clean": True,
+                "base_hashes_match": True,
+                "reasons": [],
+            },
+            "candidate_preview": {"passed": True, "reason": ""},
+            "auto_apply": {"phase": "shadow"},
+        },
+        "readiness_metrics": {"reviewed_count": 20},
+    }
+
+    with pytest.raises(ArtifactValidationError, match="checks.auto_apply.incident_active"):
         validate_json_artifact("auto-apply-shadow.json", payload)
 
 
@@ -3046,7 +3135,11 @@ def test_validate_auto_apply_preflight_accepts_legacy_schema_without_source_arti
                     "reasons": [],
                 },
                 "candidate_preview": {"passed": False, "reason": "candidate_preview_missing"},
-                "auto_apply": {"candidate": {"candidate_id": "7"}},
+                "auto_apply": {
+                    "candidate": {"candidate_id": "7"},
+                    "incident_active": False,
+                    "active_incidents": [],
+                },
             },
             "readiness_metrics": {"reviewed_count": 20},
         },
@@ -3164,7 +3257,11 @@ def test_validate_auto_apply_preflight_requires_vcs_checks():
                         "suite_id": "all",
                     },
                     "candidate_preview": {"passed": True, "reason": ""},
-                    "auto_apply": {"candidate": {"candidate_id": "7"}},
+                    "auto_apply": {
+                        "candidate": {"candidate_id": "7"},
+                        "incident_active": False,
+                        "active_incidents": [],
+                    },
                 },
                 "readiness_metrics": {"reviewed_count": 20},
             },

@@ -1019,7 +1019,10 @@ def test_latest_failed_gates_returns_sanitized_gate_failures(tmp_path: Path):
                             "reasons": [],
                         },
                         "candidate_preview": {"passed": True, "reason": ""},
-                        "auto_apply": {},
+                        "auto_apply": {
+                            "incident_active": False,
+                            "active_incidents": [],
+                        },
                     },
                     "readiness_metrics": {},
                 }
@@ -1663,6 +1666,111 @@ def test_auto_update_status_exposes_read_only_lane_observability(tmp_path: Path)
     }
     assert result["daemon_queue"]["jobs_by_state"] == {}
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_auto_update_status"
+
+
+def test_auto_update_status_exposes_active_rollback_incidents(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    incident_path = run_dir / "rollback-incident.json"
+    incident_payload = {
+        "schema_version": 1,
+        "decision_id": "run-1",
+        "candidate_id": 7,
+        "failure_kind": "git_revert_failed",
+        "failure_message": "git revert failed",
+        "commit_sha": "abc123",
+        "target_files": ["CODEX.md"],
+        "source_artifacts": {
+            "apply_plan": {
+                "path": ".sidecar/runs/run-1/apply-plan.json",
+                "sha256": "a" * 64,
+            }
+        },
+        "rollback_plan_written": False,
+        "rollback_applied": False,
+    }
+    incident_path.write_text(
+        json.dumps(incident_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "rollback.failed",
+            {
+                "candidate_id": 7,
+                "failure_kind": "git_revert_failed",
+                "incident": ".sidecar/runs/run-1/rollback-incident.json",
+            },
+        )
+
+    result = tugboat_auto_update_status(repo)
+
+    assert result["active_incidents"] == [
+        {
+            "candidate_id": 7,
+            "event_type": "rollback.failed",
+            "artifact_status": "valid",
+            "artifact_valid": True,
+            "failure_kind": "git_revert_failed",
+            "incident": ".sidecar/runs/run-1/rollback-incident.json",
+        }
+    ]
+    assert result["incident_active"] is True
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_auto_update_status"
+
+
+def test_auto_update_status_clears_active_rollback_incident_after_success(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "rollback.failed",
+            {
+                "candidate_id": 7,
+                "failure_kind": "git_revert_failed",
+                "incident": ".sidecar/runs/run-1/rollback-incident.json",
+            },
+        )
+        store.append_audit_event("rollback.applied", {"candidate_id": 7})
+
+    result = tugboat_auto_update_status(repo)
+
+    assert result["active_incidents"] == []
+    assert result["incident_active"] is False
+
+
+def test_auto_update_status_exposes_missing_rollback_incident_artifact(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "rollback.failed",
+            {
+                "candidate_id": 8,
+                "failure_kind": "rollback_plan_publication_failed",
+                "incident": ".sidecar/runs/run-2/rollback-incident.json",
+            },
+        )
+
+    result = tugboat_auto_update_status(repo)
+
+    assert result["active_incidents"] == [
+        {
+            "candidate_id": 8,
+            "event_type": "rollback.failed",
+            "artifact_status": "missing",
+            "artifact_valid": False,
+            "failure_kind": "rollback_plan_publication_failed",
+            "incident": ".sidecar/runs/run-2/rollback-incident.json",
+        }
+    ]
+    assert result["incident_active"] is True
 
 
 def test_bound_read_only_mcp_stdio_includes_auto_update_status(tmp_path: Path):

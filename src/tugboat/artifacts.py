@@ -2927,7 +2927,37 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                             "reason": {"type": "string"},
                         },
                     },
-                    "auto_apply": {"type": "object"},
+                    "auto_apply": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "required": ["incident_active", "active_incidents"],
+                        "properties": {
+                            "incident_active": {"type": "boolean"},
+                            "active_incidents": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": [
+                                        "artifact_status",
+                                        "artifact_valid",
+                                        "candidate_id",
+                                        "event_type",
+                                        "failure_kind",
+                                        "incident",
+                                    ],
+                                    "properties": {
+                                        "artifact_status": {"type": "string"},
+                                        "artifact_valid": {"type": "boolean"},
+                                        "candidate_id": {"type": "integer"},
+                                        "event_type": {"type": "string"},
+                                        "failure_kind": {"type": "string"},
+                                        "incident": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
             },
             "readiness_metrics": {"type": "object"},
