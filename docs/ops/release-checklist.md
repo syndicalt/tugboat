@@ -29,10 +29,10 @@ tugboat ci --repo .
 tugboat index --repo . --check 2>&1 | tee .sidecar/ci/index-check.txt
 tugboat harness check --repo . 2>&1 | tee .sidecar/ci/harness.txt
 python -m pytest --cov=src --cov-report=term-missing -q 2>&1 | tee .sidecar/ci/pytest-coverage.log
-python -m build --wheel --outdir dist 2>&1 | tee .sidecar/ci/build-wheel.txt
+{ echo "python -m build --wheel --outdir dist"; python -m build --wheel --outdir dist; } 2>&1 | tee .sidecar/ci/build-wheel.txt
 WHEEL="$(ls dist/tugboat-*.whl | sort | tail -n 1)"
 echo "built ${WHEEL}" | tee -a .sidecar/ci/build-wheel.txt
-python -m twine check "${WHEEL}" 2>&1 | tee .sidecar/ci/twine-check.txt
+{ echo "python -m twine check ${WHEEL}"; python -m twine check "${WHEEL}"; } 2>&1 | tee .sidecar/ci/twine-check.txt
 cat > .sidecar/ci/security-review.md <<'EOF'
 # Security Review
 

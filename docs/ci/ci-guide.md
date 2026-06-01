@@ -65,13 +65,13 @@ jobs:
       - run: python -m pytest --cov=src --cov-report=term-missing -q 2>&1 | tee .sidecar/ci/pytest-coverage.log
       - run: |
           set -o pipefail
-          python -m build --wheel --outdir dist 2>&1 | tee .sidecar/ci/build-wheel.txt
+          { echo "python -m build --wheel --outdir dist"; python -m build --wheel --outdir dist; } 2>&1 | tee .sidecar/ci/build-wheel.txt
           WHEEL="$(ls dist/tugboat-*.whl | sort | tail -n 1)"
           echo "built ${WHEEL}" | tee -a .sidecar/ci/build-wheel.txt
       - run: |
           set -o pipefail
           WHEEL="$(ls dist/tugboat-*.whl | sort | tail -n 1)"
-          python -m twine check "${WHEEL}" 2>&1 | tee .sidecar/ci/twine-check.txt
+          { echo "python -m twine check ${WHEEL}"; python -m twine check "${WHEEL}"; } 2>&1 | tee .sidecar/ci/twine-check.txt
       - run: |
           cat > .sidecar/ci/security-review.md <<'EOF'
           # Security Review
