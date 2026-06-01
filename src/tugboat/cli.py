@@ -64,7 +64,7 @@ from tugboat.harness.checks import (
     generate_harness_report,
 )
 from tugboat.llmff.contracts import LlmffRunFailed
-from tugboat.llmff.runner import command_prefix, inspect_manifest, run_manifest
+from tugboat.llmff.runner import MissingOutputError, command_prefix, inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
     materialize_manifests,
@@ -2602,25 +2602,36 @@ def _run_acceptance_summary(
         raise RuntimeError("manifest hash is not allowed by policy")
     manifest = next(record.path for record in manifests if record.name == "acceptance-summary.yaml")
     inspect = inspect_manifest(manifest, run_dir=run_dir, policy=policy)
-    run = run_manifest(
-        manifest,
-        run_dir=run_dir,
-        policy=policy,
-        timeout_ms=policy.llmff_timeout_ms,
-        retry_attempts=policy.llmff_retry_attempts,
-        retry_backoff_ms=policy.llmff_retry_backoff_ms,
-        checkpoint_path=run_dir / "acceptance-summary" / "checkpoint.json",
-        input_paths={
-            "audit_report": run_dir / "audit.raw.json",
-            "candidate_patch": run_dir / "candidate.raw.json",
-            "policy_gate": run_dir / "policy-gate.json",
-            "eval_reports": eval_reports_path or run_dir / "eval-report.json",
-            "proposal_rationale": run_dir / "proposal-rationale.raw.json",
-            "risk_class": run_dir / "candidate.json",
-        },
-        output_paths={"acceptance_summary": run_dir / "acceptance-summary.raw.json"},
-        validate_output_artifacts=False,
-    )
+    try:
+        run = run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=policy,
+            timeout_ms=policy.llmff_timeout_ms,
+            retry_attempts=policy.llmff_retry_attempts,
+            retry_backoff_ms=policy.llmff_retry_backoff_ms,
+            checkpoint_path=run_dir / "acceptance-summary" / "checkpoint.json",
+            input_paths={
+                "audit_report": run_dir / "audit.raw.json",
+                "candidate_patch": run_dir / "candidate.raw.json",
+                "policy_gate": run_dir / "policy-gate.json",
+                "eval_reports": eval_reports_path or run_dir / "eval-report.json",
+                "proposal_rationale": run_dir / "proposal-rationale.raw.json",
+                "risk_class": run_dir / "candidate.json",
+            },
+            output_paths={"acceptance_summary": run_dir / "acceptance-summary.raw.json"},
+            validate_output_artifacts=False,
+        )
+    except MissingOutputError:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="acceptance_summary",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
+            )
+        raise
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(
             run_id=run_dir.name,
@@ -2640,11 +2651,22 @@ def _run_acceptance_summary(
             f"llmff acceptance-summary failed with exit code {run.exit_code}",
             exit_code=run.exit_code,
         )
-    payload = load_json_object_artifact(
-        run.output_paths["acceptance_summary"],
-        "acceptance-summary.raw.json",
-    )
-    validate_json_artifact("acceptance-summary.raw.json", payload)
+    try:
+        payload = load_json_object_artifact(
+            run.output_paths["acceptance_summary"],
+            "acceptance-summary.raw.json",
+        )
+        validate_json_artifact("acceptance-summary.raw.json", payload)
+    except ValueError:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="acceptance_summary",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
+            )
+        raise
     return payload
 
 

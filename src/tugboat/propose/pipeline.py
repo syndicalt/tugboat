@@ -17,7 +17,7 @@ from tugboat.artifacts import (
 from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.llmff.contracts import LlmffRunFailed
-from tugboat.llmff.runner import inspect_manifest, run_manifest
+from tugboat.llmff.runner import MissingOutputError, inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
     materialize_manifests,
@@ -184,18 +184,22 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         },
         required_outputs={"candidate_patch", "proposal_rationale"},
     )
-    run = run_manifest(
-        manifest,
-        run_dir=run_dir,
-        policy=policy,
-        timeout_ms=policy.llmff_timeout_ms,
-        retry_attempts=policy.llmff_retry_attempts,
-        retry_backoff_ms=policy.llmff_retry_backoff_ms,
-        checkpoint_path=run_dir / "patch-propose" / "checkpoint.json",
-        input_paths=input_paths,
-        output_paths=output_paths,
-        validate_output_artifacts=False,
-    )
+    try:
+        run = run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=policy,
+            timeout_ms=policy.llmff_timeout_ms,
+            retry_attempts=policy.llmff_retry_attempts,
+            retry_backoff_ms=policy.llmff_retry_backoff_ms,
+            checkpoint_path=run_dir / "patch-propose" / "checkpoint.json",
+            input_paths=input_paths,
+            output_paths=output_paths,
+            validate_output_artifacts=False,
+        )
+    except MissingOutputError:
+        _record_failed_run(repo, run_dir, stage="propose", manifest_hash=inspect.manifest_hash)
+        raise
     if run.exit_code != 0:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
@@ -212,38 +216,42 @@ def _run_patch_propose(repo: Path, run_dir: Path, policy, *, audit_id: int) -> C
         )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
-    payload = load_json_object_artifact(
-        run.output_paths["candidate_patch"],
-        "candidate.raw.json",
-    )
-    audit_evidence_refs = _audit_evidence_refs(run_dir)
-    if "proposal_rationale" in run.output_paths:
-        rationale_payload = load_json_object_artifact(
-            run.output_paths["proposal_rationale"],
-            "proposal-rationale.raw.json",
+    try:
+        payload = load_json_object_artifact(
+            run.output_paths["candidate_patch"],
+            "candidate.raw.json",
         )
-        validate_json_artifact("proposal-rationale.raw.json", rationale_payload)
-        _validate_proposal_rationale_declared_by_audit(
+        audit_evidence_refs = _audit_evidence_refs(run_dir)
+        if "proposal_rationale" in run.output_paths:
+            rationale_payload = load_json_object_artifact(
+                run.output_paths["proposal_rationale"],
+                "proposal-rationale.raw.json",
+            )
+            validate_json_artifact("proposal-rationale.raw.json", rationale_payload)
+            _validate_proposal_rationale_declared_by_audit(
+                audit_evidence_refs,
+                rationale_payload,
+            )
+            _validate_no_batch_training_evidence_refs(
+                run_dir,
+                "proposal_rationale",
+                _unique_json_strings(rationale_payload.get("evidence_refs", [])),
+            )
+        payload = _select_candidate_payload(repo, run_dir, payload)
+        validate_json_artifact("candidate.raw.json", payload)
+        _validate_reflections_from_payload(payload)
+        _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
+        _validate_payload_batch_training_evidence_refs(run_dir, payload)
+        candidate = _candidate_from_payload(payload, audit_id=audit_id)
+        _validate_bounded_edit_metadata_matches_diff(repo, candidate)
+        _validate_candidate_sources_declared_by_audit(
             audit_evidence_refs,
-            rationale_payload,
+            candidate,
+            canonical_evidence_trusts=_canonical_evidence_trusts(run_dir),
         )
-        _validate_no_batch_training_evidence_refs(
-            run_dir,
-            "proposal_rationale",
-            _unique_json_strings(rationale_payload.get("evidence_refs", [])),
-        )
-    payload = _select_candidate_payload(repo, run_dir, payload)
-    validate_json_artifact("candidate.raw.json", payload)
-    _validate_reflections_from_payload(payload)
-    _validate_reflections_declared_by_audit(audit_evidence_refs, payload)
-    _validate_payload_batch_training_evidence_refs(run_dir, payload)
-    candidate = _candidate_from_payload(payload, audit_id=audit_id)
-    _validate_bounded_edit_metadata_matches_diff(repo, candidate)
-    _validate_candidate_sources_declared_by_audit(
-        audit_evidence_refs,
-        candidate,
-        canonical_evidence_trusts=_canonical_evidence_trusts(run_dir),
-    )
+    except ValueError:
+        _record_failed_run(repo, run_dir, stage="propose", manifest_hash=inspect.manifest_hash)
+        raise
     return candidate
 
 
@@ -702,18 +710,22 @@ def _run_drift_detect(
         },
         required_outputs={"drift_clusters", "optimizer_notes"},
     )
-    run = run_manifest(
-        manifest,
-        run_dir=run_dir,
-        policy=policy,
-        timeout_ms=policy.llmff_timeout_ms,
-        retry_attempts=policy.llmff_retry_attempts,
-        retry_backoff_ms=policy.llmff_retry_backoff_ms,
-        checkpoint_path=run_dir / "drift-detect" / "checkpoint.json",
-        input_paths=input_paths,
-        output_paths=output_paths,
-        validate_output_artifacts=False,
-    )
+    try:
+        run = run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=policy,
+            timeout_ms=policy.llmff_timeout_ms,
+            retry_attempts=policy.llmff_retry_attempts,
+            retry_backoff_ms=policy.llmff_retry_backoff_ms,
+            checkpoint_path=run_dir / "drift-detect" / "checkpoint.json",
+            input_paths=input_paths,
+            output_paths=output_paths,
+            validate_output_artifacts=False,
+        )
+    except MissingOutputError:
+        _record_failed_run(repo, run_dir, stage="drift_detect", manifest_hash=inspect.manifest_hash)
+        raise
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
         if run.exit_code != 0:
@@ -729,22 +741,37 @@ def _run_drift_detect(
             f"llmff drift-detect failed with exit code {run.exit_code}",
             exit_code=run.exit_code,
         )
-    payload = load_json_object_artifact(output_path, "drift.raw.json")
-    validate_json_artifact("drift.raw.json", payload)
-    payload = _normalize_drift_clusters(payload, policy)
-    _write_private_json_artifact(output_path, "drift.raw.json", payload)
-    optimizer_payload = load_json_object_artifact(
-        run.output_paths["optimizer_notes"],
-        "optimizer-notes.raw.json",
-    )
-    validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
-    declared_evidence_refs = _audit_evidence_refs(run_dir)
-    _validate_drift_evidence_refs_declared_by_audit(declared_evidence_refs, payload)
-    _validate_optimizer_notes_evidence_refs_declared_by_audit(
-        declared_evidence_refs,
-        optimizer_payload,
-    )
+    try:
+        payload = load_json_object_artifact(output_path, "drift.raw.json")
+        validate_json_artifact("drift.raw.json", payload)
+        payload = _normalize_drift_clusters(payload, policy)
+        _write_private_json_artifact(output_path, "drift.raw.json", payload)
+        optimizer_payload = load_json_object_artifact(
+            run.output_paths["optimizer_notes"],
+            "optimizer-notes.raw.json",
+        )
+        validate_json_artifact("optimizer-notes.raw.json", optimizer_payload)
+        declared_evidence_refs = _audit_evidence_refs(run_dir)
+        _validate_drift_evidence_refs_declared_by_audit(declared_evidence_refs, payload)
+        _validate_optimizer_notes_evidence_refs_declared_by_audit(
+            declared_evidence_refs,
+            optimizer_payload,
+        )
+    except ValueError:
+        _record_failed_run(repo, run_dir, stage="drift_detect", manifest_hash=inspect.manifest_hash)
+        raise
     return output_path, optimizer_notes_path
+
+
+def _record_failed_run(repo: Path, run_dir: Path, *, stage: str, manifest_hash: str) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage=stage,
+            manifest_hash=manifest_hash,
+            status="failed",
+            run_dir=run_dir,
+        )
 
 
 def _normalize_drift_clusters(payload: dict[str, object], policy) -> dict[str, object]:

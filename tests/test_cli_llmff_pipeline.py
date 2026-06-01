@@ -130,6 +130,7 @@ def _write_fake_llmff(
     reflections: object | None = None,
     secret_artifact: str | None = None,
     invalid_json_output: str | None = None,
+    missing_output: str | None = None,
     optimizer_notes: object | None = None,
     proposal_rationale: object | None = None,
     omit_audit_instruction_refs: bool = False,
@@ -284,6 +285,7 @@ REFLECTIONS = __REFLECTIONS__
 SECRET_ARTIFACT = __SECRET_ARTIFACT__
 SECRET_VALUE = "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx"
 INVALID_JSON_OUTPUT = __INVALID_JSON_OUTPUT__
+MISSING_OUTPUT = __MISSING_OUTPUT__
 
 args = sys.argv[1:]
 if args[:3] == ["inspect", "--format", "json"]:
@@ -422,12 +424,16 @@ if args[:1] == ["run"]:
                     }
                 ]
             }
-        if INVALID_JSON_OUTPUT == "drift_clusters":
+        if MISSING_OUTPUT == "drift_clusters":
+            pass
+        elif INVALID_JSON_OUTPUT == "drift_clusters":
             outputs["drift_clusters"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["drift_clusters"].write_text(json.dumps(DRIFT_CLUSTERS) + "\\n", encoding="utf-8")
         if "optimizer_notes" in outputs:
-            if INVALID_JSON_OUTPUT == "optimizer_notes":
+            if MISSING_OUTPUT == "optimizer_notes":
+                pass
+            elif INVALID_JSON_OUTPUT == "optimizer_notes":
                 outputs["optimizer_notes"].write_text("{not json\\n", encoding="utf-8")
             else:
                 outputs["optimizer_notes"].write_text(json.dumps(OPTIMIZER_NOTES) + "\\n", encoding="utf-8")
@@ -436,10 +442,14 @@ if args[:1] == ["run"]:
         repo = outputs["candidate_patch"].parents[3]
         base = repo / "CODEX.md"
         if "proposal_rationale" in outputs:
-            if INVALID_JSON_OUTPUT == "proposal_rationale":
+            if MISSING_OUTPUT == "proposal_rationale":
+                pass
+            elif INVALID_JSON_OUTPUT == "proposal_rationale":
                 outputs["proposal_rationale"].write_text("{not json\\n", encoding="utf-8")
             else:
                 outputs["proposal_rationale"].write_text(json.dumps(PROPOSAL_RATIONALE) + "\\n", encoding="utf-8")
+        if MISSING_OUTPUT == "candidate_patch":
+            raise SystemExit(0)
         if SECRET_ARTIFACT == "candidate_patch":
             outputs["candidate_patch"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
             raise SystemExit(0)
@@ -474,18 +484,24 @@ if args[:1] == ["run"]:
             suite_id = json.loads(eval_suite.read_text(encoding="utf-8")).get("suite_id")
         eval_report = EVAL_REPORTS_BY_SUITE.get(suite_id, EVAL_REPORT)
         policy_decision = POLICY_DECISIONS_BY_SUITE.get(suite_id, POLICY_DECISION)
-        if SECRET_ARTIFACT == "eval_report":
+        if MISSING_OUTPUT == "eval_report":
+            pass
+        elif SECRET_ARTIFACT == "eval_report":
             outputs["eval_report"].write_text(json.dumps({"raw_model_payload": SECRET_VALUE}) + "\\n", encoding="utf-8")
         elif INVALID_JSON_OUTPUT == "eval_report":
             outputs["eval_report"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["eval_report"].write_text(json.dumps(eval_report) + "\\n", encoding="utf-8")
-        if INVALID_JSON_OUTPUT == "policy_decision":
+        if MISSING_OUTPUT == "policy_decision":
+            pass
+        elif INVALID_JSON_OUTPUT == "policy_decision":
             outputs["policy_decision"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["policy_decision"].write_text(json.dumps(policy_decision) + "\\n", encoding="utf-8")
     elif manifest == "acceptance-summary":
-        if INVALID_JSON_OUTPUT == "acceptance_summary":
+        if MISSING_OUTPUT == "acceptance_summary":
+            pass
+        elif INVALID_JSON_OUTPUT == "acceptance_summary":
             outputs["acceptance_summary"].write_text("{not json\\n", encoding="utf-8")
         else:
             outputs["acceptance_summary"].write_text(json.dumps(ACCEPTANCE_SUMMARY) + "\\n", encoding="utf-8")
@@ -528,6 +544,8 @@ raise SystemExit(64)
             "__SECRET_ARTIFACT__", repr(secret_artifact)
         ).replace(
             "__INVALID_JSON_OUTPUT__", repr(invalid_json_output)
+        ).replace(
+            "__MISSING_OUTPUT__", repr(missing_output)
         ),
         encoding="utf-8",
     )
@@ -1695,6 +1713,13 @@ llmff:
     assert (run_dir / "candidate.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status, episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+    assert run_row[:2] == ("propose", "failed")
+    assert run_row[2] is not None
 
 
 def test_propose_rejects_candidate_patch_wrapped_in_model_prose(
@@ -2860,6 +2885,58 @@ llmff:
     assert (run_dir / "drift.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status, episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+    assert run_row[:2] == ("drift_detect", "failed")
+    assert run_row[2] is not None
+
+
+def test_propose_records_failed_run_when_llmff_drift_output_is_missing(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        missing_output="drift_clusters",
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "llmff run succeeded without declared output: drift_clusters" in output
+    assert not (run_dir / "drift.raw.json").exists()
+    assert not (run_dir / "candidate.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status, episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+    assert run_row[:2] == ("drift_detect", "failed")
+    assert run_row[2] is not None
 
 
 def test_propose_rejects_drift_evidence_refs_not_declared_by_audit(
@@ -3111,6 +3188,13 @@ llmff:
     assert (run_dir / "proposal-rationale.raw.json").exists()
     assert not (run_dir / "candidate.json").exists()
     assert not (run_dir / "candidate.diff").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status, episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+    assert run_row[:2] == ("propose", "failed")
+    assert run_row[2] is not None
 
 
 def test_propose_rejects_invalid_json_proposal_rationale_output(tmp_path: Path, capsys):
@@ -4999,7 +5083,13 @@ llmff:
     assert (run_dir / "eval-report.raw.json").exists()
     assert not (run_dir / "eval-report.json").exists()
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status, episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
         eval_count = store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0]
+    assert run_row[:2] == ("eval", "failed")
+    assert run_row[2] is not None
     assert eval_count == 0
 
 
@@ -7685,6 +7775,13 @@ llmff:
     assert "acceptance-summary.raw.json contains invalid JSON" in output
     assert (run_dir / "acceptance-summary.raw.json").exists()
     assert not (run_dir / "optimization-summary.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        run_row = store.connection.execute(
+            "SELECT stage, status, episode_id FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+    assert run_row[:2] == ("acceptance_summary", "failed")
+    assert run_row[2] is not None
 
 
 def test_optimize_rejects_semantically_empty_acceptance_summary_output(

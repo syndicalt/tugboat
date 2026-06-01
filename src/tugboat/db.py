@@ -514,7 +514,7 @@ class Store:
             {"run_id": run_id, "stage": stage, "status": status},
         )
         existing = self.connection.execute(
-            "SELECT created_at FROM runs WHERE id = ?",
+            "SELECT created_at, episode_id FROM runs WHERE id = ?",
             (run_id,),
         ).fetchone()
         if existing is None:
@@ -539,6 +539,7 @@ class Store:
                 ),
             )
         else:
+            effective_episode_id = episode_id if episode_id is not None else existing[1]
             self.connection.execute(
                 """
                 UPDATE runs
@@ -547,7 +548,7 @@ class Store:
                 WHERE id = ?
                 """,
                 (
-                    episode_id,
+                    effective_episode_id,
                     stage,
                     manifest_hash,
                     status,

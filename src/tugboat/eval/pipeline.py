@@ -12,7 +12,7 @@ from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
 from tugboat.evals import EvalCaseRecord, run_offline_eval_suite, run_provider_smoke_suite
 from tugboat.llmff.contracts import LlmffRunFailed
-from tugboat.llmff.runner import inspect_manifest, run_manifest
+from tugboat.llmff.runner import MissingOutputError, inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
     materialize_manifests,
@@ -486,25 +486,29 @@ def _run_patch_eval(
     suite_path = run_dir / "eval-suite.json"
     suite_payload = {"schema_version": SCHEMA_VERSION, "suite_id": suite_id}
     _write_private_json_artifact(suite_path, "eval-suite.json", suite_payload)
-    run = run_manifest(
-        manifest,
-        run_dir=run_dir,
-        policy=policy,
-        timeout_ms=policy.llmff_timeout_ms,
-        retry_attempts=policy.llmff_retry_attempts,
-        retry_backoff_ms=policy.llmff_retry_backoff_ms,
-        checkpoint_path=run_dir / "patch-eval" / "checkpoint.json",
-        input_paths={
-            "candidate_patch": run_dir / "candidate.raw.json",
-            "eval_suite": suite_path,
-            "policy": sidecar_dir(repo) / "policy.yaml",
-        },
-        output_paths={
-            "eval_report": run_dir / "eval-report.raw.json",
-            "policy_decision": run_dir / "policy-decision.raw.json",
-        },
-        validate_output_artifacts=False,
-    )
+    try:
+        run = run_manifest(
+            manifest,
+            run_dir=run_dir,
+            policy=policy,
+            timeout_ms=policy.llmff_timeout_ms,
+            retry_attempts=policy.llmff_retry_attempts,
+            retry_backoff_ms=policy.llmff_retry_backoff_ms,
+            checkpoint_path=run_dir / "patch-eval" / "checkpoint.json",
+            input_paths={
+                "candidate_patch": run_dir / "candidate.raw.json",
+                "eval_suite": suite_path,
+                "policy": sidecar_dir(repo) / "policy.yaml",
+            },
+            output_paths={
+                "eval_report": run_dir / "eval-report.raw.json",
+                "policy_decision": run_dir / "policy-decision.raw.json",
+            },
+            validate_output_artifacts=False,
+        )
+    except MissingOutputError:
+        _record_failed_run(repo, run_dir, stage="eval", manifest_hash=inspect.manifest_hash)
+        raise
     if run.exit_code != 0:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
@@ -521,17 +525,32 @@ def _run_patch_eval(
         )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.record_llmff_run(run_id=run_dir.name, manifest_hash=inspect.manifest_hash, result=run)
-    eval_payload = load_json_object_artifact(
-        run.output_paths["eval_report"],
-        "eval-report.raw.json",
-    )
-    validate_json_artifact("eval-report.raw.json", eval_payload)
-    raw_policy_decision_payload = load_json_object_artifact(
-        run.output_paths["policy_decision"],
-        "policy-decision.raw.json",
-    )
-    validate_json_artifact("policy-decision.raw.json", raw_policy_decision_payload)
+    try:
+        eval_payload = load_json_object_artifact(
+            run.output_paths["eval_report"],
+            "eval-report.raw.json",
+        )
+        validate_json_artifact("eval-report.raw.json", eval_payload)
+        raw_policy_decision_payload = load_json_object_artifact(
+            run.output_paths["policy_decision"],
+            "policy-decision.raw.json",
+        )
+        validate_json_artifact("policy-decision.raw.json", raw_policy_decision_payload)
+    except ValueError:
+        _record_failed_run(repo, run_dir, stage="eval", manifest_hash=inspect.manifest_hash)
+        raise
     return eval_payload, raw_policy_decision_payload
+
+
+def _record_failed_run(repo: Path, run_dir: Path, *, stage: str, manifest_hash: str) -> None:
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage=stage,
+            manifest_hash=manifest_hash,
+            status="failed",
+            run_dir=run_dir,
+        )
 
 
 def _float_eval_field(
