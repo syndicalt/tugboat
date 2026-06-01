@@ -986,6 +986,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if _sidecar_schema_preflight_blocked("propose", repo):
             return 1
+        if _policy_preflight_blocked("propose", repo):
+            return 1
         try:
             result = run_propose_pipeline(repo, args.audit)
         except (
@@ -1002,6 +1004,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval":
         repo = Path(args.repo)
         if _sidecar_schema_preflight_blocked("eval", repo):
+            return 1
+        if _policy_preflight_blocked("eval", repo):
             return 1
         try:
             result = run_eval_pipeline(repo, args.candidate, args.suite)
@@ -2672,6 +2676,7 @@ def _run_acceptance_summary(
 
 def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
     metadata = load_json_object_artifact(run_dir / "candidate.json", "candidate.json")
+    validate_json_artifact("candidate.json", metadata)
     diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
     if hashlib.sha256(diff.encode("utf-8")).hexdigest() != str(metadata["diff_hash"]):
         raise ValueError("candidate diff hash does not match candidate.diff")
@@ -2702,6 +2707,7 @@ def _decision_from_artifact(run_dir: Path):
     from tugboat.policy.gate import PolicyDecision
 
     payload = load_json_object_artifact(run_dir / "policy-gate.json", "policy-gate.json")
+    validate_json_artifact("policy-gate.json", payload)
     return PolicyDecision(bool(payload["allowed"]), tuple(payload["reasons"]))
 
 

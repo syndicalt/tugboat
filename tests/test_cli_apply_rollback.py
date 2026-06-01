@@ -130,22 +130,24 @@ def _candidate_run(
         "base_file": base_file,
         "base_hash": _hash(repo / base_file),
         "diff_hash": hashlib.sha256(diff.encode("utf-8")).hexdigest(),
+        "expected_behavior_change": "Rollback provenance stays visible to reviewers.",
+        "evals_required": ["governance-regression"],
         "risk_class": risk_class,
         "rationale": "Keep rollback provenance visible.",
+        "rollback_plan": ["tugboat", "rollback", "--decision", "latest"],
         "sources": [{"source_id": "audit:1", "trusted": True}],
-    }
-    if pending_eval_definition_paths:
-        candidate["pending_audit_eval_definition_paths"] = list(pending_eval_definition_paths)
-    if bounded_section is not None:
-        candidate["bounded_edit_metadata"] = [
+        "bounded_edit_metadata": [
             {
                 "operator": "add",
                 "file": base_file,
-                "section": bounded_section,
+                "section": bounded_section or "Rules",
                 "changed_lines": 1,
                 "normative_changes": 0,
             }
-        ]
+        ],
+    }
+    if pending_eval_definition_paths:
+        candidate["pending_audit_eval_definition_paths"] = list(pending_eval_definition_paths)
     (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
     (run_dir / "candidate.json").write_text(
         json.dumps(candidate, indent=2, sort_keys=True) + "\n",

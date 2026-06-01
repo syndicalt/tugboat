@@ -485,6 +485,123 @@ def test_audit_malformed_policy_cli_exits_cleanly_without_python_traceback(
     assert "Traceback" not in result.stdout
 
 
+def test_propose_malformed_policy_cli_exits_cleanly_without_python_traceback(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (repo / ".sidecar" / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+    (run_dir / "audit.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "edit_warranted": True,
+                "evidence_refs": ["ev-1"],
+                "failure_class": "instruction_missing",
+                "severity": "medium",
+                "confidence": 0.9,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "audit.raw.json").write_text("{}\n", encoding="utf-8")
+    (run_dir / "instruction-index.raw.json").write_text("{}\n", encoding="utf-8")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tugboat",
+            "propose",
+            "--repo",
+            str(repo),
+            "--audit",
+            "run-1",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "propose blocked: policy invalid:" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
+def test_propose_malformed_policy_main_returns_clear_error(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    assert main(["propose", "--repo", str(repo), "--audit", "missing"]) == 1
+
+    output = capsys.readouterr().out
+    assert "propose blocked: policy invalid:" in output
+    assert "missing" not in output
+
+
+def test_eval_malformed_policy_cli_exits_cleanly_without_python_traceback(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (repo / ".sidecar" / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+    _write_report_candidate_artifacts(run_dir)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tugboat",
+            "eval",
+            "--repo",
+            str(repo),
+            "--candidate",
+            "run-1",
+            "--suite",
+            "all",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "eval blocked: policy invalid:" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
+def test_eval_malformed_policy_main_returns_clear_error(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: [\n", encoding="utf-8")
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "missing", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked: policy invalid:" in output
+    assert "missing" not in output
+
+
 def test_optimize_missing_train_trace_returns_clear_error_without_traceback(
     tmp_path: Path,
     capsys,
@@ -778,13 +895,26 @@ def _write_report_candidate_artifacts(run_dir: Path) -> None:
             {
                 "schema_version": 1,
                 "audit_id": 1,
-                "candidate_id": "candidate-1",
+                "candidate_id": 1,
                 "base_file": "CODEX.md",
                 "base_hash": "abc",
                 "diff_hash": "e3b0c44298fc1c149afbf4c8996fb924"
                 "27ae41e4649b934ca495991b7852b855",
+                "expected_behavior_change": "No behavior change.",
+                "evals_required": [],
                 "risk_class": "low",
                 "rationale": "Test candidate.",
+                "rollback_plan": [],
+                "sources": [{"source_id": "ev-1", "trusted": True}],
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Rules",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -895,6 +1025,57 @@ def test_report_non_object_candidate_artifact_returns_clear_error_without_traceb
     assert not (run_dir / "report.md").exists()
 
 
+def test_report_malformed_candidate_sources_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    diff = ""
+    (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "candidate_id": 1,
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "e3b0c44298fc1c149afbf4c8996fb924"
+                "27ae41e4649b934ca495991b7852b855",
+                "expected_behavior_change": "No behavior change.",
+                "evals_required": [],
+                "risk_class": "low",
+                "rationale": "Test candidate.",
+                "rollback_plan": [],
+                "sources": "ev-1",
+                "bounded_edit_metadata": [
+                    {
+                        "operator": "add",
+                        "file": "CODEX.md",
+                        "section": "Rules",
+                        "changed_lines": 1,
+                        "normative_changes": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}),
+        encoding="utf-8",
+    )
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: candidate.json field has wrong type: sources" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
 def test_report_non_object_policy_gate_artifact_returns_clear_error_without_traceback(
     tmp_path: Path,
     capsys,
@@ -909,6 +1090,27 @@ def test_report_non_object_policy_gate_artifact_returns_clear_error_without_trac
 
     output = capsys.readouterr().out
     assert "report blocked: policy-gate.json must be a JSON object" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_malformed_policy_gate_allowed_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    _write_report_candidate_artifacts(run_dir)
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": "true", "reasons": []}),
+        encoding="utf-8",
+    )
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: policy-gate.json field has wrong type: allowed" in output
     assert "Traceback" not in output
     assert not (run_dir / "report.md").exists()
 
