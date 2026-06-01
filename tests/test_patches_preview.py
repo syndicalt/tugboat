@@ -45,6 +45,251 @@ def test_apply_unified_diff_applies_valid_ranged_hunk():
     assert apply_unified_diff(base, diff) == "alpha\ndelta\ngamma\n"
 
 
+def test_apply_unified_diff_generated_single_line_replacements_preserve_expected_text():
+    base_lines = [
+        "# Rules\n",
+        "\n",
+        "Use tests.\n",
+        "Record rollback.\n",
+        "Keep review notes.\n",
+    ]
+    base = "".join(base_lines)
+
+    for line_number, original in enumerate(base_lines, start=1):
+        replacement = f"Generated replacement {line_number}.\n"
+        diff = (
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            f"@@ -{line_number},1 +{line_number},1 @@\n"
+            f"-{original}"
+            f"+{replacement}"
+        )
+
+        expected_lines = [*base_lines]
+        expected_lines[line_number - 1] = replacement
+
+        assert apply_unified_diff(base, diff, expected_path="CODEX.md") == "".join(
+            expected_lines
+        )
+
+
+def test_bounded_edit_metadata_generated_replacements_match_classifier_output():
+    base = "# Rules\n\nUse tests.\nRecord rollback.\nKeep review notes.\n"
+
+    for line_number, original in (
+        (3, "Use tests.\n"),
+        (4, "Record rollback.\n"),
+        (5, "Keep review notes.\n"),
+    ):
+        replacement = f"Generated replacement {line_number}.\n"
+        diff = (
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            f"@@ -{line_number},1 +{line_number},1 @@\n"
+            f"-{original}"
+            f"+{replacement}"
+        )
+        operations = classify_markdown_diff_operations(base, diff, expected_path="CODEX.md")
+
+        assert bounded_edit_metadata_mismatch_fields(
+            base,
+            diff,
+            tuple(operation.as_metadata() for operation in operations),
+            expected_path="CODEX.md",
+        ) == ()
+
+
+def test_generated_bounded_operator_diffs_round_trip_through_metadata():
+    allowed_operators = {
+        "add",
+        "delete",
+        "replace",
+        "annotate",
+        "split",
+        "merge",
+        "promote",
+        "demote",
+    }
+
+    for case in _generated_patch_cases():
+        operations = classify_markdown_diff_operations(
+            case["base"],
+            case["diff"],
+            expected_path="CODEX.md",
+        )
+
+        assert apply_unified_diff(
+            case["base"],
+            case["diff"],
+            expected_path="CODEX.md",
+        ) == case["expected_text"]
+        assert [operation.operator for operation in operations] == [case["operator"]]
+        assert bounded_edit_metadata_mismatch_fields(
+            case["base"],
+            case["diff"],
+            tuple(operation.as_metadata() for operation in operations),
+            expected_path="CODEX.md",
+        ) == ()
+        metadata = operations[0].as_metadata()
+        assert metadata["operator"] in allowed_operators
+        assert metadata["file"] == "CODEX.md"
+        assert metadata["changed_lines"] == max(case["removed_count"], case["added_count"])
+        assert metadata["normative_changes"] <= metadata["changed_lines"]
+
+
+def test_generated_bounded_operator_diffs_reject_mutated_hunk_counts():
+    for case in _generated_patch_cases():
+        invalid_diff = case["diff"].replace(case["header"], case["invalid_header"], 1)
+
+        assert apply_unified_diff(
+            case["base"],
+            invalid_diff,
+            expected_path="CODEX.md",
+        ) is None
+        assert (
+            classify_markdown_diff_operations(
+                case["base"],
+                invalid_diff,
+                expected_path="CODEX.md",
+            )
+            == ()
+        )
+        assert bounded_edit_metadata_mismatch_fields(
+            case["base"],
+            invalid_diff,
+            (),
+            expected_path="CODEX.md",
+        ) == ("diff",)
+
+
+def _generated_patch_cases() -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "operator": "add",
+            "base": "# Testing\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -2,0 +3,1 @@\n"
+                "+Add regression guidance.\n"
+            ),
+            "expected_text": "# Testing\nAdd regression guidance.\n\nUse tests.\n",
+            "header": "@@ -2,0 +3,1 @@",
+            "invalid_header": "@@ -2,0 +3,2 @@",
+            "removed_count": 0,
+            "added_count": 1,
+        },
+        {
+            "operator": "delete",
+            "base": "# Testing\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,1 +3,0 @@\n"
+                "-Use tests.\n"
+            ),
+            "expected_text": "# Testing\n\n",
+            "header": "@@ -3,1 +3,0 @@",
+            "invalid_header": "@@ -3,2 +3,0 @@",
+            "removed_count": 1,
+            "added_count": 0,
+        },
+        {
+            "operator": "replace",
+            "base": "# Testing\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,1 +3,1 @@\n"
+                "-Use tests.\n"
+                "+Use regression tests.\n"
+            ),
+            "expected_text": "# Testing\n\nUse regression tests.\n",
+            "header": "@@ -3,1 +3,1 @@",
+            "invalid_header": "@@ -3,2 +3,1 @@",
+            "removed_count": 1,
+            "added_count": 1,
+        },
+        {
+            "operator": "annotate",
+            "base": "# Testing\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,0 +4,1 @@\n"
+                "+<!-- keep fixture coverage explicit -->\n"
+            ),
+            "expected_text": "# Testing\n\n<!-- keep fixture coverage explicit -->\nUse tests.\n",
+            "header": "@@ -3,0 +4,1 @@",
+            "invalid_header": "@@ -3,0 +4,2 @@",
+            "removed_count": 0,
+            "added_count": 1,
+        },
+        {
+            "operator": "split",
+            "base": "# Testing\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,0 +4,1 @@\n"
+                "+## Regression\n"
+            ),
+            "expected_text": "# Testing\n\n## Regression\nUse tests.\n",
+            "header": "@@ -3,0 +4,1 @@",
+            "invalid_header": "@@ -3,0 +4,2 @@",
+            "removed_count": 0,
+            "added_count": 1,
+        },
+        {
+            "operator": "merge",
+            "base": "# Testing\n\n## Regression\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,1 +3,0 @@\n"
+                "-## Regression\n"
+            ),
+            "expected_text": "# Testing\n\n\nUse tests.\n",
+            "header": "@@ -3,1 +3,0 @@",
+            "invalid_header": "@@ -3,2 +3,0 @@",
+            "removed_count": 1,
+            "added_count": 0,
+        },
+        {
+            "operator": "promote",
+            "base": "# Rules\n\n## Testing\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,1 +3,1 @@\n"
+                "-## Testing\n"
+                "+# Testing\n"
+            ),
+            "expected_text": "# Rules\n\n# Testing\n\nUse tests.\n",
+            "header": "@@ -3,1 +3,1 @@",
+            "invalid_header": "@@ -3,2 +3,1 @@",
+            "removed_count": 1,
+            "added_count": 1,
+        },
+        {
+            "operator": "demote",
+            "base": "# Testing\n\n# Regression\n\nUse tests.\n",
+            "diff": (
+                "--- a/CODEX.md\n"
+                "+++ b/CODEX.md\n"
+                "@@ -3,1 +3,1 @@\n"
+                "-# Regression\n"
+                "+## Regression\n"
+            ),
+            "expected_text": "# Testing\n\n## Regression\n\nUse tests.\n",
+            "header": "@@ -3,1 +3,1 @@",
+            "invalid_header": "@@ -3,2 +3,1 @@",
+            "removed_count": 1,
+            "added_count": 1,
+        },
+    )
+
+
 def test_apply_unified_diff_rejects_bare_hunk_headers():
     base = "alpha\nbeta\n"
     diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+delta\n"
