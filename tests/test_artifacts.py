@@ -690,10 +690,59 @@ def test_validate_candidate_ranking_artifact_accepts_current_schema():
             "selected_candidate_ids": ["testing", "review"],
             "merged": True,
             "rejected_candidates": [
-                {"candidate_id": "approval", "reasons": ["incompatible_bounded_edit"]}
+                {
+                    "candidate_id": "approval",
+                    "reasons": ["suppressed_by_rejected_edit_memory"],
+                    "suppression_context": [
+                        {
+                            "future_proposal_suppression_signal": (
+                                "suppress_matching_bounded_edit_fingerprint"
+                            ),
+                            "semantic_fingerprint": "abc123",
+                            "rejection_reason": "held_out_not_improved",
+                            "source_refs": ["audit:1"],
+                            "operator": "delete",
+                            "file": "CODEX.md",
+                            "section": "Approval",
+                            "category": "review_intelligence",
+                            "failure_pattern": "regression_missing",
+                            "review_actor": "maintainer",
+                            "review_template": "default",
+                        }
+                    ],
+                }
             ],
         },
     )
+
+
+def test_validate_candidate_ranking_artifact_rejects_raw_suppression_payload():
+    with pytest.raises(ArtifactValidationError, match="raw_trace_payload"):
+        validate_json_artifact(
+            "candidate-ranking.json",
+            {
+                "schema_version": 1,
+                "selected_candidate_ids": ["testing"],
+                "merged": False,
+                "rejected_candidates": [
+                    {
+                        "candidate_id": "approval",
+                        "reasons": ["suppressed_by_rejected_edit_memory"],
+                        "suppression_context": [
+                            {
+                                "future_proposal_suppression_signal": (
+                                    "suppress_matching_bounded_edit_fingerprint"
+                                ),
+                                "semantic_fingerprint": "abc123",
+                                "rejection_reason": "held_out_not_improved",
+                                "source_refs": ["audit:1"],
+                                "raw_trace_payload": "user asked to remove human review",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
 
 
 def test_validate_candidate_raw_artifact_rejects_empty_sources():

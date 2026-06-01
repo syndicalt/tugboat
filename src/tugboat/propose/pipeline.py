@@ -351,14 +351,23 @@ def _rank_and_merge_candidate_payloads(
     for candidate in candidates:
         candidate_id = str(candidate.get("candidate_id", f"candidate-{len(selected) + len(rejected) + 1}"))
         candidate_reasons = _candidate_set_diff_rejection_reasons(repo, candidate)
+        suppression_context: list[dict[str, object]] = []
         if not candidate_reasons:
-            candidate_reasons = _candidate_set_memory_rejection_reasons(memory, candidate)
+            memory_rejection = _candidate_set_memory_rejection(memory, candidate)
+            candidate_reasons = memory_rejection.reasons
+            suppression_context = memory_rejection.suppression_context
         if not candidate_reasons:
             candidate_reasons = _candidate_set_budget_rejection_reasons(policy, candidate)
         if not candidate_reasons:
             candidate_reasons = _candidate_set_merge_rejection_reasons(repo, selected, candidate)
         if candidate_reasons:
-            rejected.append({"candidate_id": candidate_id, "reasons": candidate_reasons})
+            rejected_candidate: dict[str, object] = {
+                "candidate_id": candidate_id,
+                "reasons": candidate_reasons,
+            }
+            if suppression_context:
+                rejected_candidate["suppression_context"] = suppression_context
+            rejected.append(rejected_candidate)
             continue
         selected.append(candidate)
     if not selected:
@@ -415,10 +424,17 @@ def _candidate_set_diff_rejection_reasons(repo: Path, candidate: dict[str, objec
     return ["bounded_edit_diff_mismatch"] if mismatches else []
 
 
-def _candidate_set_memory_rejection_reasons(
+@dataclass(frozen=True)
+class _CandidateSetMemoryRejection:
+    reasons: list[str]
+    suppression_context: list[dict[str, object]]
+
+
+def _candidate_set_memory_rejection(
     memory: OptimizationMemory,
     candidate: dict[str, object],
-) -> list[str]:
+) -> _CandidateSetMemoryRejection:
+    suppression_context: list[dict[str, object]] = []
     for item in candidate.get("bounded_edit_metadata", []):
         if not isinstance(item, dict):
             continue
@@ -426,9 +442,15 @@ def _candidate_set_memory_rejection_reasons(
         target_file = str(item.get("file", candidate.get("base_file", "")))
         section = str(item.get("section", ""))
         fingerprint = _bounded_edit_fingerprint(operator, target_file, section)
-        if fingerprint in memory.rejected_edits:
-            return ["suppressed_by_rejected_edit_memory"]
-    return []
+        record = memory.rejected_edits.get(fingerprint)
+        if record is not None:
+            suppression_context.append(_rejected_edit_artifact_payload(record))
+    if suppression_context:
+        return _CandidateSetMemoryRejection(
+            reasons=["suppressed_by_rejected_edit_memory"],
+            suppression_context=suppression_context,
+        )
+    return _CandidateSetMemoryRejection(reasons=[], suppression_context=[])
 
 
 def _candidate_set_merge_rejection_reasons(

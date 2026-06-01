@@ -633,6 +633,35 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "properties": {
                         "candidate_id": {"type": "string"},
                         "reasons": {"type": "array", "items": {"type": "string"}},
+                        "suppression_context": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [
+                                    "future_proposal_suppression_signal",
+                                    "semantic_fingerprint",
+                                    "rejection_reason",
+                                    "source_refs",
+                                ],
+                                "properties": {
+                                    "future_proposal_suppression_signal": {
+                                        "type": "string",
+                                        "const": "suppress_matching_bounded_edit_fingerprint",
+                                    },
+                                    "semantic_fingerprint": {"type": "string"},
+                                    "rejection_reason": {"type": "string"},
+                                    "source_refs": {"type": "array", "items": {"type": "string"}},
+                                    "operator": {"type": "string"},
+                                    "file": {"type": "string"},
+                                    "section": {"type": "string"},
+                                    "category": {"type": "string"},
+                                    "failure_pattern": {"type": "string"},
+                                    "review_actor": {"type": "string"},
+                                    "review_template": {"type": "string"},
+                                },
+                            },
+                        },
                     },
                 },
             },

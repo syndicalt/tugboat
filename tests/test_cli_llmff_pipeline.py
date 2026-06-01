@@ -3863,6 +3863,13 @@ llmff:
                 "semantic_fingerprint": fingerprint,
                 "rejection_reason": "held_out_not_improved",
                 "source_refs": ["audit:1"],
+                "operator": "delete",
+                "file": "CODEX.md",
+                "section": "Approval",
+                "category": "review_intelligence",
+                "failure_pattern": "manual_rejection",
+                "review_actor": "maintainer",
+                "review_template": "default",
             },
         )
 
@@ -3872,6 +3879,7 @@ llmff:
     candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
     ranking = json.loads((run_dir / "candidate-ranking.json").read_text(encoding="utf-8"))
     policy_gate = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    ranking_text = json.dumps(ranking, sort_keys=True)
 
     assert candidate["bounded_edit_metadata"] == [
         {
@@ -3890,9 +3898,28 @@ llmff:
             {
                 "candidate_id": "suppressed-approval-delete",
                 "reasons": ["suppressed_by_rejected_edit_memory"],
+                "suppression_context": [
+                    {
+                        "future_proposal_suppression_signal": (
+                            "suppress_matching_bounded_edit_fingerprint"
+                        ),
+                        "semantic_fingerprint": fingerprint,
+                        "rejection_reason": "held_out_not_improved",
+                        "source_refs": ["audit:1"],
+                        "operator": "delete",
+                        "file": "CODEX.md",
+                        "section": "Approval",
+                        "category": "review_intelligence",
+                        "failure_pattern": "manual_rejection",
+                        "review_actor": "maintainer",
+                        "review_template": "default",
+                    }
+                ],
             }
         ],
     }
+    assert "Keep human review" not in ranking_text
+    assert "--- a/CODEX.md" not in ranking_text
     assert policy_gate == {
         "schema_version": 1,
         "allowed": True,
