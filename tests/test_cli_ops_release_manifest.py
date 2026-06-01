@@ -85,7 +85,14 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
         "installed tugboat index --repo . --check\n"
         "index: ok\n"
         "installed tugboat harness check --repo .\n"
-        "harness: ok\n",
+        "harness: ok\n"
+        "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all\n"
+        "optimization: needs_review\n"
+        "proposal smoke artifact: audit.json\n"
+        "proposal smoke artifact: candidate.json\n"
+        "proposal smoke artifact: eval-report.json\n"
+        "proposal smoke artifact: optimization-summary.json\n"
+        "proposal smoke artifact: report.md\n",
         encoding="utf-8",
     )
     return evidence
@@ -252,6 +259,13 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         b"index: ok\n"
         b"installed tugboat harness check --repo .\n"
         b"harness: ok\n"
+        b"installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all\n"
+        b"optimization: needs_review\n"
+        b"proposal smoke artifact: audit.json\n"
+        b"proposal smoke artifact: candidate.json\n"
+        b"proposal smoke artifact: eval-report.json\n"
+        b"proposal smoke artifact: optimization-summary.json\n"
+        b"proposal smoke artifact: report.md\n"
     )
     build_wheel = (
         b"python -m build --wheel\n"
@@ -298,6 +312,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             "installed tugboat doctor",
             "installed tugboat index --repo . --check",
             "installed tugboat harness check --repo .",
+            "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all",
         ],
         "retained_evidence": [
             {
@@ -664,6 +679,49 @@ def test_ops_release_manifest_blocks_installed_smoke_missing_harness(
         "auto_apply: disabled\n"
         "installed tugboat index --repo . --check\n"
         "index: ok\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: install smoke evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_installed_smoke_missing_proposal_loop_artifacts(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["install"].write_text(
+        "installed tugboat wheel: dist/tugboat-0.1.0-py3-none-any.whl\n"
+        "installed tugboat doctor\n"
+        "tugboat: ok\n"
+        "mode: proposal_only\n"
+        "auto_apply: disabled\n"
+        "installed tugboat index --repo . --check\n"
+        "index: ok\n"
+        "installed tugboat harness check --repo .\n"
+        "harness: ok\n",
         encoding="utf-8",
     )
     (repo / "pyproject.toml").write_text(

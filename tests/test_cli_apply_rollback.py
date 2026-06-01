@@ -380,13 +380,14 @@ def _seed_auto_apply_history(
                 (1000 + index, decision, created_at, int(cursor.lastrowid)),
             )
         for index in range(applied):
+            candidate_id = 2000 + index
             cursor = connection.execute(
                 """
                 INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
                 VALUES ('decision.recorded', ?, '', ?)
                 """,
                 (
-                    json.dumps({"candidate_id": 2000 + index, "seed": index}, sort_keys=True),
+                    json.dumps({"candidate_id": candidate_id, "seed": index}, sort_keys=True),
                     f"seeded-apply-decision-{index}",
                 ),
             )
@@ -396,17 +397,79 @@ def _seed_auto_apply_history(
                   candidate_id, actor, policy, decision, reason, created_at,
                   applied_commit, rollback_ref, audit_event_sequence
                 )
-                VALUES (?, 'tugboat', 'apply_controller', 'applied', 'seeded', ?, 'abc', '[]', ?)
+                VALUES (?, 'tugboat', 'auto_apply_controller', 'applied', 'seeded', ?, 'abc', '[]', ?)
                 """,
-                (2000 + index, created_at, int(cursor.lastrowid)),
+                (candidate_id, created_at, int(cursor.lastrowid)),
             )
         for index in range(rollbacks):
+            candidate_id = 2000 + index
             connection.execute(
                 """
                 INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
                 VALUES ('rollback.applied', ?, '', ?)
                 """,
-                (json.dumps({"seed": index}, sort_keys=True), f"rollback-{index}"),
+                (
+                    json.dumps({"candidate_id": candidate_id, "seed": index}, sort_keys=True),
+                    f"rollback-{index}",
+                ),
+            )
+        connection.commit()
+
+
+def _seed_applied_decisions(
+    repo: Path,
+    *,
+    policy: str,
+    candidate_start: int,
+    count: int,
+    days_ago: int = 15,
+) -> tuple[int, ...]:
+    created_at = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    candidate_ids = tuple(candidate_start + index for index in range(count))
+    db_path = repo / ".sidecar" / "db.sqlite"
+    with Store.open(sidecar_dir(repo) / "db.sqlite"):
+        pass
+    with closing(sqlite3.connect(db_path)) as connection:
+        for index, candidate_id in enumerate(candidate_ids):
+            cursor = connection.execute(
+                """
+                INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+                VALUES ('decision.recorded', ?, '', ?)
+                """,
+                (
+                    json.dumps({"candidate_id": candidate_id, "seed": index}, sort_keys=True),
+                    f"seeded-{policy}-decision-{candidate_id}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO decisions(
+                  candidate_id, actor, policy, decision, reason, created_at,
+                  applied_commit, rollback_ref, audit_event_sequence
+                )
+                VALUES (?, 'tugboat', ?, 'applied', 'seeded', ?, 'abc', '[]', ?)
+                """,
+                (candidate_id, policy, created_at, int(cursor.lastrowid)),
+            )
+        connection.commit()
+    return candidate_ids
+
+
+def _seed_rollback_applied_events(repo: Path, *, candidate_ids: tuple[int, ...]) -> None:
+    db_path = repo / ".sidecar" / "db.sqlite"
+    with Store.open(sidecar_dir(repo) / "db.sqlite"):
+        pass
+    with closing(sqlite3.connect(db_path)) as connection:
+        for index, candidate_id in enumerate(candidate_ids):
+            connection.execute(
+                """
+                INSERT INTO audit_events(event_type, payload_json, previous_hash, event_hash)
+                VALUES ('rollback.applied', ?, '', ?)
+                """,
+                (
+                    json.dumps({"candidate_id": candidate_id, "seed": index}, sort_keys=True),
+                    f"rollback-{candidate_id}",
+                ),
             )
         connection.commit()
 
@@ -2957,6 +3020,55 @@ def test_auto_apply_uses_ledger_rejection_and_rollback_rates_without_cli_overrid
     assert event_payload["readiness_metrics"]["source_audit_range"]["last_sequence"] is not None
     assert "rejection_rate_too_high" in event_payload["reasons"]
     assert "rollback_rate_too_high" in event_payload["reasons"]
+
+
+def test_auto_apply_rollback_watch_is_not_diluted_by_human_applies(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=6)
+    _seed_auto_apply_history(repo, reviewed=20, rejected=0, applied=0, rollbacks=0)
+    _seed_applied_decisions(
+        repo,
+        policy="apply_controller",
+        candidate_start=3000,
+        count=100,
+    )
+    auto_applied_candidate_ids = _seed_applied_decisions(
+        repo,
+        policy="auto_apply_controller",
+        candidate_start=4000,
+        count=1,
+    )
+    _seed_rollback_applied_events(repo, candidate_ids=auto_applied_candidate_ids)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "6",
+                "--actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
+    decisions = _auto_apply_decision_payloads(repo)
+    assert len(decisions) == 1
+    event_payload = decisions[0]
+    assert event_payload["phase"] == "precheck"
+    assert event_payload["eligible"] is False
+    assert event_payload["readiness_metrics"]["applied_count"] == 1
+    assert event_payload["readiness_metrics"]["rollback_count"] == 1
+    assert event_payload["readiness_metrics"]["rollback_rate"] == 1.0
+    assert event_payload["reasons"] == ["rollback_rate_too_high"]
 
 
 def test_auto_apply_precheck_blocks_without_eval_evidence(tmp_path: Path):

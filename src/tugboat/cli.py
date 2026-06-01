@@ -1686,6 +1686,7 @@ def _write_release_artifact_manifest(
             "installed tugboat doctor",
             "installed tugboat index --repo . --check",
             "installed tugboat harness check --repo .",
+            "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all",
         ],
         "retained_evidence": retained_evidence,
     }
@@ -1755,6 +1756,14 @@ def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> No
             or "index: ok" not in lowered
             or "installed tugboat harness check --repo ." not in lowered
             or "harness: ok" not in lowered
+            or "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all"
+            not in lowered
+            or "optimization:" not in lowered
+            or "audit.json" not in lowered
+            or "candidate.json" not in lowered
+            or "eval-report.json" not in lowered
+            or "optimization-summary.json" not in lowered
+            or "report.md" not in lowered
             or "auto_apply: enabled" in lowered
             or _contains_failed_release_signal(lowered)
         ):
@@ -3345,34 +3354,54 @@ def _auto_apply_ledger_metrics(
             """,
             (exclude_candidate_id, exclude_candidate_id),
         ).fetchone()
-        applied_row = store.connection.execute(
+        applied_rows = store.connection.execute(
             """
-            SELECT COUNT(*)
+            SELECT candidate_id, audit_event_sequence
             FROM decisions
             WHERE decision = 'applied'
-              AND policy IN ('apply_controller', 'auto_apply_controller')
+              AND policy = 'auto_apply_controller'
+              AND (? IS NULL OR candidate_id != ?)
+            """,
+            (exclude_candidate_id, exclude_candidate_id),
+        ).fetchall()
+        rollback_rows = store.connection.execute(
             """
-        ).fetchone()
-        rollback_row = store.connection.execute(
-            """
-            SELECT COUNT(*), MIN(sequence), MAX(sequence)
+            SELECT sequence, payload_json
             FROM audit_events
             WHERE event_type = 'rollback.applied'
             """
-        ).fetchone()
+        ).fetchall()
 
     reviewed_count = int(reviewed_row[0] or 0)
     rejected_count = int(reviewed_row[1] or 0)
-    applied_count = int(applied_row[0] or 0)
-    rollback_count = int(rollback_row[0] or 0)
+    auto_applied_candidate_ids = {
+        int(row[0]) for row in applied_rows if row[0] is not None
+    }
+    applied_count = len(auto_applied_candidate_ids)
+    rollback_sequences: list[int] = []
+    for sequence, payload_json in rollback_rows:
+        try:
+            payload = json.loads(str(payload_json))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        raw_candidate_id = payload.get("candidate_id")
+        try:
+            rollback_candidate_id = int(raw_candidate_id)
+        except (TypeError, ValueError):
+            continue
+        if rollback_candidate_id in auto_applied_candidate_ids:
+            rollback_sequences.append(int(sequence))
+    rollback_count = len(rollback_sequences)
     burn_in_days = _burn_in_days(str(reviewed_row[2])) if reviewed_row[2] else 0
     source_sequences = [
         value
         for value in (
             reviewed_row[3],
             reviewed_row[4],
-            rollback_row[1],
-            rollback_row[2],
+            *(row[1] for row in applied_rows),
+            *rollback_sequences,
         )
         if value is not None
     ]
