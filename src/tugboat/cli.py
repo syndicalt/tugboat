@@ -417,7 +417,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
 
-    apply = subcommands.add_parser("apply")
+    apply = subcommands.add_parser(
+        "apply",
+        description=(
+            "Apply a reviewed candidate. proposal mode writes review artifacts without "
+            "changing files. branch, commit, and pr modes require VCS safety checks. "
+            "Write modes require policy gate, eval report, and rollback plan evidence."
+        ),
+        help="prepare or apply a reviewed candidate through VCS-gated modes",
+    )
     apply.add_argument("--repo", required=True)
     apply.add_argument("--candidate", required=True)
     apply.add_argument("--mode", choices=("proposal", "branch", "commit", "pr"), default="proposal")
@@ -427,7 +435,15 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--confirm-auto-apply", action="store_true")
     apply.add_argument("--auto-apply-policy-version", type=int)
 
-    auto_apply = subcommands.add_parser("auto-apply")
+    auto_apply = subcommands.add_parser(
+        "auto-apply",
+        description=(
+            "Evaluate narrow Class A auto-apply. It is disabled unless repo policy and "
+            "CLI confirmation pass. preflight and shadow record evidence without "
+            "applying patches. The read-only kill switch blocks writes."
+        ),
+        help="evaluate policy-gated auto-apply, preflight, or shadow evidence",
+    )
     auto_apply.add_argument("--repo", required=True)
     auto_apply.add_argument("--candidate", required=True)
     auto_apply.add_argument("--confirm-auto-apply", action="store_true")
@@ -447,7 +463,15 @@ def build_parser() -> argparse.ArgumentParser:
     review_reject.add_argument("--category")
     review_reject.add_argument("--failure-pattern")
 
-    rollback = subcommands.add_parser("rollback")
+    rollback = subcommands.add_parser(
+        "rollback",
+        description=(
+            "Prepare or execute rollback evidence. without --execute, rollback writes "
+            "a reviewable plan. --execute performs the recorded VCS revert. read-only "
+            "mode blocks execution."
+        ),
+        help="prepare or execute a recorded rollback",
+    )
     rollback.add_argument("--repo", required=True)
     rollback.add_argument("--decision", required=True)
     rollback.add_argument("--execute", action="store_true")
@@ -458,7 +482,14 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_stdio.add_argument("--repo")
     mcp_stdio.add_argument("--read-only", action="store_true")
 
-    daemon = subcommands.add_parser("daemon")
+    daemon = subcommands.add_parser(
+        "daemon",
+        description=(
+            "Run the local sidecar worker and inspect its queue. The read-only kill "
+            "switch blocks write jobs."
+        ),
+        help="manage the local sidecar worker and read-only kill switch",
+    )
     daemon_subcommands = daemon.add_subparsers(dest="daemon_command", required=True)
     daemon_status_parser = daemon_subcommands.add_parser("status")
     daemon_status_parser.add_argument("--repo", required=True)
@@ -512,13 +543,28 @@ def build_parser() -> argparse.ArgumentParser:
     harness_report.add_argument("--repo", required=True)
     harness_cleanup = harness_subcommands.add_parser("cleanup")
     harness_cleanup.add_argument("--repo", required=True)
-    ops = subcommands.add_parser("ops")
+    ops = subcommands.add_parser(
+        "ops",
+        description=(
+            "Manage backup, restore, migration, observability, and release evidence. "
+            "destructive operations require explicit execute or apply flags."
+        ),
+        help="run operational backup, migration, observability, restore, and release tasks",
+    )
     ops_subcommands = ops.add_subparsers(dest="ops_command", required=True)
-    ops_backup = ops_subcommands.add_parser("backup")
+    ops_backup = ops_subcommands.add_parser(
+        "backup",
+        description="Create sidecar backup evidence; plans backup unless --execute is supplied.",
+        help="plan or execute a sidecar backup",
+    )
     ops_backup.add_argument("--repo", required=True)
     ops_backup.add_argument("--archive", required=True)
     ops_backup.add_argument("--execute", action="store_true")
-    ops_migrate = ops_subcommands.add_parser("migrate")
+    ops_migrate = ops_subcommands.add_parser(
+        "migrate",
+        description="Inspect sidecar schema migration state; dry-run migration unless --apply is supplied.",
+        help="dry-run or apply sidecar schema migrations",
+    )
     ops_migrate.add_argument("--repo", required=True)
     ops_migrate.add_argument("--apply", action="store_true")
     ops_observability = ops_subcommands.add_parser("observability")
@@ -537,7 +583,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
     )
     ops_release_manifest.add_argument("--evidence", action="append", default=[])
-    ops_restore = ops_subcommands.add_parser("restore")
+    ops_restore = ops_subcommands.add_parser(
+        "restore",
+        description="Create sidecar restore evidence; plans restore unless --execute is supplied.",
+        help="plan or execute a sidecar restore",
+    )
     ops_restore.add_argument("--repo", required=True)
     ops_restore.add_argument("--archive", required=True)
     ops_restore.add_argument("--staging", required=True)
