@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 from tugboat.models import InstructionFilePolicy, Policy
-from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
+from tugboat.policy.gate import (
+    PROHIBITED_RISK_CLASSES,
+    RESTRICTED_RISK_CLASSES,
+    RISK_CLASS_ALIASES,
+    CandidatePatch,
+    SourceRef,
+    evaluate_candidate,
+)
 
 
 def _candidate(**overrides: object) -> CandidatePatch:
@@ -416,6 +423,92 @@ def test_policy_gate_escalates_underclassified_network_section_to_class_c_review
 
     assert decision.allowed is True
     assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+    assert decision.auto_apply_eligible is False
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "Approval",
+        "Memory",
+        "Network",
+        "Provider",
+        "Sandbox",
+        "Secrets",
+        "Security",
+        "Sidecar",
+    ],
+)
+def test_policy_gate_escalates_underclassified_restricted_policy_domains_to_class_c_review(
+    tmp_path: Path,
+    section: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text(f"# {section}\n\nKeep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            f" # {section}\n"
+            " \n"
+            " Keep this instruction.\n"
+            "+Clarify existing guidance.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": section,
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+    assert decision.auto_apply_eligible is False
+
+
+def test_policy_gate_prohibited_declared_class_overrides_derived_restricted_metadata(
+    tmp_path: Path,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Network\n\nKeep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="direct_instruction_mutation",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " # Network\n"
+            " \n"
+            " Keep this instruction.\n"
+            "+Clarify existing guidance.\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "add",
+                "file": "CODEX.md",
+                "section": "Network",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("prohibited_risk_class",)
+    assert decision.review_required_reasons == ()
     assert decision.auto_apply_eligible is False
 
 
@@ -953,6 +1046,109 @@ def test_policy_gate_rejects_class_d_as_prohibited(tmp_path: Path):
 
     assert decision.allowed is False
     assert "prohibited_risk_class" in decision.reasons
+
+
+@pytest.mark.parametrize("risk_class", sorted(PROHIBITED_RISK_CLASSES))
+def test_policy_gate_rejects_every_prohibited_risk_class(
+    tmp_path: Path,
+    risk_class: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class=risk_class,
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is False
+    assert decision.reasons == ("prohibited_risk_class",)
+    assert decision.review_required_reasons == ()
+    assert decision.auto_apply_eligible is False
+
+
+@pytest.mark.parametrize("risk_class", sorted(RESTRICTED_RISK_CLASSES))
+def test_policy_gate_treats_every_restricted_risk_class_as_review_required(
+    tmp_path: Path,
+    risk_class: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class=risk_class,
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ("class_c_explicit_human_review_required",)
+    assert decision.auto_apply_eligible is False
+
+
+@pytest.mark.parametrize(
+    "source_risk_class, normalized_risk_class",
+    sorted(RISK_CLASS_ALIASES.items()),
+)
+def test_policy_gate_applies_risk_class_aliases_to_their_normalized_policy_class(
+    tmp_path: Path,
+    source_risk_class: str,
+    normalized_risk_class: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class=source_risk_class,
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    if normalized_risk_class in PROHIBITED_RISK_CLASSES:
+        assert decision.allowed is False
+        assert decision.reasons == ("prohibited_risk_class",)
+        assert decision.review_required_reasons == ()
+    elif normalized_risk_class in RESTRICTED_RISK_CLASSES:
+        assert decision.allowed is True
+        assert decision.reasons == ()
+        assert decision.review_required_reasons == (
+            "class_c_explicit_human_review_required",
+        )
+    else:
+        raise AssertionError(f"unclassified alias target: {normalized_risk_class}")
+    assert decision.auto_apply_eligible is False
+
+
+@pytest.mark.parametrize(
+    "risk_class",
+    ["A", "a", "Class A", "class-a", "class_a"],
+)
+def test_policy_gate_normalized_class_a_is_the_only_auto_apply_eligible_class(
+    tmp_path: Path,
+    risk_class: str,
+):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("Keep this instruction.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class=risk_class,
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -1,1 +1,2 @@\n"
+            " Keep this instruction.\n"
+            "+Fix typo.\n"
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is True
+    assert decision.reasons == ()
+    assert decision.review_required_reasons == ()
+    assert decision.auto_apply_eligible is True
 
 
 @pytest.mark.parametrize(
