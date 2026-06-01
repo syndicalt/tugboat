@@ -247,3 +247,57 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             "paused": 0,
         },
     }
+
+
+def test_ops_observability_cli_writes_local_metrics_export(tmp_path: Path, capsys):
+    repo = tmp_path
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+    metrics_path = tmp_path / "ops-metrics.prom"
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.append_audit_event(
+            "run_failed",
+            {
+                "run_id": "run-1",
+                "failure_kind": "provider_error",
+                "provider": "openai",
+                "backend": "responses",
+                "status": "failed",
+                "duration_seconds": 12,
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": 7,
+                "eligible": True,
+                "lane": "docs_hygiene",
+                "phase": "precheck",
+                "reasons": [],
+            },
+        )
+
+    assert (
+        main(
+            [
+                "ops",
+                "observability",
+                "--repo",
+                str(repo),
+                "--metrics-output",
+                str(metrics_path),
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert f"observability metrics: {metrics_path}" in output
+    metrics = metrics_path.read_text(encoding="utf-8").splitlines()
+    assert "tugboat_run_duration_seconds_count 1" in metrics
+    assert "tugboat_failure_kind_total{failure_kind=\"provider_error\"} 1" in metrics
+    assert "tugboat_provider_backend_failure_rate 1" in metrics
+    assert (
+        "tugboat_auto_apply_lane_candidates_total{lane=\"docs_hygiene\",state=\"eligible\"} 1"
+        in metrics
+    )

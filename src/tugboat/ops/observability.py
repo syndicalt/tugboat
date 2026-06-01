@@ -92,6 +92,147 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
     ) | {"daemon_queue": daemon_queue}
 
 
+def observability_metrics_text(summary: dict[str, Any]) -> str:
+    lines: list[str] = []
+    _append_prefixed_numeric_metrics(lines, "tugboat_run_duration_seconds", summary.get("run_duration"))
+    _append_labelled_counter(
+        lines,
+        "tugboat_failure_kind_total",
+        "failure_kind",
+        summary.get("failure_kind_counts"),
+    )
+    _append_prefixed_numeric_metrics(lines, "tugboat_edits", summary.get("edits"))
+    _append_prefixed_numeric_metrics(lines, "tugboat_edit_rates", summary.get("edit_rates"))
+    _append_metric(lines, "tugboat_mean_changed_lines", summary.get("mean_changed_lines"))
+    _append_metric(
+        lines,
+        "tugboat_governance_regression_count",
+        summary.get("governance_regression_count"),
+    )
+    _append_prefixed_numeric_metrics(lines, "tugboat_corpus_growth", summary.get("corpus_growth"))
+    provider_backend_failure_rate = summary.get("provider_backend_failure_rate")
+    if isinstance(provider_backend_failure_rate, dict):
+        _append_metric(
+            lines,
+            "tugboat_provider_backend_failure_rate",
+            provider_backend_failure_rate.get("rate"),
+        )
+        _append_metric(
+            lines,
+            "tugboat_provider_backend_failure_failed",
+            provider_backend_failure_rate.get("failed"),
+        )
+        _append_metric(
+            lines,
+            "tugboat_provider_backend_failure_total",
+            provider_backend_failure_rate.get("total"),
+        )
+    _append_metric(lines, "tugboat_duplicate_rule_count", summary.get("duplicate_rule_count"))
+    _append_metric(lines, "tugboat_stale_doc_count", summary.get("stale_doc_count"))
+    _append_prefixed_numeric_metrics(
+        lines,
+        "tugboat_user_correction_recurrence",
+        summary.get("user_correction_recurrence"),
+    )
+    _append_prefixed_numeric_metrics(
+        lines,
+        "tugboat_recurring_incident_rate",
+        summary.get("recurring_incident_rate"),
+    )
+    _append_auto_apply_lane_metrics(lines, summary.get("auto_apply_lanes"))
+    _append_daemon_queue_metrics(lines, summary.get("daemon_queue"))
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _append_auto_apply_lane_metrics(lines: list[str], lanes: object) -> None:
+    if not isinstance(lanes, dict):
+        return
+    for lane_name, lane_counts in sorted(lanes.items()):
+        if not isinstance(lane_counts, dict):
+            continue
+        for state, value in sorted(lane_counts.items()):
+            _append_metric(
+                lines,
+                "tugboat_auto_apply_lane_candidates_total",
+                value,
+                labels={"lane": str(lane_name), "state": str(state)},
+            )
+
+
+def _append_daemon_queue_metrics(lines: list[str], daemon_queue: object) -> None:
+    if not isinstance(daemon_queue, dict):
+        return
+    jobs_by_state = daemon_queue.get("jobs_by_state")
+    if isinstance(jobs_by_state, dict):
+        for state, value in sorted(jobs_by_state.items()):
+            _append_metric(
+                lines,
+                "tugboat_daemon_queue_jobs_total",
+                value,
+                labels={"state": str(state)},
+            )
+    _append_metric(
+        lines,
+        "tugboat_daemon_kill_switch_enabled",
+        1 if daemon_queue.get("kill_switch_enabled") else 0,
+    )
+    _append_metric(lines, "tugboat_daemon_leased_job_count", daemon_queue.get("leased_job_count"))
+    _append_metric(lines, "tugboat_daemon_stuck_job_count", daemon_queue.get("stuck_job_count"))
+
+
+def _append_labelled_counter(
+    lines: list[str],
+    metric_name: str,
+    label_name: str,
+    values: object,
+) -> None:
+    if not isinstance(values, dict):
+        return
+    for label_value, value in sorted(values.items()):
+        _append_metric(lines, metric_name, value, labels={label_name: str(label_value)})
+
+
+def _append_prefixed_numeric_metrics(
+    lines: list[str],
+    metric_prefix: str,
+    values: object,
+) -> None:
+    if not isinstance(values, dict):
+        return
+    for key, value in sorted(values.items()):
+        _append_metric(lines, f"{metric_prefix}_{key}", value)
+
+
+def _append_metric(
+    lines: list[str],
+    metric_name: str,
+    value: object,
+    *,
+    labels: dict[str, str] | None = None,
+) -> None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return
+    label_text = ""
+    if labels:
+        label_text = "{" + ",".join(
+            f'{name}="{_escape_metric_label(label_value)}"'
+            for name, label_value in sorted(labels.items())
+        ) + "}"
+    lines.append(f"{metric_name}{label_text} {_format_metric_value(value)}")
+
+
+def _escape_metric_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _format_metric_value(value: int | float) -> str:
+    if isinstance(value, int):
+        return str(value)
+    if value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _daemon_queue_status(repo: Path) -> dict[str, Any]:
     from tugboat.daemon.service import daemon_status, default_kill_switch
 

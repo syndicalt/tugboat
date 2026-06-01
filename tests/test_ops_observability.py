@@ -8,7 +8,11 @@ from pathlib import Path
 from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
-from tugboat.ops.observability import summarize_observability, summarize_sidecar_observability
+from tugboat.ops.observability import (
+    observability_metrics_text,
+    summarize_observability,
+    summarize_sidecar_observability,
+)
 from tugboat.policy.gate import CandidatePatch, SourceRef
 
 
@@ -320,6 +324,51 @@ def test_sidecar_observability_reports_auto_apply_counts_by_lane(tmp_path: Path)
             "paused": 0,
         },
     }
+
+
+def test_observability_metrics_text_renders_bounded_local_metrics() -> None:
+    summary = summarize_observability(
+        runs=[
+            {
+                "duration_seconds": 12,
+                "provider": "openai",
+                "backend": "responses",
+                "status": "failed",
+                "failure_kind": 'provider"error',
+            }
+        ],
+        jobs=[{"state": "applied", "changed_lines": 4}],
+        auto_apply_events=[
+            {
+                "event_type": "auto_apply.decided",
+                "candidate_id": 1,
+                "eligible": True,
+                "lane": "docs_hygiene",
+                "phase": "precheck",
+            }
+        ],
+        auto_apply_lane_names=["docs_hygiene"],
+    ) | {
+        "daemon_queue": {
+            "jobs_by_state": {"queued": 2},
+            "kill_switch_enabled": True,
+            "leased_job_count": 1,
+            "stuck_job_count": 0,
+        }
+    }
+
+    metrics = observability_metrics_text(summary).splitlines()
+
+    assert "tugboat_run_duration_seconds_count 1" in metrics
+    assert "tugboat_edits_accepted 1" in metrics
+    assert 'tugboat_failure_kind_total{failure_kind="provider\\"error"} 1' in metrics
+    assert "tugboat_provider_backend_failure_rate 1" in metrics
+    assert (
+        'tugboat_auto_apply_lane_candidates_total{lane="docs_hygiene",state="eligible"} 1'
+        in metrics
+    )
+    assert 'tugboat_daemon_queue_jobs_total{state="queued"} 2' in metrics
+    assert "tugboat_daemon_kill_switch_enabled 1" in metrics
 
 
 def test_sidecar_observability_reports_paused_auto_apply_lane_from_kill_switch(

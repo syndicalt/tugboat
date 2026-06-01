@@ -79,7 +79,7 @@ from tugboat.ops.backup import (
     execute_sidecar_restore,
 )
 from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
-from tugboat.ops.observability import summarize_sidecar_observability
+from tugboat.ops.observability import observability_metrics_text, summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy, export_redacted_artifacts
 from tugboat.optimization import (
     REJECTED_EDIT_SUPPRESSION_SIGNAL,
@@ -597,6 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_observability = ops_subcommands.add_parser("observability")
     ops_observability.add_argument("--repo", required=True)
     ops_observability.add_argument("--output")
+    ops_observability.add_argument("--metrics-output")
     ops_release_manifest = ops_subcommands.add_parser("release-manifest")
     ops_release_manifest.add_argument("--repo", required=True)
     ops_release_manifest.add_argument("--wheel", required=True)
@@ -1312,6 +1313,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        if args.metrics_output:
+            metrics_path = Path(args.metrics_output)
+            metrics_path.parent.mkdir(parents=True, exist_ok=True)
+            metrics_path.write_text(
+                observability_metrics_text(payload["summary"]),
+                encoding="utf-8",
+            )
+            print(f"observability metrics: {metrics_path}")
         print(f"observability summary: {output_path}")
         return 0
 
