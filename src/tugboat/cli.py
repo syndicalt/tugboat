@@ -1072,6 +1072,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"apply blocked: {error}")
             _print_apply_blocked_next_step(repo, run_dir, str(error))
             return 1
+        except KeyboardInterrupt as error:
+            print(f"apply interrupted: {error}")
+            _print_apply_blocked_next_step(repo, run_dir, "interrupted")
+            return 130
         print(f"apply plan: {apply_path}")
         return 0
 
@@ -3005,6 +3009,12 @@ def _write_apply_plan(
             policy_version=auto_apply_policy_version,
         )
 
+    def cleanup_generated_branch_without_commit() -> None:
+        if branch_created and not applied_commit:
+            adapter.discard_worktree_changes()
+            adapter.switch_branch(base_branch)
+            adapter.delete_branch(branch_name)
+
     try:
         if mode == "branch":
             adapter.create_branch(branch_name)
@@ -3073,11 +3083,11 @@ def _write_apply_plan(
                 provider=policy.vcs_pull_request_provider,
             )
             pr_result = created_pr.to_json_dict()
+    except KeyboardInterrupt:
+        cleanup_generated_branch_without_commit()
+        raise
     except VcsStateError:
-        if branch_created and not applied_commit:
-            adapter.discard_worktree_changes()
-            adapter.switch_branch(base_branch)
-            adapter.delete_branch(branch_name)
+        cleanup_generated_branch_without_commit()
         raise
     except ValueError:
         if auto_apply and branch_created:
@@ -3127,7 +3137,8 @@ def _write_apply_plan(
             recorded_provenance=recorded_provenance,
         )
     except Exception:
-        if not applied_worktree_change and not applied_commit:
+        if not applied_commit:
+            cleanup_generated_branch_without_commit()
             path.unlink(missing_ok=True)
             (run_dir / "provenance-bundle.json").unlink(missing_ok=True)
         raise

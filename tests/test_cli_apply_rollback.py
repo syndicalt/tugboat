@@ -649,6 +649,47 @@ def test_apply_proposal_mode_cleans_plan_when_provenance_publish_fails(
     assert row is None
 
 
+def test_apply_branch_mode_cleans_generated_branch_when_provenance_publish_fails(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+    generated_branch = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+    target = run_dir / "provenance-bundle.json"
+    original_replace = Path.replace
+
+    def fail_provenance_replace(self: Path, replacement_target: Path):
+        if replacement_target == target:
+            raise OSError("simulated provenance publish failure")
+        return original_replace(self, replacement_target)
+
+    monkeypatch.setattr(Path, "replace", fail_provenance_replace)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: simulated provenance publish failure" in output
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    assert list(run_dir.glob(".provenance-bundle.json.*.tmp")) == []
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type IN ('apply.planned', 'apply.applied')"
+        ).fetchone()
+    assert row is None
+
+
 def test_apply_rejects_artifact_only_candidate_without_recorded_provenance(
     tmp_path: Path,
     capsys,
@@ -910,6 +951,40 @@ def test_apply_restores_original_branch_when_vcs_apply_fails_after_branch_creati
     assert _git(repo, "branch", "--show-current") == original_branch
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     assert not (run_dir / "apply-plan.json").exists()
+
+
+def test_apply_interrupt_after_branch_creation_restores_base_without_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_branch = _git(repo, "branch", "--show-current")
+    run_dir = _candidate_run(repo)
+    generated_branch = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+    original_apply_diff = VcsAdapter.apply_diff
+
+    def interrupted_apply(
+        self: VcsAdapter,
+        diff_path: Path,
+        *,
+        allowed_paths: tuple[str, ...],
+    ) -> None:
+        original_apply_diff(self, diff_path, allowed_paths=allowed_paths)
+        raise KeyboardInterrupt("simulated interrupted apply")
+
+    monkeypatch.setattr(cli_module.VcsAdapter, "apply_diff", interrupted_apply)
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "branch"]) == 130
+
+    assert _git(repo, "branch", "--show-current") == original_branch
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert not (run_dir / "apply-plan.json").exists()
+    assert _git(repo, "branch", "--list", generated_branch) == ""
 
 
 def test_apply_rejects_prohibited_risk_class(tmp_path: Path):
