@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact, write_text_artifact
 from tugboat.audit.pipeline import detect_trace_format
 from tugboat.config import load_policy
 from tugboat.daemon.queue import (
@@ -493,5 +493,5 @@ def _write_private_json_artifact(path: Path, artifact_name: str, payload: dict[s
     if findings:
         raise SecretScanError(findings)
     ensure_private_dir(path.parent)
-    path.write_text(text, encoding="utf-8")
+    write_text_artifact(path, text)
     mark_private_file(path)

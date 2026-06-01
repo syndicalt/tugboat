@@ -26,6 +26,7 @@ from tugboat.artifacts import (
     load_json_object_artifact,
     validate_json_artifact,
     write_json_artifact,
+    write_text_artifact,
 )
 from tugboat.audit.pipeline import run_audit_pipeline
 from tugboat.auto_apply import (
@@ -168,7 +169,7 @@ def _serialize_secret_scanned_json_artifact(
 
 def _write_secret_scanned_json_artifact(path: Path, artifact_name: str, payload: dict[str, object]) -> None:
     text = _serialize_secret_scanned_json_artifact(path, artifact_name, payload)
-    path.write_text(text, encoding="utf-8")
+    write_text_artifact(path, text)
 
 
 def _initialize_repo_policy(repo: Path) -> Path:
@@ -1062,7 +1063,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 confirm_auto_apply=args.confirm_auto_apply,
                 auto_apply_policy_version=args.auto_apply_policy_version,
             )
-        except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
+        except (FileNotFoundError, KeyError, OSError, VcsStateError, ValueError) as error:
             print(f"apply blocked: {error}")
             _print_apply_blocked_next_step(repo, run_dir, str(error))
             return 1
@@ -3039,20 +3040,26 @@ def _write_apply_plan(
     }
     provenance_bundle = str(payload["provenance_bundle"])
     path = run_dir / "apply-plan.json"
-    _write_secret_scanned_json_artifact(path, "apply-plan.json", payload)
-    _write_provenance_bundle(
-        repo,
-        run_dir,
-        candidate_id=candidate_id,
-        mode=mode,
-        target_files=target_files,
-        applied_commit=applied_commit,
-        rollback_command=rollback_command,
-        pre_hashes=pre_hashes,
-        post_hashes=post_hashes,
-        apply_plan_path=path,
-        recorded_provenance=recorded_provenance,
-    )
+    try:
+        _write_secret_scanned_json_artifact(path, "apply-plan.json", payload)
+        _write_provenance_bundle(
+            repo,
+            run_dir,
+            candidate_id=candidate_id,
+            mode=mode,
+            target_files=target_files,
+            applied_commit=applied_commit,
+            rollback_command=rollback_command,
+            pre_hashes=pre_hashes,
+            post_hashes=post_hashes,
+            apply_plan_path=path,
+            recorded_provenance=recorded_provenance,
+        )
+    except Exception:
+        if not applied_worktree_change and not applied_commit:
+            path.unlink(missing_ok=True)
+            (run_dir / "provenance-bundle.json").unlink(missing_ok=True)
+        raise
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.append_audit_event(
             "apply.planned",
@@ -5234,7 +5241,7 @@ def _write_optimization_summary(
         },
     )
     optimization_summary_path = run_dir / "optimization-summary.json"
-    optimization_summary_path.write_text(summary_text, encoding="utf-8")
+    write_text_artifact(optimization_summary_path, summary_text)
     mark_private_file(optimization_summary_path)
     try:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -5903,7 +5910,7 @@ def _decision_json(
 def _merge_json(path: Path, updates: dict[str, object]) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload.update(updates)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_artifact(path, payload)
 
 
 def _parse_profile_app_boot(raw: str) -> dict[str, Any]:

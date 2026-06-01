@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tugboat.artifacts import validate_json_artifact, validate_report_markdown
+from tugboat.artifacts import (
+    validate_json_artifact,
+    validate_report_markdown,
+    write_text_artifact,
+)
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
 from tugboat.policy.gate import CandidatePatch, PolicyDecision, SourceRef
 from tugboat.security.secrets import SecretScanError, scan_text
@@ -61,7 +65,7 @@ def write_report(
     findings = scan_text(report_path.as_posix(), text)
     if findings:
         raise SecretScanError(findings)
-    report_path.write_text(text, encoding="utf-8")
+    write_text_artifact(report_path, text)
     mark_private_file(report_path)
     return report_path
 

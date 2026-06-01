@@ -6,7 +6,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.artifacts import SCHEMA_VERSION, load_json_object_artifact, validate_json_artifact
+from tugboat.artifacts import (
+    SCHEMA_VERSION,
+    load_json_object_artifact,
+    validate_json_artifact,
+    write_text_artifact,
+)
 from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
@@ -691,5 +696,5 @@ def _write_private_json_artifact(path: Path, artifact_name: str, payload: dict[s
     findings = scan_text(path.as_posix(), text)
     if findings:
         raise SecretScanError(findings)
-    path.write_text(text, encoding="utf-8")
+    write_text_artifact(path, text)
     mark_private_file(path)

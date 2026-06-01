@@ -590,6 +590,40 @@ def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_p
     )
 
 
+def test_apply_proposal_mode_cleans_plan_when_provenance_publish_fails(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    target = run_dir / "provenance-bundle.json"
+    original_replace = Path.replace
+
+    def fail_provenance_replace(self: Path, replacement_target: Path):
+        if replacement_target == target:
+            raise OSError("simulated provenance publish failure")
+        return original_replace(self, replacement_target)
+
+    monkeypatch.setattr(Path, "replace", fail_provenance_replace)
+
+    assert (
+        main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"])
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "apply blocked: simulated provenance publish failure" in output
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+    assert list(run_dir.glob(".provenance-bundle.json.*.tmp")) == []
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM audit_events WHERE event_type = 'apply.planned'"
+        ).fetchone()
+    assert row is None
+
+
 def test_apply_rejects_artifact_only_candidate_without_recorded_provenance(
     tmp_path: Path,
     capsys,

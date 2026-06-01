@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact, write_json_artifact
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
-from tugboat.security.secrets import SecretScanError, scan_text
 
 
 def write_eval_report(
@@ -55,11 +53,7 @@ def write_eval_report(
     if eval_cases is not None:
         payload["eval_cases"] = sorted(eval_cases, key=lambda case: case["case_id"])
     validate_json_artifact("eval-report.json", payload)
-    report_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    findings = scan_text(report_path.as_posix(), report_text)
-    if findings:
-        raise SecretScanError(findings)
-    report_path.write_text(report_text, encoding="utf-8")
+    write_json_artifact(report_path, payload)
     mark_private_file(report_path)
     return report_path
 

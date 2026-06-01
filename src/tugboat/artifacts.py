@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -3265,17 +3267,42 @@ def write_json_artifact(path: Path, payload: dict[str, Any]) -> Path:
     findings = scan_text(path.as_posix(), text)
     if findings:
         raise SecretScanError(findings)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    mark_private_file(path)
-    return path
+    return _publish_text_artifact(path, text)
 
 
 def write_text_artifact(path: Path, text: str) -> Path:
     findings = scan_text(path.as_posix(), text)
     if findings:
         raise SecretScanError(findings)
+    return _publish_text_artifact(path, text)
+
+
+def _publish_text_artifact(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    mark_private_file(path)
-    return path
+    temp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.replace(path)
+        mark_private_file(path)
+        _fsync_directory(path.parent)
+        return path
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _fsync_directory(path: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)

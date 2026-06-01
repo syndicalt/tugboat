@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact
+from tugboat.artifacts import (
+    SCHEMA_VERSION,
+    validate_json_artifact,
+    write_json_artifact,
+    write_text_artifact,
+)
 from tugboat.patches import apply_unified_diff
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir
 from tugboat.policy.gate import CandidatePatch
@@ -34,17 +38,11 @@ def write_candidate(repo: Path, run_id: str, candidate: CandidatePatch) -> Candi
             from tugboat.security.secrets import SecretScanError
 
             raise SecretScanError(findings)
-        diff_path.write_text(candidate.diff, encoding="utf-8")
+        write_text_artifact(diff_path, candidate.diff)
         mark_private_file(diff_path)
         artifact = {"schema_version": SCHEMA_VERSION, **candidate.to_json_dict()}
         validate_json_artifact("candidate.json", artifact)
-        candidate_text = json.dumps(artifact, indent=2, sort_keys=True) + "\n"
-        findings = scan_text(json_path.as_posix(), candidate_text)
-        if findings:
-            from tugboat.security.secrets import SecretScanError
-
-            raise SecretScanError(findings)
-        json_path.write_text(candidate_text, encoding="utf-8")
+        write_json_artifact(json_path, artifact)
         mark_private_file(json_path)
         preview_path, preview_manifest_path = _write_candidate_preview(repo, run_dir, candidate)
     except Exception:
@@ -116,7 +114,7 @@ def _write_candidate_preview(
         raise SecretScanError(findings)
     ensure_private_dir(run_dir / "candidate-preview")
     ensure_private_dir(preview_path.parent)
-    preview_path.write_text(preview_text, encoding="utf-8")
+    write_text_artifact(preview_path, preview_text)
     mark_private_file(preview_path)
 
     preview_manifest_path = run_dir / "candidate-preview.json"
@@ -129,9 +127,6 @@ def _write_candidate_preview(
         "preview_hash": CandidatePatch.hash_file(preview_path),
     }
     validate_json_artifact("candidate-preview.json", manifest)
-    preview_manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json_artifact(preview_manifest_path, manifest)
     mark_private_file(preview_manifest_path)
     return preview_path, preview_manifest_path

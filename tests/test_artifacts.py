@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -47,6 +48,60 @@ def test_write_json_artifact_is_secret_scanned_and_owner_only(tmp_path: Path):
     assert not (tmp_path / "run" / "leaked.json").exists()
 
 
+def test_write_json_artifact_preserves_existing_file_when_publish_is_interrupted(
+    tmp_path: Path,
+):
+    path = tmp_path / "run" / "audit.json"
+    path.parent.mkdir()
+    original = '{"schema_version": 1, "status": "old"}\n'
+    path.write_text(original, encoding="utf-8")
+
+    def fail_replace(self: Path, target: Path):
+        if target == path:
+            raise OSError("simulated replace failure")
+        return original_replace(self, target)
+
+    original_replace = Path.replace
+    with patch.object(Path, "replace", fail_replace):
+        with pytest.raises(OSError, match="simulated replace failure"):
+            write_json_artifact(path, {"schema_version": 1, "status": "new"})
+
+    assert path.read_text(encoding="utf-8") == original
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "status": "old",
+    }
+
+
+def test_write_json_artifact_does_not_create_final_file_when_publish_is_interrupted(
+    tmp_path: Path,
+):
+    path = tmp_path / "run" / "audit.json"
+
+    def fail_replace(self: Path, target: Path):
+        if target == path:
+            raise OSError("simulated replace failure")
+        return original_replace(self, target)
+
+    original_replace = Path.replace
+    with patch.object(Path, "replace", fail_replace):
+        with pytest.raises(OSError, match="simulated replace failure"):
+            write_json_artifact(path, {"schema_version": 1, "status": "new"})
+
+    assert not path.exists()
+    assert list(path.parent.glob(f".{path.name}.*.tmp")) == []
+
+
+def test_write_json_artifact_secret_failure_leaves_no_final_or_temp_file(tmp_path: Path):
+    path = tmp_path / "run" / "leaked.json"
+
+    with pytest.raises(SecretScanError):
+        write_json_artifact(path, {"token": "sk-" + "a" * 20})
+
+    assert not path.exists()
+    assert not path.parent.exists()
+
+
 def test_write_text_artifact_creates_parent(tmp_path: Path):
     path = write_text_artifact(tmp_path / "run" / "candidate.diff", "diff")
 
@@ -65,6 +120,45 @@ def test_write_text_artifact_is_secret_scanned_and_owner_only(tmp_path: Path):
     with pytest.raises(SecretScanError):
         write_text_artifact(tmp_path / "run" / "leaked.diff", "sk-" + "a" * 20)
     assert not (tmp_path / "run" / "leaked.diff").exists()
+
+
+def test_write_text_artifact_preserves_existing_file_when_publish_is_interrupted(
+    tmp_path: Path,
+):
+    path = tmp_path / "run" / "candidate.diff"
+    path.parent.mkdir()
+    original = "--- a/CODEX.md\n+++ b/CODEX.md\n"
+    path.write_text(original, encoding="utf-8")
+
+    def fail_replace(self: Path, target: Path):
+        if target == path:
+            raise OSError("simulated replace failure")
+        return original_replace(self, target)
+
+    original_replace = Path.replace
+    with patch.object(Path, "replace", fail_replace):
+        with pytest.raises(OSError, match="simulated replace failure"):
+            write_text_artifact(path, "--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+new\n")
+
+    assert path.read_text(encoding="utf-8") == original
+    assert list(path.parent.glob(f".{path.name}.*.tmp")) == []
+
+
+def test_write_text_artifact_replacement_remains_owner_only_with_permissive_umask(
+    tmp_path: Path,
+):
+    path = tmp_path / "run" / "candidate.diff"
+    path.parent.mkdir()
+    path.write_text("old", encoding="utf-8")
+    path.chmod(0o644)
+    previous_umask = os.umask(0o022)
+    try:
+        write_text_artifact(path, "new")
+    finally:
+        os.umask(previous_umask)
+
+    assert path.read_text(encoding="utf-8") == "new"
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_validate_audit_artifact_requires_schema_version():
