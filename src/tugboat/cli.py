@@ -310,6 +310,54 @@ def _doctor_recommendations(
     return tuple(recommendations)
 
 
+def _print_apply_blocked_next_step(repo: Path, run_dir: Path, reason: str) -> None:
+    repo_ref = repo.resolve()
+    if "base_hash_mismatch" in reason or "base hash mismatch" in reason:
+        print(
+            f"next: re-run tugboat optimize --repo {repo_ref} --trace <trace> --suite all "
+            "from the current base, then apply the new candidate"
+        )
+        return
+    run_id = run_dir.name
+    if (
+        reason.startswith("policy gate rejected candidate")
+        or reason == "stored policy gate rejected candidate"
+        or reason == "eval policy gate rejected candidate"
+    ):
+        print(f"next: tugboat inspect-decision --repo {repo_ref} --decision {run_id}")
+        print(f"next: tugboat report --repo {repo_ref} --run {run_id}")
+        return
+    if _apply_blocked_reason_is_eval_related(reason):
+        eval_ref = _apply_blocked_artifact_ref(repo, run_dir, "eval-report.json")
+        if eval_ref is not None:
+            print(f"next: inspect {eval_ref}")
+        print(f"next: tugboat report --repo {repo_ref} --run {run_id}")
+
+
+def _apply_blocked_reason_is_eval_related(reason: str) -> bool:
+    return (
+        reason.startswith("eval ")
+        or reason.startswith("eval-report.json")
+        or reason.startswith("held-out eval ")
+        or reason.startswith("regression score ")
+        or reason.startswith("validation ")
+        or reason.startswith("stored validation ")
+        or reason.startswith("trigger and held-out ")
+        or reason == "eval report candidate_id does not match candidate"
+        or reason == "eval report did not pass"
+    )
+
+
+def _apply_blocked_artifact_ref(repo: Path, run_dir: Path, artifact_name: str) -> str | None:
+    path = run_dir / artifact_name
+    if not path.exists():
+        return None
+    try:
+        return path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tugboat")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -781,6 +829,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except (FileNotFoundError, KeyError, VcsStateError, ValueError) as error:
             print(f"apply blocked: {error}")
+            _print_apply_blocked_next_step(repo, run_dir, str(error))
             return 1
         print(f"apply plan: {apply_path}")
         return 0

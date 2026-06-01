@@ -635,6 +635,28 @@ def test_apply_rejects_stale_base_hash_before_writing_plan(tmp_path: Path):
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_rejects_stale_base_hash_with_next_command_hint(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\nChanged base.\n", encoding="utf-8")
+    _git(repo, "add", "CODEX.md")
+    _git(repo, "commit", "-m", "change base")
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
+
+    output = capsys.readouterr().out
+    assert "apply blocked: policy gate rejected candidate: base_hash_mismatch" in output
+    assert (
+        f"next: re-run tugboat optimize --repo {repo.resolve()} --trace <trace> --suite all "
+        "from the current base, then apply the new candidate"
+        in output
+    )
+    assert not (run_dir / "apply-plan.json").exists()
+
+
 def test_apply_rejects_policy_invalid_patch_without_mutation_or_branch_change(tmp_path: Path):
     repo = _init_repo(tmp_path)
     original = (repo / "CODEX.md").read_text(encoding="utf-8")
@@ -756,6 +778,11 @@ def test_apply_rejects_candidate_matching_prior_rejected_edit_memory(
 
     output = capsys.readouterr().out
     assert "apply blocked: policy gate rejected candidate: suppressed_by_rejected_edit_memory" in output
+    assert (
+        f"next: tugboat inspect-decision --repo {repo.resolve()} "
+        "--decision 20260525T000000000000Z"
+    ) in output
+    assert f"next: tugboat report --repo {repo.resolve()} --run 20260525T000000000000Z" in output
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     assert not (run_dir / "apply-plan.json").exists()
 
@@ -908,32 +935,25 @@ def test_apply_rejects_sidecar_audit_record_edit_even_when_stored_gate_passed(
     assert not (run_dir / "apply-plan.json").exists()
 
 
-def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path):
+def test_apply_rejects_passing_eval_without_held_out_improvement(tmp_path: Path, capsys):
     repo = _init_repo(tmp_path)
     run_dir = _candidate_run(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["recommendation"] = "reject"
+    eval_report["held_out_score"] = 0.80
+    eval_report["metrics"]["recommendation"] = "reject"
+    eval_report["metrics"]["held_out_score"] = 0.80
     (run_dir / "eval-report.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "candidate_id": 7,
-                "suite_id": "all",
-                "passed": True,
-                "metrics": {
-                    "governance_regressions": 0,
-                    "trigger_score": 0.90,
-                    "held_out_score": 0.80,
-                    "recommendation": "reject",
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
     assert main(["apply", "--repo", str(repo), "--candidate", "latest", "--mode", "proposal"]) == 1
 
+    output = capsys.readouterr().out
+    assert "apply blocked: eval report recommendation was reject" in output
+    assert "next: inspect .sidecar/runs/20260525T000000000000Z/eval-report.json" in output
+    assert f"next: tugboat report --repo {repo.resolve()} --run 20260525T000000000000Z" in output
     assert not (run_dir / "apply-plan.json").exists()
 
 
