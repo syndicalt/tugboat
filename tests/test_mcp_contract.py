@@ -13,6 +13,7 @@ from stat import S_IMODE
 
 import pytest
 
+from tugboat import __version__
 import tugboat.mcp.contracts as mcp_contracts
 from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import DaemonRunConfig, run_daemon_once
@@ -3631,7 +3632,7 @@ def test_mcp_stdio_supports_initialize_handshake_and_initialized_notification():
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "tugboat", "version": "0.1.0"},
+                "serverInfo": {"name": "tugboat", "version": __version__},
             },
         },
         {"jsonrpc": "2.0", "id": 2, "result": {"tools": list_mcp_tools()}},

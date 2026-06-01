@@ -4,14 +4,19 @@ import json
 import subprocess
 import sys
 import venv
+from email.parser import Parser
 from pathlib import Path
 from zipfile import ZipFile
 
 from tugboat.manifests import REQUIRED_MANIFEST_NAMES
 
 
+RELEASE_VERSION = "1.0.0"
+
+
 def test_built_wheel_runs_fresh_repo_proposal_loop(tmp_path: Path):
     wheel = _build_wheel(tmp_path)
+    assert wheel.name == f"tugboat-{RELEASE_VERSION}-py3-none-any.whl"
     venv_python = _install_wheel_in_venv(tmp_path, wheel)
     bin_dir = venv_python.parent
     tugboat = bin_dir / "tugboat"
@@ -82,6 +87,19 @@ def test_wheel_contains_runtime_manifest_templates(tmp_path: Path):
 
     for manifest in REQUIRED_MANIFEST_NAMES:
         assert f"tugboat/manifests/templates/{manifest}" in names
+
+
+def test_built_wheel_metadata_uses_v1_release_version(tmp_path: Path):
+    wheel = _build_wheel(tmp_path)
+
+    with ZipFile(wheel) as archive:
+        metadata_name = next(
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        )
+        metadata = Parser().parsestr(archive.read(metadata_name).decode("utf-8"))
+
+    assert metadata["Name"] == "tugboat"
+    assert metadata["Version"] == RELEASE_VERSION
 
 
 def _build_wheel(tmp_path: Path) -> Path:

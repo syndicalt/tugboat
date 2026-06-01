@@ -7,9 +7,9 @@
 
 ## 1.0.0
 
-Draft release notes live in `docs/releases/1.0.0-draft.md`.
+Release notes live in `docs/releases/1.0.0-draft.md`.
 
-Planned v1 highlights:
+Highlights:
 
 - Stable local sidecar workflow for governed maintenance of `CODEX.md`, `AGENTS.md`, `SKILL.md`, runbooks, policies, and eval definitions.
 - Evidence-backed audit, proposal, eval, report, review, apply, and rollback workflows.

@@ -16,7 +16,7 @@ python -m pip install tugboat
 For a local wheel release, install the retained wheel artifact instead:
 
 ```bash
-python -m pip install dist/tugboat-0.1.0-py3-none-any.whl
+python -m pip install dist/tugboat-1.0.0-py3-none-any.whl
 ```
 
 Verify the installed command:
