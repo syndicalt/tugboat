@@ -504,6 +504,7 @@ DOC_CONTRACTS = {
             "## Safety Defaults",
         ],
         "required_text": [
+            "verification_status: verified",
             "tugboat doctor --repo .",
             "tugboat init --repo .",
             "tugboat optimize --repo . --trace traces/example.jsonl --suite all",
@@ -529,6 +530,7 @@ DOC_CONTRACTS = {
             "## Harness And CI",
             "## MCP And Daemon",
             "## Operations",
+            "## Exit Codes",
         ],
         "required_text": [
             "tugboat doctor",
@@ -557,6 +559,11 @@ DOC_CONTRACTS = {
             ".sidecar/VERSION",
             "policy.yaml version",
             "python -m pytest --cov=src --cov-report=term-missing -q",
+            "Exit code `0` means the requested command completed its documented success path",
+            "A nonzero exit means the command was blocked, rejected, failed validation, or could not publish required evidence.",
+            "Safety gates use nonzero exits instead of partial mutation",
+            "`auto-apply --preflight` exits `0` when the preflight report is written",
+            "`ops release-manifest` exits nonzero when required release evidence is missing, stale, below threshold, or fails security review.",
         ],
     },
     "docs/apply-rollback.md": {
@@ -849,7 +856,8 @@ DOC_CONTRACTS = {
             "production release candidate",
             "proposal-only",
             "auto-apply remains disabled",
-            "1099 tests and 90.02% coverage",
+            "1637 tests and 90.07% coverage",
+            "dist/tugboat-1.0.0-py3-none-any.whl",
             "python -m pytest --cov=src --cov-report=term-missing -q",
             "approved_proposal_only",
             ".sidecar/ops/release-artifact-manifest.json",
@@ -867,7 +875,8 @@ DOC_CONTRACTS = {
             "exact release commit",
             "proposal_only",
             "auto_apply: disabled",
-            "1099 tests and 90.02% coverage",
+            "1637 tests and 90.07% coverage",
+            "dist/tugboat-1.0.0-py3-none-any.whl",
             "python -m pytest --cov=src --cov-report=term-missing -q",
             "No open critical or high findings",
             "Not approved",
@@ -999,8 +1008,12 @@ def test_production_release_candidate_uses_current_head_manifest_shape() -> None
     assert "$(git rev-parse --short HEAD)" in release_notes
     assert "$(git rev-parse --short HEAD)" in security_review
     assert "PYTHONPATH=src python -m tugboat ci --repo .` passed with `ci: ok`" in release_notes
-    assert "1099 tests and 90.02% coverage" in release_notes
-    assert "1099 tests and 90.02% coverage" in security_review
+    assert "1637 tests and 90.07% coverage" in release_notes
+    assert "1637 tests and 90.07% coverage" in security_review
+    assert "dist/tugboat-1.0.0-py3-none-any.whl" in release_notes
+    assert "dist/tugboat-1.0.0-py3-none-any.whl" in security_review
+    assert "dist/tugboat-0.1.0-py3-none-any.whl" not in release_notes
+    assert "dist/tugboat-0.1.0-py3-none-any.whl" not in security_review
     assert "python -m pytest --cov=src --cov-report=term-missing -q" in release_notes
     assert "python -m pytest --cov=src --cov-report=term-missing -q" in security_review
     assert ".sidecar/ops/release-artifact-manifest.json" in release_notes
@@ -1032,6 +1045,9 @@ def test_github_actions_ci_workflow_enforces_proposal_only_release_gates() -> No
         "actions/upload-artifact@v4",
         "if: always()",
         "retention-days: 14",
+        "release-evidence-index.md",
+        "Attach `.sidecar/ops/release-artifact-manifest.json`",
+        "at least one year",
         ".sidecar/ci/ci-report.json",
     ]
     for fragment in required_fragments:

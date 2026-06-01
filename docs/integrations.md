@@ -1,6 +1,6 @@
 ---
 owner: platform
-verification_status: draft
+verification_status: verified
 ---
 
 # Integration Guide

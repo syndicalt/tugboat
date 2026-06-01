@@ -29,6 +29,8 @@ python -m twine check dist/<wheel>.whl
 
 The protected-branch workflow also retains release-readiness evidence for `ops release-manifest`: `doctor.txt`, `index-check.txt`, `harness.txt`, `ci-report.json`, `security-review.md`, `pytest-coverage.log`, `build-wheel.txt`, `twine-check.txt`, `install-smoke.txt`, and `.sidecar/ops/release-artifact-manifest.json`. The installed-wheel smoke records `tugboat --version`, creates `.sidecar/ci/proposal-smoke-repo`, runs `tugboat init`, `index`, `harness check`, and the fixture-backed `optimize` loop, then verifies `audit.json`, `candidate.json`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
 
+GitHub Actions upload artifacts are short-lived CI scratch evidence. For a stable release, attach `.sidecar/ops/release-artifact-manifest.json`, coverage, build, twine, install-smoke, security-review, and CI logs to the GitHub Release or another durable release archive for at least one year.
+
 For scheduled governance checks, also run:
 
 ```bash

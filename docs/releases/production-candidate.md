@@ -25,11 +25,11 @@ The retained release manifest must be generated from the exact release commit wi
 - `PYTHONPATH=src python -m tugboat ci --repo .` passed with `ci: ok`.
 - `pytest tests/test_docs_ops.py tests/test_harness_legibility.py tests/test_cli_ci.py -q` passed with 59 tests.
 - `pytest tests/test_docs_ops.py tests/test_cli_ops_release_manifest.py tests/test_cli_ops_observability.py tests/test_cli_ops_backup.py tests/test_cli_ops_migrations.py tests/test_ops_retention.py -q` passed with 64 tests.
-- `python -m pytest --cov=src --cov-report=term-missing -q` passed with 1099 tests and 90.02% coverage.
-- `python -m build --wheel` built `dist/tugboat-0.1.0-py3-none-any.whl`.
-- `python -m twine check dist/tugboat-0.1.0-py3-none-any.whl` passed.
-- `.sidecar/ci/install-smoke-venv/bin/python -m pip install dist/tugboat-0.1.0-py3-none-any.whl` installed the built wheel, and installed CLI smoke passed `doctor`, `index --check`, and `harness check`.
-- `PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit "$(git rev-parse HEAD)" --ci-url "local://production-candidate/2026-05-27-$(git rev-parse --short HEAD)" --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 ...` writes `.sidecar/ops/release-artifact-manifest.json`.
+- `python -m pytest --cov=src --cov-report=term-missing -q` passed with 1637 tests and 90.07% coverage.
+- `python -m build --wheel` builds `dist/tugboat-1.0.0-py3-none-any.whl`.
+- `python -m twine check dist/tugboat-1.0.0-py3-none-any.whl` must pass.
+- `.sidecar/ci/install-smoke-venv/bin/python -m pip install dist/tugboat-1.0.0-py3-none-any.whl` installs the built wheel, and installed CLI smoke must pass `tugboat --version`, `doctor`, `init`, `index --check`, `harness check`, and the fixture-backed proposal loop.
+- `PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-1.0.0-py3-none-any.whl --commit "$(git rev-parse HEAD)" --ci-url "local://production-candidate/2026-06-01-$(git rev-parse --short HEAD)" --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 ...` writes `.sidecar/ops/release-artifact-manifest.json`.
 
 ## Release Manifest
 

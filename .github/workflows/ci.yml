@@ -109,6 +109,12 @@ jobs:
             --evidence .sidecar/ci/build-wheel.txt \
             --evidence .sidecar/ci/twine-check.txt \
             --evidence .sidecar/ci/install-smoke.txt
+      - run: |
+          cat > .sidecar/ci/release-evidence-index.md <<'EOF'
+          # Release Evidence Archive
+
+          CI upload artifacts are scratch evidence for pull requests and protected-branch failures. Attach `.sidecar/ops/release-artifact-manifest.json`, coverage, build, twine, install-smoke, security-review, and CI logs to the GitHub Release or another durable release archive for at least one year before publishing a stable tag.
+          EOF
       - uses: actions/upload-artifact@v4
         if: always()
         with:
