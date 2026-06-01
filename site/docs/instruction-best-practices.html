@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instruction Best Practices — Tugboat Docs</title>
+    <meta name="description" content="Patterns for maintainable agent instructions." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="instruction-best-practices">Instruction Best Practices</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Use this guide before asking Tugboat to maintain <code>CODEX.md</code>, <code>AGENTS.md</code>, <code>SKILL.md</code>, runbooks, or eval definitions. Tugboat is proposal-only by default, so these practices make generated candidates easier to review, validate, and roll back.</p>
+<p>Tugboat should treat trace and model output as evidence, never authority. The repo policy <code>instruction_files</code> list remains the authority boundary for which instruction surfaces Tugboat can observe and propose against. In monorepos, use <code>scope_root</code> on <code>instruction_files</code> entries to make package or service ownership explicit and to prevent cross-scope instruction mutations.</p>
+<h2 id="instruction-maps">Instruction Maps</h2>
+<p>The baseline rule is to keep instruction files as maps to repo-local docs. <code>CODEX.md</code> and <code>AGENTS.md</code> should name the stable operating rules, point to owned runbooks, and avoid copying large policy blocks from other files.</p>
+<p>Do:</p>
+<ul>
+<li>keep authority, ownership, and scope visible near the top of the file;</li>
+<li>link to repo-local runbooks instead of embedding long procedures;</li>
+<li>use stable headings that Tugboat can cite in evidence and reports;</li>
+<li>avoid monolithic policy growth by moving detailed procedures into owned docs;</li>
+<li>run <code>tugboat harness check --repo .</code> after reorganizing instruction maps.</li>
+</ul>
+<p>Do not:</p>
+<ul>
+<li>hide approval, sandbox, network, or rollback rules in unrelated sections;</li>
+<li>mix temporary incident notes into permanent policy;</li>
+<li>add every local exception to the top-level agent file.</li>
+</ul>
+<h2 id="skills">Skills</h2>
+<p>The baseline rule is to keep skills triggerable and testable. <code>SKILL.md</code> files should explain when the skill applies, what inputs it expects, what checks prove completion, and which files or commands are authoritative.</p>
+<p>Do:</p>
+<ul>
+<li>keep trigger rules concrete enough for an agent to decide whether the skill applies;</li>
+<li>preserve trigger conditions when accepting a rewrite;</li>
+<li>list verification commands and expected artifacts;</li>
+<li>keep safety constraints explicit when a skill can change instructions, policy, evals, or release files;</li>
+<li>prefer links to examples or fixtures over long embedded transcripts.</li>
+</ul>
+<p>Do not:</p>
+<ul>
+<li>broaden authority with vague phrases such as &quot;handle anything related&quot;;</li>
+<li>remove prerequisites that prevent unsafe execution;</li>
+<li>bury required checks in prose that is not tied to a command or artifact.</li>
+</ul>
+<h2 id="runbooks">Runbooks</h2>
+<p>The baseline rule is to keep runbooks rollback-ready. A runbook should say who owns the procedure, when to use it, what evidence to collect, what command sequence is safe, and how to return to the previous state.</p>
+<p>Do:</p>
+<ul>
+<li>include preconditions, stop criteria, rollback steps, and retained evidence;</li>
+<li>keep production operations local-first unless a reviewed policy explicitly enables networked provider paths;</li>
+<li>keep destructive actions behind explicit execute or apply flags.</li>
+</ul>
+<p>Do not:</p>
+<ul>
+<li>treat review-only commands and mutating commands as interchangeable;</li>
+<li>omit the artifact paths an operator should inspect;</li>
+<li>rely on unrecorded chat context to explain why a procedure is safe.</li>
+</ul>
+<h2 id="eval-definitions">Eval Definitions</h2>
+<p>The baseline rule is to keep eval definitions separate from trigger traces. Evals should validate candidate behavior without being edited by the same pending candidate they are judging.</p>
+<p>Do:</p>
+<ul>
+<li>store eval definitions in stable, reviewable files;</li>
+<li>name the behavior being protected and the expected pass/fail signal;</li>
+<li>keep held-out or unseen validation separate from the trace that triggered a proposal;</li>
+<li>review any candidate that edits eval definitions as policy-sensitive.</li>
+</ul>
+<p>Do not:</p>
+<ul>
+<li>let a pending candidate weaken the eval that decides whether it passes;</li>
+<li>place secrets or provider credentials in eval fixtures;</li>
+<li>use eval definitions as a substitute for operator review.</li>
+</ul>
+<h2 id="review-checklist">Review Checklist</h2>
+<p>Before accepting a Tugboat proposal:</p>
+<ul>
+<li>confirm the candidate is grounded in cited trace or harness evidence;</li>
+<li>confirm <code>eval-report.json</code>, <code>optimization-summary.json</code>, and <code>report.md</code> agree on the decision;</li>
+<li>inspect token footprint and safety checks for <code>SKILL.md</code> rewrites;</li>
+<li>verify rollback instructions exist before any apply mode;</li>
+<li>keep auto-apply disabled unless the repo has explicitly opted into narrow Class A lanes.</li>
+</ul>
+      </article>
+    </main>
+  </body>
+</html>

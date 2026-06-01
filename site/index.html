@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tugboat — Governed instruction maintenance for agent teams</title>
+    <meta
+      name="description"
+      content="Tugboat is a local-first sidecar for monitoring and improving agent instructions, runbooks, policies, and eval definitions with evidence-backed proposals."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Tugboat home">
+        <span class="brand-mark" aria-hidden="true">T</span>
+        <span>Tugboat</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#workflow">Workflow</a>
+        <a href="#features">Features</a>
+        <a href="#docs">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="starfield" aria-hidden="true"></div>
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="hero-inner">
+          <p class="kicker">Local-first sidecar · Governed optimization</p>
+          <h1 id="hero-title">Agent instructions that can be observed, improved, and rolled back.</h1>
+          <p class="hero-copy">
+            Tugboat monitors the operating layer around coding agents: <code>CODEX.md</code>,
+            <code>AGENTS.md</code>, <code>SKILL.md</code>, runbooks, policies, and eval definitions.
+            It turns real traces into bounded proposals with provenance, validation, and human review.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="./docs/quickstart.html">Read the quickstart</a>
+            <a class="button button-ghost" href="https://github.com/syndicalt/tugboat">View repository</a>
+          </div>
+          <div class="proof-strip" aria-label="Release proof points">
+            <span>Proposal-only default</span>
+            <span>VCS rollback</span>
+            <span>90%+ coverage gate</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section mission" aria-labelledby="mission-title">
+        <div class="section-grid">
+          <div>
+            <p class="kicker">Mission</p>
+            <h2 id="mission-title">Make the harness layer legible enough to improve safely.</h2>
+          </div>
+          <div class="mission-copy">
+            <p>
+              Coding agents already depend on local instructions, runbooks, policies, and evals. Those
+              files quietly shape behavior, but they rarely have telemetry, review trails, or rollback
+              discipline.
+            </p>
+            <p>
+              Tugboat treats that layer as production infrastructure. It reads traces, identifies drift,
+              proposes narrow edits, validates impact, and leaves an auditable trail before anything is
+              applied.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="section workflow-section" aria-labelledby="workflow-title">
+        <div class="section-header">
+          <p class="kicker">Workflow</p>
+          <h2 id="workflow-title">A proposal loop with evidence at every handoff.</h2>
+          <p>
+            Tugboat keeps model orchestration separate from authority. <code>llmff</code> runs bounded
+            manifests; Tugboat owns policy, artifacts, evals, VCS checks, and review state.
+          </p>
+        </div>
+
+        <div class="workflow-layout">
+          <div class="workflow-visual" aria-label="Tugboat workflow illustration">
+            <svg viewBox="0 0 760 460" role="img" aria-labelledby="workflow-svg-title">
+              <title id="workflow-svg-title">Trace, audit, propose, evaluate, apply, and rollback workflow</title>
+              <defs>
+                <radialGradient id="workflow-glow" cx="50%" cy="50%" r="55%">
+                  <stop offset="0%" stop-color="rgba(255,230,168,.22)" />
+                  <stop offset="58%" stop-color="rgba(255,230,168,.06)" />
+                  <stop offset="100%" stop-color="rgba(255,230,168,0)" />
+                </radialGradient>
+              </defs>
+              <rect width="760" height="460" rx="10" fill="url(#workflow-glow)" />
+              <g class="orbit-lines">
+                <circle cx="380" cy="230" r="168" />
+                <circle cx="380" cy="230" r="104" />
+                <line x1="120" y1="230" x2="640" y2="230" />
+                <line x1="380" y1="54" x2="380" y2="406" />
+              </g>
+              <g class="flow-path">
+                <path d="M132 104 C236 52 520 52 628 104" />
+                <path d="M628 104 C704 184 704 286 628 356" />
+                <path d="M628 356 C520 414 236 414 132 356" />
+                <path d="M132 356 C54 286 54 184 132 104" />
+              </g>
+              <g class="flow-node" transform="translate(78 74)">
+                <rect width="140" height="64" rx="6" />
+                <text x="16" y="26">TRACE</text>
+                <text class="muted" x="16" y="46">agent run evidence</text>
+              </g>
+              <g class="flow-node" transform="translate(310 48)">
+                <rect width="140" height="64" rx="6" />
+                <text x="16" y="26">AUDIT</text>
+                <text class="muted" x="16" y="46">drift and refs</text>
+              </g>
+              <g class="flow-node" transform="translate(542 74)">
+                <rect width="140" height="64" rx="6" />
+                <text x="16" y="26">PROPOSE</text>
+                <text class="muted" x="16" y="46">bounded diff</text>
+              </g>
+              <g class="flow-node" transform="translate(542 322)">
+                <rect width="140" height="64" rx="6" />
+                <text x="16" y="26">EVAL</text>
+                <text class="muted" x="16" y="46">gated outcome</text>
+              </g>
+              <g class="flow-node" transform="translate(310 348)">
+                <rect width="140" height="64" rx="6" />
+                <text x="16" y="26">REVIEW</text>
+                <text class="muted" x="16" y="46">human decision</text>
+              </g>
+              <g class="flow-node" transform="translate(78 322)">
+                <rect width="140" height="64" rx="6" />
+                <text x="16" y="26">APPLY</text>
+                <text class="muted" x="16" y="46">VCS + rollback</text>
+              </g>
+              <g class="center-readout">
+                <rect x="272" y="177" width="216" height="106" rx="8" />
+                <text x="302" y="214">proposal-only default</text>
+                <text x="302" y="240">policy gate: pass</text>
+                <text x="302" y="266">rollback: recorded</text>
+              </g>
+            </svg>
+          </div>
+
+          <div class="workflow-panel">
+            <p class="panel-label">Decision trace</p>
+            <h3>Every proposal carries its own review packet.</h3>
+            <dl class="readouts">
+              <div>
+                <dt>Evidence</dt>
+                <dd>Trace refs, instruction snapshots, candidate rationale, and eval output.</dd>
+              </div>
+              <div>
+                <dt>Authority</dt>
+                <dd>Policy gates, VCS state, protected writes, and read-only kill switch checks.</dd>
+              </div>
+              <div>
+                <dt>Recovery</dt>
+                <dd>Apply plans, provenance bundles, rollback plans, and incident artifacts.</dd>
+              </div>
+              <div>
+                <dt>Automation</dt>
+                <dd>Class A auto-apply only after opt-in, burn-in, shadow evidence, and rollback readiness.</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section features" aria-labelledby="features-title">
+        <div class="section-header">
+          <p class="kicker">Capabilities</p>
+          <h2 id="features-title">Production controls for changing the text that controls agents.</h2>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <span>01</span>
+            <h3>Instruction observability</h3>
+            <p>Indexes instruction files, runbooks, policies, evals, and trace evidence so drift has concrete refs.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Bounded proposals</h3>
+            <p>Generates narrow diffs with rationale, expected behavior, risk classification, and review artifacts.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>Eval-gated optimization</h3>
+            <p>Runs acceptance, held-out, token-efficiency, and skill behavior checks before recommending change.</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>VCS apply and rollback</h3>
+            <p>Applies through proposal, branch, commit, or PR modes with provenance and rollback plans.</p>
+          </article>
+          <article>
+            <span>05</span>
+            <h3>Safe automation lane</h3>
+            <p>Class A auto-apply stays opt-in, shadowed, policy-bound, and blocked by active incidents.</p>
+          </article>
+          <article>
+            <span>06</span>
+            <h3>Local operator control</h3>
+            <p>Runs locally with credential-free fixture paths, read-only MCP surfaces, and auditable sidecar state.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="docs" class="section docs-section" aria-labelledby="docs-title">
+        <div class="section-header">
+          <p class="kicker">Documentation</p>
+          <h2 id="docs-title">Read the product docs as rendered HTML.</h2>
+          <p>
+            These pages are generated from the Markdown docs in this repository. The source docs remain
+            the canonical authoring format.
+          </p>
+        </div>
+        <div class="docs-grid">
+          <a href="./docs/quickstart.html"><strong>Quickstart</strong><span>Get to a proposal loop without credentials.</span></a>
+          <a href="./docs/cli-reference.html"><strong>CLI Reference</strong><span>Commands, modes, and exit behavior.</span></a>
+          <a href="./docs/architecture.html"><strong>Architecture</strong><span>Authority boundaries and data flow.</span></a>
+          <a href="./docs/apply-rollback.html"><strong>Apply and Rollback</strong><span>Reviewed mutation and recovery paths.</span></a>
+          <a href="./docs/auto-apply.html"><strong>Auto-Apply</strong><span>Policy gates, shadow mode, and incidents.</span></a>
+          <a href="./docs/mcp-guide.html"><strong>MCP Guide</strong><span>Read-only agent consumption surface.</span></a>
+          <a href="./docs/llmff-compatibility.html"><strong>llmff Compatibility</strong><span>Pipeline runner contracts and provider posture.</span></a>
+          <a href="./docs/operating-runbook.html"><strong>Operating Runbook</strong><span>Operational checks and release evidence.</span></a>
+          <a href="./docs/troubleshooting.html"><strong>Troubleshooting</strong><span>Common failures and safe recovery.</span></a>
+        </div>
+      </section>
+
+      <section class="section cta" aria-labelledby="cta-title">
+        <p class="kicker">Adopt carefully</p>
+        <h2 id="cta-title">Start proposal-only. Earn automation later.</h2>
+        <p>
+          Tugboat is designed for serious agent-heavy development workflows where safety, auditability,
+          and local control matter more than opaque overnight edits.
+        </p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="./docs/quick-adoption-proposal-only.html">Adoption guide</a>
+          <a class="button button-ghost" href="./docs/threat-model.html">Threat model</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div>
+        <a class="brand" href="#top" aria-label="Tugboat home">
+          <span class="brand-mark" aria-hidden="true">T</span>
+          <span>Tugboat</span>
+        </a>
+        <p>Local-first agent instruction observability and governed optimization.</p>
+      </div>
+      <div class="footer-links">
+        <a href="./docs/index.html">Docs index</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+        <a href="./docs/1.0.0-draft.html">Release notes</a>
+      </div>
+    </footer>
+  </body>
+</html>

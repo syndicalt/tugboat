@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CLI Reference — Tugboat Docs</title>
+    <meta name="description" content="Commands, options, and exit behavior." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="cli-reference">CLI Reference</h1>
+<h2 id="core-workflow">Core Workflow</h2>
+<p>All commands run from a repository root unless <code>--repo</code> points elsewhere.</p>
+<pre><code>tugboat --version
+tugboat doctor
+tugboat doctor --repo .
+tugboat init
+tugboat init --repo .
+tugboat index --repo .
+tugboat status --repo .</code></pre>
+<ul>
+<li><code>--version</code> prints the installed Tugboat runtime identity, for example <code>tugboat 1.0.0</code>.</li>
+<li><code>doctor</code> prints installed CLI health, repo policy posture, provider/network posture, manifest policy, and actionable recommendations.</li>
+<li><code>init</code> writes <code>.sidecar/policy.yaml</code> and <code>.sidecar/.gitignore</code> for the current directory by default; pass <code>--repo</code> for another repository. It refuses to overwrite an existing policy.</li>
+<li><code>index</code> parses configured instruction files and stores document/chunk metadata. Add <code>--check</code> for dry-run validation without writing index rows. Instruction discovery honors <code>instruction_files[].scope_root</code> for monorepos, then applies policy-owned <code>index.max_instruction_files</code> and blocks before parsing or DB writes when the budget is exceeded.</li>
+<li><code>status</code> writes <code>.sidecar/status-report.json</code> and prints mode, auto-apply state, latest run, latest <code>llmff</code> job, pending candidates, retention candidates, manifest policy, and daemon queue health.</li>
+</ul>
+<h2 id="proposal-pipeline">Proposal Pipeline</h2>
+<p>Use <code>optimize</code> for the normal end-to-end proposal loop:</p>
+<pre><code>tugboat optimize --repo . --trace traces/example.jsonl --suite all</code></pre>
+<p>Use the decomposed commands when debugging or when CI needs smaller stages:</p>
+<pre><code>tugboat audit --repo . --trace traces/example.jsonl --trace-format auto
+tugboat propose --repo . --audit latest
+tugboat eval --repo . --candidate latest --suite all
+tugboat report --repo . --run latest
+tugboat inspect-decision --repo . --decision latest
+tugboat inspect-decision --repo . --decision latest --compare &lt;decision-id&gt;</code></pre>
+<p>Supported <code>--trace-format</code> values are <code>auto</code>, <code>generic-jsonl</code>, <code>codex</code>, <code>claude</code>, <code>ci</code>, and <code>mcp</code>.</p>
+<p>Trace ingestion honors policy-owned <code>trace.max_input_bytes</code> and <code>trace.max_events</code>. Oversized trace files are blocked before copying into <code>.sidecar/runs</code>, oversized MCP episode payloads are blocked before persistence, and over-event JSONL traces are blocked before building an unbounded trace bundle.</p>
+<p><code>report</code> writes <code>.sidecar/runs/&lt;run-id&gt;/report.md</code> with artifact references, eval scores, longitudinal metrics, optimization summary fields, and a <code>highest_impact_summary</code> derived from bounded edit metadata plus eval metrics. The impact summary is metadata-only: target file/section, edit operator, changed lines, held-out delta, instruction token delta, and governance status.</p>
+<p><code>inspect-decision</code> writes <code>.sidecar/runs/&lt;run-id&gt;/decision-trace.json</code> and prints a metadata-only operator summary:</p>
+<pre><code>decision_trace: &lt;path&gt;
+run_id: &lt;run-id&gt;
+decision: needs_review
+candidate_id: &lt;id&gt;
+candidate_file: CODEX.md
+candidate_state: needs_review
+risk_class: &lt;class&gt;
+risk_explanation: class=&lt;class&gt; policy_allowed=true policy_reasons=none review_required=none
+evals: all=passed
+rollback_ready: no
+rollback_readiness: state=planned command=tugboat rollback --decision latest artifact=.sidecar/runs/&lt;run-id&gt;/optimization-summary.json applied_commit=missing
+highest_impact: target=CODEX.md#Testing operator=add changed_lines=1 normative_changes=0 held_out_delta=0.08 instruction_token_delta=6 governance_passed=true
+review_next: inspect .sidecar/runs/&lt;run-id&gt;/candidate.diff</code></pre>
+<p><code>rollback_ready</code> keeps its strict compatibility meaning: <code>yes</code> only when an applied commit and a rollback-plan artifact exist. <code>rollback_readiness</code> is broader operator guidance and can be <code>missing</code>, <code>planned</code>, <code>apply_ready</code>, or <code>applied_ready</code>.</p>
+<p>Use <code>--compare</code> to compare the selected decision against another decision id or run ref. The comparison prints only bounded metadata fields: candidate id, target file, state, risk class, decision, eval summary, rollback readiness, and changed field names.</p>
+<p>Raw trace evidence, payload snippets, rationale text, optimizer memory, and rollback bodies stay in artifacts rather than stdout.</p>
+<p><code>optimize</code> also accepts training and validation metadata:</p>
+<pre><code>tugboat optimize --repo . \
+  --trace traces/failure.jsonl \
+  --train-trace traces/success.jsonl \
+  --suite held-out \
+  --held-out-episode held-out:no-regression \
+  --unseen-suite governance</code></pre>
+<p><code>audit</code> supports <code>--mock-llmff-inspect</code> for audit-only smoke tests. Do not use mock inspect output as proposal evidence.</p>
+<p><code>propose</code> rewrites overlarge <code>drift.raw.json</code> clusters into deterministic review-sized parts before <code>patch-propose</code> consumes them. The bound is policy-owned at <code>roadmap.drift_cluster.max_evidence_refs</code> and defaults to <code>8</code>; evidence IDs remain ordered and no raw trace payloads are added.</p>
+<h2 id="review-and-change-control">Review And Change Control</h2>
+<p>Generated candidates are review artifacts until an apply command moves through the VCS adapter:</p>
+<pre><code>tugboat apply --repo . --candidate latest --mode proposal
+tugboat apply --repo . --candidate latest --mode branch --human-review --review-actor &lt;name&gt;
+tugboat apply --repo . --candidate latest --mode commit --human-review --review-actor &lt;name&gt;
+tugboat apply --repo . --candidate latest --mode pr --human-review --review-actor &lt;name&gt;
+tugboat review reject --repo . --candidate latest --actor &lt;name&gt; --template redundant-rule
+tugboat rollback --repo . --decision latest
+tugboat rollback --repo . --decision latest --execute</code></pre>
+<p><code>proposal</code> mode writes an apply plan without mutating instruction files. <code>branch</code>, <code>commit</code>, and <code>pr</code> modes require clean/stale-base checks, policy gate proof, eval evidence, and VCS adapter execution.</p>
+<p><code>review reject</code> records a human rejection, updates candidate state, and writes rejected-edit plus rejected-cluster optimizer memory so future matching proposals and drift groups stay visible to the optimizer. Prefer built-in rejection templates for consistent memory:</p>
+<ul>
+<li><code>redundant-rule</code></li>
+<li><code>too-broad</code></li>
+<li><code>weakens-safety</code></li>
+<li><code>unsupported-evidence</code></li>
+</ul>
+<p>Manual <code>--reason</code>, <code>--category</code>, and <code>--failure-pattern</code> fields remain available as a complete triplet. Templates cannot be combined with manual fields.</p>
+<h2 id="eval-reports">Eval Reports</h2>
+<p><code>tugboat eval --repo . --candidate latest --suite all</code> writes <code>.sidecar/runs/&lt;run-id&gt;/eval-report.json</code>. Offline eval metrics include <code>instruction_token_delta</code>, <code>duplicate_rule_token_delta</code>, <code>instruction_token_growth_reason</code>, and <code>instruction_token_growth_acceptable</code> so reviewers can tell whether token growth was paired with held-out improvement and governance safety. Duplicate rule growth without held-out improvement is reported as <code>duplicate_token_growth_without_held_out_improvement</code>. For <code>SKILL.md</code> preview rewrites, the report includes <code>skill_report</code> with deterministic checks for trigger preservation, executability, ambiguity, overfit risk, token footprint, required sections, explicit non-goals, examples or fixtures when present, forbidden sections, safety weakening, and held-out skill behavior. Skill reports include <code>metrics.held_out_behavior_score</code>, while the top-level eval metrics include <code>skill_held_out_behavior_cases</code> and <code>skill_held_out_behavior_failures</code>. A failing <code>skill_report</code> forces <code>passed: false</code> and <code>recommendation: reject</code>.</p>
+<h2 id="auto-apply">Auto-Apply</h2>
+<p>Auto-apply is a separate, narrow lane:</p>
+<pre><code>tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt;
+tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; --preflight
+tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; --shadow \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1
+tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1</code></pre>
+<p>The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, lane match, ledger-derived burn-in and reliability metrics, eval, governance, token-growth, VCS, rollback evidence, and current passing shadow evidence all pass. Runtime arguments confirm intent; policy owns thresholds such as <code>docs_hygiene.minimum_burn_in_days: 3</code>, <code>docs_hygiene.maximum_rejection_rate: 0.20</code>, <code>docs_hygiene.max_instruction_token_delta: 50</code>, and <code>skill_improvement.maximum_rollback_rate: 0.03</code>. <code>skill_improvement</code> candidates also require held-out skill behavior evidence; missing or failing evidence is reported as <code>skill_held_out_behavior_failed</code>.</p>
+<p><code>--preflight</code> writes <code>.sidecar/runs/&lt;run-id&gt;/auto-apply-preflight.json</code> with eligibility, reasons, gate snapshots, eval status, VCS checks, readiness metrics, and any pending approval bundle. It exits <code>0</code> when the report is produced and does not apply, branch, commit, write an apply plan, or record auto-apply decision events.</p>
+<p><code>--shadow</code> writes <code>.sidecar/runs/&lt;run-id&gt;/auto-apply-shadow.json</code> and appends an <code>auto_apply.shadowed</code> audit event for lane telemetry. It exits <code>0</code> when shadow evidence is recorded and does not apply, branch, commit, write an apply plan, write an approval artifact, or record <code>auto_apply.decided</code>. Final commit-mode auto-apply requires this shadow artifact to remain eligible and to match the current candidate, eval, and policy-gate artifact hashes.</p>
+<h2 id="harness-and-ci">Harness And CI</h2>
+<pre><code>tugboat harness check --repo .
+tugboat harness report --repo .
+tugboat harness cleanup --repo .
+tugboat ci --repo .
+python -m pytest --cov=src --cov-report=term-missing -q</code></pre>
+<p><code>harness report</code> writes <code>.sidecar/harness-report.json</code> with knowledge-map, doc-gardening, recurring-failure, and estimated token-efficiency metrics for the instruction corpus and active context. Token metrics include deterministic instruction-file, active-context, and retrieval-pack budgets plus violation messages for large instruction corpora. <code>harness cleanup</code> writes review-only cleanup candidates and is blocked by <code>.sidecar/read-only.kill</code>. <code>ci</code> writes <code>.sidecar/ci/ci-report.json</code> and checks manifest contracts, semantic policy lint, harness health, blocking token-budget violations, and optional eval evidence.</p>
+<h2 id="mcp-and-daemon">MCP And Daemon</h2>
+<pre><code>tugboat mcp stdio --repo . --read-only
+tugboat daemon status --repo .
+tugboat daemon run-once --repo .
+tugboat daemon cycle --repo . --trace-dir traces --max-jobs 1
+tugboat daemon serve --repo . --socket .sidecar/daemon.sock --max-requests 1
+tugboat daemon read-only --repo . --enable
+tugboat daemon read-only --repo . --disable
+tugboat daemon profile --repo . --app-boot-json &#x27;{&quot;command&quot;:&quot;python -m app&quot;}&#x27;</code></pre>
+<p>MCP is an adapter over the CLI/service layer. The daemon is local-only and kill-switchable. <code>daemon status</code> is read-only and reports queued, leased, and expired-lease counts without recovering or mutating jobs.</p>
+<h2 id="operations">Operations</h2>
+<pre><code>tugboat retention --repo .
+tugboat retention --repo . --redact-output /tmp/tugboat-redacted
+tugboat retention --repo . --apply
+tugboat ops migrate --repo .
+tugboat ops migrate --repo . --apply
+tugboat ops observability --repo .
+tugboat ops observability --repo . --metrics-output .sidecar/ops/observability/metrics.prom
+tugboat ops observability --repo . --event-log-output .sidecar/ops/observability/events.jsonl
+tugboat ops backup --repo . --archive /tmp/tugboat-sidecar.tgz
+tugboat ops backup --repo . --archive /tmp/tugboat-sidecar.tgz --execute
+tugboat ops restore --repo . --archive /tmp/tugboat-sidecar.tgz --staging /tmp/tugboat-restore --pre-restore /tmp/tugboat-pre-restore
+tugboat ops release-manifest --repo . --wheel dist/&lt;wheel&gt;.whl --commit &quot;$(git rev-parse HEAD)&quot; --ci-url &lt;url&gt; --approver &lt;name&gt; --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt</code></pre>
+<p>Operations commands write reviewable artifacts under <code>.sidecar/ops</code>. Retention and redaction scans honor policy-owned <code>retention.max_scan_files</code> and block before deletion or export when <code>.sidecar/runs</code> exceeds the budget. <code>ops observability --metrics-output</code> writes a local Prometheus text-format metrics export derived from the same summary artifact, with bounded labels for failure kinds, daemon queue states, and auto-apply lanes. <code>ops observability --event-log-output</code> writes deterministic JSONL operational events for summary, daemon queue, and auto-apply lane state without raw trace text, candidate rationales, or evidence payloads. <code>ops release-manifest</code> verifies retained evidence for doctor, index check, harness check, CI report, pytest coverage at or above 90%, wheel build, twine check, installed-wheel smoke, security review, and the current HEAD commit before writing <code>.sidecar/ops/release-artifact-manifest.json</code>. Destructive operations require explicit apply or execute flags and are blocked by the read-only kill switch where applicable. <code>ops migrate</code> blocks if <code>.sidecar/version.json</code> or legacy <code>.sidecar/VERSION</code> is newer than this Tugboat binary supports; unmarked 0.x sidecars migrate as legacy schema v1, and <code>policy.yaml version</code> is preserved as policy metadata. Upgrade Tugboat before using or migrating a future-version sidecar. See <code>docs/migration-v1.md</code> for upgrade procedure and <code>docs/compatibility-policy.md</code> for the v1 CLI and artifact compatibility policy.</p>
+<h2 id="exit-codes">Exit Codes</h2>
+<p>Exit code <code>0</code> means the requested command completed its documented success path. For read commands this means output was produced. For write-capable commands this means the required artifact, VCS action, or explicit dry-run report was produced.</p>
+<p>A nonzero exit means the command was blocked, rejected, failed validation, or could not publish required evidence. Safety gates use nonzero exits instead of partial mutation, including invalid policy, missing or malformed traces, failed eval or governance gates, dirty worktrees, stale base hashes, read-only kill switch blocks, missing rollback metadata, and release-manifest evidence failures.</p>
+<p><code>auto-apply --preflight</code> exits <code>0</code> when the preflight report is written, even when the report says the candidate is ineligible. <code>auto-apply --shadow</code> exits <code>0</code> when shadow evidence is written without mutation. Confirmed auto-apply exits nonzero unless all policy, eval, VCS, rollback, shadow, and incident gates pass.</p>
+<p><code>ops release-manifest</code> exits nonzero when required release evidence is missing, stale, below threshold, or fails security review. It writes <code>.sidecar/ops/release-artifact-manifest.json</code> only after validating the wheel identity, coverage evidence, CI/harness evidence, build and twine evidence, installed-wheel smoke, security review, and commit identity.</p>
+      </article>
+    </main>
+  </body>
+</html>

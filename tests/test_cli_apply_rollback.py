@@ -36,7 +36,7 @@ def _git(repo: Path, *args: str) -> str:
 def _init_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git(repo, "init")
+    _git(repo, "init", "--initial-branch", "main")
     _git(repo, "config", "user.email", "tugboat@example.test")
     _git(repo, "config", "user.name", "Tugboat Tests")
     (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")

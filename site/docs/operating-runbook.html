@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Operating Runbook — Tugboat Docs</title>
+    <meta name="description" content="Operational checks and routine maintenance." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="tugboat-operating-runbook">Tugboat Operating Runbook</h1>
+<h2 id="purpose">Purpose</h2>
+<p>This runbook covers routine operation, failure triage, and escalation for teams running Tugboat in proposal-only mode. It assumes instruction edits are reviewed by humans before application.</p>
+<h2 id="daily-checks">Daily Checks</h2>
+<p>Run from the repository root:</p>
+<pre><code>tugboat status --repo .
+tugboat harness report --repo .</code></pre>
+<p>Check:</p>
+<ul>
+<li>Mode is <code>proposal_only</code>.</li>
+<li>Auto-apply is disabled unless explicitly approved for this repository.</li>
+<li>Pending candidates have owners.</li>
+<li>The latest run status is expected.</li>
+<li>Harness findings are either resolved or tracked.</li>
+</ul>
+<h2 id="incident-response">Incident Response</h2>
+<p>When a run fails or produces an unsafe candidate:</p>
+<pre><code>tugboat status --repo .
+tugboat report --repo . --run &lt;run-id&gt;</code></pre>
+<p>Classify the incident:</p>
+<ul>
+<li><code>failure_kind</code> from <code>llmff</code> or Tugboat run metadata.</li>
+<li>Affected repository, branch, and commit.</li>
+<li>Whether secrets, credentials, private traces, or policy files were exposed.</li>
+<li>Whether the candidate changed protected topics such as approvals, sandboxing, network, deployment, memory, provider routing, or secrets.</li>
+</ul>
+<p>Pause further proposal runs if the same failure repeats or if artifacts may contain unredacted sensitive data.</p>
+<h2 id="rollback">Rollback</h2>
+<p>For proposal-only use, rollback usually means rejecting the candidate and preserving evidence:</p>
+<pre><code>tugboat report --repo . --run &lt;run-id&gt;
+git diff</code></pre>
+<p>If a branch or commit mode was used, follow the release checklist rollback instructions and keep <code>.sidecar</code> evidence intact until review closes.</p>
+<h2 id="escalation">Escalation</h2>
+<p>Escalate to the repository owner and security reviewer when:</p>
+<ul>
+<li>A secret appears in <code>.sidecar/runs</code>, CI artifacts, tickets, or chat.</li>
+<li>A candidate changes policy or authority boundaries.</li>
+<li>A restored <code>.sidecar</code> database fails <code>PRAGMA integrity_check</code>.</li>
+<li>The same <code>failure_kind</code> appears in three consecutive production runs.</li>
+<li>CI cannot run <code>tugboat doctor</code>, <code>tugboat harness check --repo .</code>, or <code>python -m pytest -q</code>.</li>
+</ul>
+      </article>
+    </main>
+  </body>
+</html>

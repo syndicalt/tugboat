@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Troubleshooting — Tugboat Docs</title>
+    <meta name="description" content="Common failures and recovery guidance." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="troubleshooting">Troubleshooting</h1>
+<h2 id="first-checks">First Checks</h2>
+<p>Start with these commands:</p>
+<pre><code>tugboat doctor
+tugboat status --repo .
+tugboat harness check --repo .
+tugboat harness report --repo .</code></pre>
+<p>If a run exists, inspect:</p>
+<pre><code>tugboat report --repo . --run latest
+tugboat inspect-decision --repo . --decision latest</code></pre>
+<h2 id="init-and-policy">Init And Policy</h2>
+<p><code>init blocked: .sidecar/policy.yaml already exists</code></p>
+<p>Review the existing policy instead of overwriting it. Confirm <code>mode: proposal_only</code>, <code>auto_apply.enabled: false</code>, and <code>llmff.allow_network: false</code> unless the repo intentionally opts into provider-backed runs.</p>
+<p><code>manifest hash is not allowed by policy</code></p>
+<p>Run <code>tugboat ci --repo .</code> to materialize manifests, then review <code>.sidecar/manifests</code>. Add hashes only after manifest review.</p>
+<h2 id="llmff-failures">llmff Failures</h2>
+<p><code>audit blocked: trace file not found</code></p>
+<p>Create or export the trace file first, then rerun with the same <code>--trace</code> path. For a quick local smoke test, use <code>tests/fixtures/traces/codex-local-session-export.jsonl</code>.</p>
+<p><code>audit blocked: invalid trace</code></p>
+<p>Validate that the trace is JSONL or JSON matching the selected <code>--trace-format</code>. Use <code>--trace-format auto</code> for generic JSONL, Codex JSONL, Claude transcript JSON/JSONL, MCP session JSONL, or CI failure JSON traces.</p>
+<p><code>audit blocked: invalid trace: unsupported JSON trace format</code></p>
+<p>The file is a JSON object that does not match a supported object-based trace shape, such as Claude transcript JSON or CI failure JSON. Export the session as JSONL, use a supported trace fixture shape, or pass an explicit non-auto <code>--trace-format</code> only when the file truly matches that adapter.</p>
+<p><code>audit blocked: trace input size budget exceeded</code></p>
+<p>Review the trace export before raising <code>trace.max_input_bytes</code> in <code>.sidecar/policy.yaml</code>. Tugboat blocks before copying oversized audit, optimize, or train-trace files into <code>.sidecar/runs</code>.</p>
+<p><code>audit blocked: trace event budget exceeded</code></p>
+<p>Review the trace export before raising <code>trace.max_events</code> in <code>.sidecar/policy.yaml</code>. Tugboat blocks over-event JSONL traces before building an unbounded trace bundle or invoking <code>llmff</code>.</p>
+<p><code>audit blocked: redaction failed</code></p>
+<p>Check filesystem permissions and available disk space under <code>.sidecar/runs</code>. Tugboat fails closed before invoking <code>llmff</code> when it cannot write redacted trace or canonical episode artifacts.</p>
+<p><code>instruction index blocked: llmff inspect failed: binary not found</code></p>
+<p>Check <code>.sidecar/policy.yaml</code> and verify <code>llmff.binary</code>. The default after <code>tugboat init --repo .</code> is <code>python -m tugboat.llmff.fixture_backend</code>.</p>
+<p><code>llmff inspect failed</code></p>
+<p>Inspect <code>.sidecar/runs/&lt;run-id&gt;/&lt;manifest&gt;/llmff-inspect.json</code>. Provider-backed runs must declare network requirements, providers, and external calls, and repo policy must allow them.</p>
+<p><code>llmff patch-eval failed with exit code</code></p>
+<p>Inspect <code>.sidecar/runs/&lt;run-id&gt;/patch-eval/llmff-events.jsonl</code>, <code>.sidecar/runs/&lt;run-id&gt;/eval-report.raw.json</code>, and <code>.sidecar/runs/&lt;run-id&gt;/policy-decision.raw.json</code>.</p>
+<h2 id="daemon">Daemon</h2>
+<p><code>daemon user service is not processing jobs</code></p>
+<p>Run <code>tugboat daemon status --repo .</code> first. If <code>read_only: enabled</code> or <code>.sidecar/read-only.kill</code> exists, review the incident and leave the service stopped until write paths are safe. For Linux, inspect <code>systemctl --user status tugboat.service</code> and <code>journalctl --user -u tugboat.service</code>; for macOS, inspect <code>launchctl print &quot;gui/$(id -u)/com.example.tugboat&quot;</code>. Confirm the service working directory is the repository root and the command is a bounded <code>tugboat daemon cycle --repo .</code>, not a public listener. After review, run one manual <code>tugboat daemon run-once --repo .</code> to recover stale leases before restarting the user service.</p>
+<h2 id="eval-and-acceptance">Eval And Acceptance</h2>
+<p><code>eval rejected: llmff eval_report cannot accept without validation split provenance</code></p>
+<p>The eval report must include separate triggering and held-out validation cases. Do not use the triggering episode as the only validation case.</p>
+<p><code>eval rejected: held_out_score must strictly improve</code></p>
+<p>Review the validation baseline in optimizer memory. A candidate can be plausible and still fail the acceptance gate.</p>
+<p><code>governance_passed</code> is false</p>
+<p>Treat the candidate as rejected. Governance regressions override accept recommendations.</p>
+<h2 id="apply-and-rollback">Apply And Rollback</h2>
+<p><code>apply blocked: dirty target</code></p>
+<p>Commit, stash, or discard local target-file edits before applying.</p>
+<p><code>apply blocked: base hash</code></p>
+<p>Regenerate the candidate from the current file state. Do not hand-edit candidate hashes.</p>
+<p><code>apply blocked: policy gate rejected candidate</code></p>
+<p>Inspect <code>policy-gate.json</code> and <code>decision-trace.json</code>. Common causes are protected headings, Class C review requirements, Class D prohibited topics, or rejected-edit memory suppression.</p>
+<p><code>apply blocked: git push failed</code></p>
+<p>Inspect <code>.sidecar/runs/&lt;run-id&gt;/apply-incident.json</code>. A failed push after local commit records <code>remote_branch_state: unknown</code>; check the remote before deleting anything, preserve the incident artifact, then remove any generated local or remote branch only after evidence is retained.</p>
+<p><code>apply blocked: gh pr create failed</code></p>
+<p>Inspect <code>apply-incident.json</code>. When <code>remote_branch_state: pushed</code> and <code>pr_state: uncertain</code>, check the provider for a created PR before retrying. Do not delete the remote branch or close a PR until the incident artifact and any provider evidence are preserved.</p>
+<p><code>apply blocked: simulated apply plan publish failure</code> or another PR artifact publication error</p>
+<p>If <code>apply-incident.json</code> records <code>pr_state: created</code>, the PR exists but Tugboat could not publish complete local apply evidence. Preserve <code>.sidecar/runs/&lt;run-id&gt;/</code>, review or close the PR manually, and delete the remote branch only after evidence is retained.</p>
+<p><code>rollback blocked: git revert</code></p>
+<p>Resolve or abort the VCS revert state manually, preserve <code>.sidecar/runs/&lt;run-id&gt;/rollback-plan.json</code> if present, then rerun after the repository is clean.</p>
+<p><code>rollback blocked: simulated rollback plan publish failure</code> or another rollback-plan publication error</p>
+<p>Check <code>.sidecar/runs/&lt;run-id&gt;/rollback-incident.json</code>. When it records <code>rollback_applied: true</code> and <code>rollback_plan_written: false</code>, the Git revert commit exists but the success plan evidence is missing. Preserve the incident artifact, keep the repository clean, and repair or reconstruct the missing rollback evidence before closing the incident.</p>
+<h2 id="mcp">MCP</h2>
+<p>MCP tools return repo allowlist errors when <code>.sidecar/policy.yaml</code> lacks the absolute repo path under <code>mcp.allowed_repositories</code>.</p>
+<p>Bound read-only stdio:</p>
+<pre><code>tugboat mcp stdio --repo . --read-only</code></pre>
+<p>This profile rejects repo overrides and does not expose write-intent tools.</p>
+<h2 id="daemon">Daemon</h2>
+<p><code>daemon serve blocked: socket_path must resolve inside repo sidecar</code></p>
+<p>Use a socket path such as <code>.sidecar/daemon.sock</code>.</p>
+<p>Queued jobs are not moving:</p>
+<pre><code>tugboat daemon status --repo .
+tugboat daemon read-only --repo . --status
+tugboat daemon run-once --repo .</code></pre>
+<p>If the kill switch is enabled, queued jobs will not execute. If status reports <code>stuck_job_count</code> greater than zero, <code>run-once</code> or <code>cycle</code> recovers expired leases before acquiring work.</p>
+<h2 id="operations">Operations</h2>
+<p><code>index blocked: instruction file budget exceeded</code></p>
+<p>Review the configured <code>instruction_files</code> globs and raise <code>index.max_instruction_files</code> only after confirming the repository really needs the larger instruction corpus. Tugboat blocks before parsing files or writing <code>.sidecar/db.sqlite</code> when the index budget is exceeded.</p>
+<p><code>migration blocked: sidecar schema version &lt;n&gt; is newer than supported version &lt;m&gt;</code></p>
+<p>Stop and upgrade Tugboat before running more commands against that sidecar. A newer <code>.sidecar/version.json</code> means the sidecar may contain schema or artifact semantics this binary does not understand; older binaries must not migrate, apply, or reinterpret it.</p>
+<h2 id="secrets-and-redaction">Secrets And Redaction</h2>
+<p><code>retention blocked: scan budget exceeded</code></p>
+<p>Increase <code>retention.max_scan_files</code> in <code>.sidecar/policy.yaml</code> only after reviewing <code>.sidecar/runs</code> growth, or archive/delete old sidecar runs manually. Tugboat blocks before deletion or redaction export when the scan budget is exceeded.</p>
+<p>If a secret appears in a trace, prompt, event, checkpoint, diff, or report:</p>
+<pre><code>tugboat daemon read-only --repo . --enable
+tugboat retention --repo . --redact-output /tmp/tugboat-redacted</code></pre>
+<p>Do not upload raw <code>.sidecar/runs/**</code> artifacts until redaction is reviewed.</p>
+<h2 id="release-evidence">Release Evidence</h2>
+<p><code>release manifest blocked: commit does not match current HEAD</code></p>
+<p>Commit tracked docs/tests first, then regenerate the manifest with:</p>
+<pre><code>tugboat ops release-manifest --repo . --wheel dist/&lt;wheel&gt;.whl --commit &quot;$(git rev-parse HEAD)&quot; --ci-url &lt;url&gt; --approver &lt;name&gt; --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt</code></pre>
+<p><code>release manifest blocked: pytest coverage evidence did not pass</code></p>
+<p>Regenerate retained evidence with the full coverage report; the release gate requires a parseable total coverage percentage at or above 90%:</p>
+<pre><code>python -m pytest --cov=src --cov-report=term-missing -q 2&gt;&amp;1 | tee .sidecar/ci/pytest-coverage.log</code></pre>
+<p><code>release manifest blocked: CI evidence is required</code></p>
+<p>Run <code>tugboat ci --repo .</code> and retain <code>.sidecar/ci/ci-report.json</code> with the other release evidence.</p>
+<p><code>release manifest blocked: security review evidence is required</code></p>
+<p>Retain an approved security-review artifact at <code>.sidecar/ci/security-review.md</code> or another path whose filename contains <code>security-review</code>. The file must state that there are no open critical or high findings.</p>
+<p><code>release manifest blocked: install smoke evidence did not pass</code></p>
+<p>Regenerate installed-wheel smoke from a clean virtual environment and retain the installed CLI command output:</p>
+<pre><code>python -m venv .sidecar/ci/install-smoke-venv
+.sidecar/ci/install-smoke-venv/bin/python -m pip install dist/&lt;wheel&gt;.whl
+{
+  echo &quot;installed tugboat wheel: dist/&lt;wheel&gt;.whl&quot;
+  echo &quot;installed tugboat --version&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat --version
+  echo &quot;installed tugboat doctor&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat doctor
+  echo &quot;installed tugboat index --repo . --check&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat index --repo . --check
+  echo &quot;installed tugboat harness check --repo .&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat harness check --repo .
+} 2&gt;&amp;1 | tee .sidecar/ci/install-smoke.txt</code></pre>
+      </article>
+    </main>
+  </body>
+</html>

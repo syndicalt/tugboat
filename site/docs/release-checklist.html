@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Release Checklist — Tugboat Docs</title>
+    <meta name="description" content="Evidence required for a release." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="tugboat-release-checklist">Tugboat Release Checklist</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Use this checklist before publishing a Tugboat release or promoting a build for team use. The default release posture is proposal-only: <code>proposal_only</code> mode, <code>auto_apply: disabled</code>, and no required live provider credentials.</p>
+<h2 id="preconditions">Preconditions</h2>
+<ul>
+<li>The release branch is clean except for intended release changes.</li>
+<li>The release notes identify user-visible changes, policy changes, storage changes, and rollback notes.</li>
+<li>Any <code>.sidecar</code> schema or artifact-format change has an explicit migration or compatibility note, including whether older Tugboat binaries block newer sidecars and whether operators must back up before <code>tugboat ops migrate --repo . --apply</code>.</li>
+<li>For v1-facing releases, review <code>docs/migration-v1.md</code>, <code>docs/compatibility-policy.md</code>, and <code>docs/llmff-compatibility.md</code> before tagging.</li>
+<li>No release step requires secret values in logs, CI summaries, or retained artifacts.</li>
+</ul>
+<h2 id="checklist">Checklist</h2>
+<p>Run these commands from the repository root:</p>
+<pre><code>mkdir -p .sidecar/ci
+set -o pipefail
+tugboat doctor --repo . 2&gt;&amp;1 | tee .sidecar/ci/doctor.txt
+tugboat ci --repo .
+tugboat index --repo . --check 2&gt;&amp;1 | tee .sidecar/ci/index-check.txt
+tugboat harness check --repo . 2&gt;&amp;1 | tee .sidecar/ci/harness.txt
+python -m pytest --cov=src --cov-report=term-missing -q 2&gt;&amp;1 | tee .sidecar/ci/pytest-coverage.log
+{ echo &quot;python -m build --wheel --outdir dist&quot;; python -m build --wheel --outdir dist; } 2&gt;&amp;1 | tee .sidecar/ci/build-wheel.txt
+WHEEL=&quot;$(ls dist/tugboat-*.whl | sort | tail -n 1)&quot;
+echo &quot;built ${WHEEL}&quot; | tee -a .sidecar/ci/build-wheel.txt
+{ echo &quot;python -m twine check ${WHEEL}&quot;; python -m twine check &quot;${WHEEL}&quot;; } 2&gt;&amp;1 | tee .sidecar/ci/twine-check.txt
+cat &gt; .sidecar/ci/security-review.md &lt;&lt;&#x27;EOF&#x27;
+# Security Review
+
+No open critical or high findings for proposal-only operation.
+
+Approved as a release candidate for proposal-only use.
+EOF
+python -m venv .sidecar/ci/install-smoke-venv
+{
+  .sidecar/ci/install-smoke-venv/bin/python -m pip install &quot;${WHEEL}&quot;
+  echo &quot;installed tugboat wheel: ${WHEEL}&quot;
+  echo &quot;installed tugboat --version&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat --version
+  echo &quot;installed tugboat doctor&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat doctor --repo .
+  echo &quot;installed tugboat index --repo . --check&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat index --repo . --check
+  echo &quot;installed tugboat harness check --repo .&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat harness check --repo .
+  python - &lt;&lt;&#x27;PY&#x27;
+from pathlib import Path
+repo = Path(&quot;.sidecar/ci/proposal-smoke-repo&quot;)
+repo.mkdir(parents=True, exist_ok=True)
+(repo / &quot;CODEX.md&quot;).write_text(&quot;# Rules\n\nUse tests.\n&quot;, encoding=&quot;utf-8&quot;)
+PY
+  echo &quot;installed tugboat init --repo .sidecar/ci/proposal-smoke-repo&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat init --repo .sidecar/ci/proposal-smoke-repo
+  echo &quot;installed tugboat index --repo .sidecar/ci/proposal-smoke-repo&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat index --repo .sidecar/ci/proposal-smoke-repo
+  echo &quot;installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all&quot;
+  .sidecar/ci/install-smoke-venv/bin/tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all
+  run_dir=&quot;$(find .sidecar/ci/proposal-smoke-repo/.sidecar/runs -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)&quot;
+  for artifact in audit.json candidate.json eval-report.json optimization-summary.json report.md; do
+    test -f &quot;${run_dir}/${artifact}&quot;
+  done
+  echo &quot;proposal smoke artifact: audit.json&quot;
+  echo &quot;proposal smoke artifact: candidate.json&quot;
+  echo &quot;proposal smoke artifact: eval-report.json&quot;
+  echo &quot;proposal smoke artifact: optimization-summary.json&quot;
+  echo &quot;proposal smoke artifact: report.md&quot;
+} 2&gt;&amp;1 | tee .sidecar/ci/install-smoke.txt
+tugboat ops release-manifest --repo . --wheel &quot;${WHEEL}&quot; --commit &lt;sha&gt; --ci-url &lt;url&gt; --approver &lt;name&gt; --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt</code></pre>
+<p>The <code>${WHEEL}</code> variable resolves to the built <code>dist/&lt;wheel&gt;.whl</code>; the retained twine step is the copy-paste-safe form of <code>python -m twine check dist/&lt;wheel&gt;.whl</code>.</p>
+<p>Before tagging:</p>
+<ul>
+<li>Confirm <code>tugboat doctor</code> reports <code>proposal_only</code> and <code>auto_apply: disabled</code>.</li>
+<li>Confirm CI retained the pytest log with total coverage at or above 90%, <code>ci-report.json</code>, security-review evidence, harness output, and release artifact manifest.</li>
+<li>Confirm the built wheel installs in a clean virtual environment and the installed <code>tugboat --version</code>, <code>tugboat doctor</code>, <code>tugboat index --repo . --check</code>, and <code>tugboat harness check --repo .</code> commands run.</li>
+<li>Confirm the installed proposal-loop smoke in <code>.sidecar/ci/proposal-smoke-repo</code> writes <code>.sidecar/runs/&lt;run-id&gt;/audit.json</code>, <code>candidate.json</code>, <code>eval-report.json</code>, <code>optimization-summary.json</code>, and <code>report.md</code>.</li>
+<li>Confirm <code>.sidecar/ops/release-artifact-manifest.json</code> records the wheel hash, retained evidence, commit, CI URL, approver, and security review decision.</li>
+<li>Confirm the security review for the release has no open critical or high findings.</li>
+<li>Confirm generated artifacts under <code>.sidecar/runs</code> contain no raw secrets.</li>
+<li>Record the release version, git commit, CI run URL, and approver.</li>
+</ul>
+<h2 id="provider-backed-approval">Provider-Backed Approval</h2>
+<p>Use <code>--security-review-decision approved_provider_backed</code> only for releases that are allowed to run provider-backed <code>llmff</code> pipelines. The repo policy must explicitly set <code>llmff.allow_network: true</code> and list every approved provider in <code>llmff.allowed_providers</code>.</p>
+<p>Retain at least one provider-backed pipeline evidence artifact with <code>network_required: true</code>, declared <code>providers</code>, and <code>external_calls</code> entries for the model provider. Pass that artifact with the other <code>--evidence</code> files so <code>.sidecar/ops/release-artifact-manifest.json</code> records <code>provider_backed_evidence</code>.</p>
+<h2 id="publish">Publish</h2>
+<p>After the checklist passes and the release owner approves publication:</p>
+<pre><code>git tag -a v&lt;version&gt; &lt;sha&gt; -m &quot;tugboat &lt;version&gt;&quot;
+git push origin v&lt;version&gt;
+python -m twine upload dist/&lt;wheel&gt;.whl</code></pre>
+<h2 id="rollback">Rollback</h2>
+<p>Rollback means returning users to the prior package and keeping the current <code>.sidecar</code> directory readable:</p>
+<pre><code>git tag --delete &lt;bad-tag&gt;
+python -m pip install tugboat==&lt;previous-version&gt;
+tugboat status --repo .</code></pre>
+<p>If the release changed <code>.sidecar</code> data, restore from the backup taken before upgrade and run the recovery verification in <code>docs/ops/sidecar-backup-restore.md</code>.</p>
+<h2 id="evidence-to-retain">Evidence to Retain</h2>
+<p>Retain these release records for at least one year:</p>
+<ul>
+<li>Release checklist result.</li>
+<li>CI run URL and logs.</li>
+<li><code>tugboat doctor</code> output.</li>
+<li><code>tugboat harness check --repo .</code> output.</li>
+<li><code>python -m pytest --cov=src --cov-report=term-missing -q</code> output.</li>
+<li>Installed-wheel smoke output.</li>
+<li>Security review approval.</li>
+<li>Artifact retention/redaction confirmation.</li>
+</ul>
+      </article>
+    </main>
+  </body>
+</html>

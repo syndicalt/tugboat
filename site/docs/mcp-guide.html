@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCP Guide — Tugboat Docs</title>
+    <meta name="description" content="Read-only agent integration surface." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="tugboat-mcp-guide">Tugboat MCP Guide</h1>
+<h2 id="transport">Transport</h2>
+<p>For read-only agent attachment, bind the stdio server to the current repo:</p>
+<pre><code>tugboat mcp stdio --repo . --read-only</code></pre>
+<p>In this profile Tugboat injects the bound repo for read tool calls, rejects repo overrides, and does not advertise write-intent tools. MCP is a local-only adapter surface. It does not replace the CLI and must obey the repo allowlist and per-tool policy.</p>
+<p>Unbound stdio remains available for clients that pass a <code>repo</code> argument with each tool call:</p>
+<pre><code>tugboat mcp stdio</code></pre>
+<h2 id="read-tools">Read Tools</h2>
+<p>Read tools include <code>tugboat_status</code>, <code>tugboat_auto_update_status</code>, <code>tugboat_instruction_graph</code>, <code>tugboat_harness_findings</code>, <code>tugboat_harness_health</code>, <code>tugboat_latest_failed_gates</code>, <code>tugboat_latest_runs</code>, <code>tugboat_recent_decisions</code>, <code>tugboat_run_report</code>, <code>tugboat_candidate</code>, and <code>tugboat_decision_trace</code>.</p>
+<p>Responses return summaries and artifact references, not raw prompt or model payloads. <code>tugboat_decision_trace</code> writes a local <code>decision-trace.json</code> artifact and returns its repo-relative path and hash. <code>tugboat_auto_update_status</code> reports the current auto-apply enablement state, kill-switch state, paused lanes, daemon queue summary, active rollback incident watch, and lane counters derived from append-only audit events. Active rollback watch is exposed as <code>incident_active</code> plus <code>active_incidents</code> entries with candidate id, failure kind, incident artifact path, and artifact validity/status. A later <code>rollback.applied</code> event for the same candidate clears the active incident. Pause-control decisions are exposed as paused lane activity instead of rejected activity, which keeps MCP consumers from treating operator pauses as policy failures. <code>tugboat_recent_decisions</code> reports recent review decisions with redacted actor and reason summaries, candidate metadata, latest eval status, and artifact references. <code>tugboat_harness_health</code> returns a read-only, sanitized harness report projection with knowledge-map links, doc health counts, doc-gardening tasks, recurring failure gaps, and token-efficiency metrics. Token metrics include <code>instruction_corpus_estimated_tokens</code>, <code>active_context_estimated_tokens</code>, <code>retrieval_pack_estimated_tokens</code>, <code>retrieval_pack_file_count</code>, <code>duplicate_rule_estimated_tokens</code>, <code>token_budget</code>, and <code>token_budget_violations</code>; instruction-file and duplicate-rule token-budget violations make harness health fail closed, while active-context and retrieval-pack overages remain visible as nonblocking warnings. It does not write <code>.sidecar/harness-report.json</code>. <code>tugboat_latest_failed_gates</code> reports recent failed policy, eval, and auto-apply gate artifacts with reason codes, artifact hashes, and redacted summaries. Malformed gate artifacts are surfaced as malformed, not trusted as pass/fail evidence.</p>
+<h2 id="write-intent-tools">Write-Intent Tools</h2>
+<p>Write-intent tools include <code>tugboat_record_episode</code>, <code>tugboat_request_audit</code>, <code>tugboat_request_proposal</code>, and <code>tugboat_request_eval</code>.</p>
+<p>These tools require an explicit <code>allow</code> entry in <code>mcp.tool_policy</code> before they can run. <code>tugboat_record_episode</code> stores episode artifacts under <code>.sidecar/mcp/episodes</code>; the request tools create queued request artifacts under <code>.sidecar/mcp/requests</code>. None of these tools directly mutate instruction files.</p>
+<h2 id="security-policy">Security Policy</h2>
+<p>Configure a repo allowlist and per-tool policy in <code>.sidecar/policy.yaml</code>. A repo allowlist is mandatory for all MCP tools, including bound read-only stdio. Read tools may run with no per-tool entry unless denied; write-intent tools require explicit <code>allow</code>. The direct apply, rollback, policy change, provider credential management, and daemon control actions are not exposed through MCP tools.</p>
+      </article>
+    </main>
+  </body>
+</html>
