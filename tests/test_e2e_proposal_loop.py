@@ -509,6 +509,163 @@ def test_eval_missing_candidate_artifact_returns_clear_error_without_traceback(
     assert "Traceback" not in output
 
 
+def _write_report_candidate_artifacts(run_dir: Path) -> None:
+    diff = ""
+    (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
+    (run_dir / "candidate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "audit_id": 1,
+                "candidate_id": "candidate-1",
+                "base_file": "CODEX.md",
+                "base_hash": "abc",
+                "diff_hash": "e3b0c44298fc1c149afbf4c8996fb924"
+                "27ae41e4649b934ca495991b7852b855",
+                "risk_class": "low",
+                "rationale": "Test candidate.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_report_malformed_candidate_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text("{}\n", encoding="utf-8")
+    (run_dir / "candidate.diff").write_text("", encoding="utf-8")
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}),
+        encoding="utf-8",
+    )
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: candidate.json missing required field:" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_missing_policy_gate_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    _write_report_candidate_artifacts(run_dir)
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: missing artifact: policy-gate.json" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_policy_gate_missing_field_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    _write_report_candidate_artifacts(run_dir)
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True}),
+        encoding="utf-8",
+    )
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: policy-gate.json missing required field: reasons" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_malformed_eval_report_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    _write_report_candidate_artifacts(run_dir)
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}),
+        encoding="utf-8",
+    )
+    (run_dir / "eval-report.json").write_text("[]\n", encoding="utf-8")
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: eval report must be a JSON object" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_non_object_candidate_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text("[]\n", encoding="utf-8")
+    (run_dir / "candidate.diff").write_text("", encoding="utf-8")
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps({"schema_version": 1, "allowed": True, "reasons": []}),
+        encoding="utf-8",
+    )
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: candidate.json must be a JSON object" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_non_object_policy_gate_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    _write_report_candidate_artifacts(run_dir)
+    (run_dir / "policy-gate.json").write_text("[]\n", encoding="utf-8")
+
+    assert main(["report", "--repo", str(repo), "--run", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: policy-gate.json must be a JSON object" in output
+    assert "Traceback" not in output
+    assert not (run_dir / "report.md").exists()
+
+
+def test_report_latest_without_runs_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert main(["report", "--repo", str(repo), "--run", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    assert "report blocked: no tugboat run directories exist" in output
+    assert "Traceback" not in output
+
+
 def _write_fake_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3

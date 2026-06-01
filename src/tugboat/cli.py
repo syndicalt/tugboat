@@ -1220,16 +1220,51 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "report":
         repo = Path(args.repo)
-        run_dir = latest_run_dir(repo) if args.run == "latest" else runs_dir(repo) / args.run
-        candidate = _candidate_from_artifacts(run_dir)
-        decision = _decision_from_artifact(run_dir)
-        report_path = write_report(
-            repo,
-            run_dir.name,
-            candidate=candidate,
-            decision=decision,
-            eval_report_path=run_dir / "eval-report.json",
-        )
+        try:
+            run_dir = latest_run_dir(repo) if args.run == "latest" else runs_dir(repo) / args.run
+            candidate = _candidate_from_artifacts(run_dir)
+        except FileNotFoundError as error:
+            if error.filename:
+                print(f"report blocked: missing artifact: {Path(error.filename).name}")
+            else:
+                print(f"report blocked: {error}")
+            return 1
+        except ArtifactValidationError as error:
+            print(f"report blocked: {error}")
+            return 1
+        except KeyError as error:
+            print(f"report blocked: candidate.json missing required field: {error.args[0]}")
+            return 1
+        except ValueError as error:
+            print(f"report blocked: candidate.json invalid: {error}")
+            return 1
+        try:
+            decision = _decision_from_artifact(run_dir)
+        except FileNotFoundError as error:
+            print(f"report blocked: missing artifact: {Path(error.filename).name}")
+            return 1
+        except ArtifactValidationError as error:
+            print(f"report blocked: {error}")
+            return 1
+        except KeyError as error:
+            print(f"report blocked: policy-gate.json missing required field: {error.args[0]}")
+            return 1
+        try:
+            report_path = write_report(
+                repo,
+                run_dir.name,
+                candidate=candidate,
+                decision=decision,
+                eval_report_path=run_dir / "eval-report.json",
+            )
+        except (
+            ArtifactValidationError,
+            FileNotFoundError,
+            SecretScanError,
+            ValueError,
+        ) as error:
+            print(f"report blocked: {error}")
+            return 1
         print(f"report: {report_path}")
         return 0
 
@@ -2505,7 +2540,7 @@ def _run_acceptance_summary(
 
 
 def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
-    metadata = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    metadata = load_json_object_artifact(run_dir / "candidate.json", "candidate.json")
     diff = (run_dir / "candidate.diff").read_text(encoding="utf-8")
     if hashlib.sha256(diff.encode("utf-8")).hexdigest() != str(metadata["diff_hash"]):
         raise ValueError("candidate diff hash does not match candidate.diff")
@@ -2535,7 +2570,7 @@ def _candidate_from_artifacts(run_dir: Path) -> CandidatePatch:
 def _decision_from_artifact(run_dir: Path):
     from tugboat.policy.gate import PolicyDecision
 
-    payload = json.loads((run_dir / "policy-gate.json").read_text(encoding="utf-8"))
+    payload = load_json_object_artifact(run_dir / "policy-gate.json", "policy-gate.json")
     return PolicyDecision(bool(payload["allowed"]), tuple(payload["reasons"]))
 
 
