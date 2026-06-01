@@ -138,6 +138,46 @@ DOC_CONTRACTS = {
             "No hosted web UI",
         ],
     },
+    "CHANGELOG.md": {
+        "sections": [
+            "## Unreleased",
+            "## 1.0.0",
+            "## 0.1.0",
+        ],
+        "required_text": [
+            "docs/releases/1.0.0-draft.md",
+            "docs/releases/0.1.0.md",
+            "proposal-only by default",
+            "read-only kill switch",
+            "migration guide",
+            "compatibility policy",
+            "known limitations",
+        ],
+    },
+    "docs/releases/1.0.0-draft.md": {
+        "sections": [
+            "## Summary",
+            "## User-Visible Changes Since 0.1.0",
+            "## Compatibility And Migration",
+            "## Verification Checklist",
+            "## Known Limitations",
+            "## GitHub Release Draft",
+        ],
+        "required_text": [
+            "1.0.0",
+            "0.1.0",
+            "docs/migration-v1.md",
+            "docs/compatibility-policy.md",
+            "python -m pytest --cov=src --cov-report=term-missing -q",
+            "tugboat ci --repo .",
+            "python -m build --wheel",
+            "python -m twine check dist/<wheel>.whl",
+            "No public network daemon",
+            "No hosted web UI",
+            "proposal-only by default",
+            "auto-apply remains opt-in",
+        ],
+    },
     "docs/ops/release-checklist.md": {
         "sections": [
             "## Purpose",
