@@ -713,6 +713,74 @@ def test_run_daemon_once_fails_malformed_trace_audit_payload_without_crashing(
         assert queue.get_job(job.id).state is JobState.FAILED  # type: ignore[union-attr]
 
 
+def test_run_daemon_once_fails_pipeline_exception_without_crashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="proposal", payload={"audit_id": "latest"}, now=_at(0))
+
+    def interrupted_pipeline(repo: Path, audit_id: str):
+        raise RuntimeError("interrupted llmff run sk-" + "a" * 20)
+
+    monkeypatch.setattr(
+        "tugboat.daemon.service.run_propose_pipeline",
+        interrupted_pipeline,
+    )
+
+    result = run_daemon_once(
+        tmp_path,
+        DaemonRunConfig(
+            worker_id="worker-a",
+            lease_duration=timedelta(seconds=30),
+            now=_at(10),
+        ),
+    )
+
+    assert result == {
+        "processed": True,
+        "job_id": job.id,
+        "final_state": "failed",
+        "recovered_jobs": [],
+    }
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        failed = queue.get_job(job.id)
+    assert failed is not None
+    assert failed.state is JobState.FAILED
+    assert failed.lease_owner is None
+    assert failed.lease_expires_at is None
+
+    with closing(sqlite3.connect(tmp_path / ".sidecar" / "db.sqlite")) as connection:
+        transition_states = connection.execute(
+            """
+            SELECT json_extract(payload_json, '$.state')
+            FROM audit_events
+            WHERE event_type = 'daemon_job.state_changed'
+            ORDER BY sequence
+            """
+        ).fetchall()
+        persisted_payloads = "\n".join(
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT payload_json
+                FROM audit_events
+                UNION ALL
+                SELECT payload_json
+                FROM daemon_jobs
+                """
+            ).fetchall()
+        )
+
+    assert [state for (state,) in transition_states] == [
+        "inspecting",
+        "running",
+        "failed",
+    ]
+    assert "interrupted llmff run" not in persisted_payloads
+    assert "sk-" + "a" * 20 not in persisted_payloads
+
+
 def test_run_daemon_once_rejects_trace_audit_path_outside_repo_before_artifacts(
     tmp_path: Path,
 ):

@@ -298,6 +298,8 @@ def process_daemon_job(repo: Path, queue: DaemonQueue, job_id: int, *, now: date
             return _fail_daemon_job(repo, queue, running.id, now=now)
     except DaemonJobPayloadError:
         return _fail_daemon_job(repo, queue, running.id, now=now)
+    except Exception:
+        return _fail_daemon_job(repo, queue, running.id, now=now)
 
     if running.kind == "eval":
         evaluating = queue.transition(running.id, JobState.EVALUATING, now=now)
