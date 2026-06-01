@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daemon Guide — Tugboat Docs</title>
+    <meta name="description" content="Local daemon operation and controls." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="daemon-guide">Daemon Guide</h1>
+<h2 id="purpose">Purpose</h2>
+<p>The daemon is a local sidecar worker for queued Tugboat jobs. It is not a public service and does not grant extra authority. It uses the same service layer, policy gates, VCS adapter, audit ledger, and read-only kill switch as the CLI.</p>
+<h2 id="status">Status</h2>
+<p>Inspect daemon state:</p>
+<pre><code>tugboat daemon status --repo .</code></pre>
+<p>The command prints <code>.sidecar/daemon.sqlite</code> queue state, whether <code>.sidecar/read-only.kill</code> is enabled, queued and leased job counts, and any expired lease summary. Status is read-only: it does not recover, requeue, fail, acquire, or transition jobs.</p>
+<h2 id="read-only-kill-switch">Read-Only Kill Switch</h2>
+<p>Enable read-only mode before incidents, restores, retention review, or policy investigations:</p>
+<pre><code>tugboat daemon read-only --repo . --enable
+tugboat daemon read-only --repo . --status</code></pre>
+<p>Disable it only after review:</p>
+<pre><code>tugboat daemon read-only --repo . --disable</code></pre>
+<p>The kill switch blocks direct write paths such as apply, auto-apply, rollback execution, retention deletion, migration apply, restore execution, and harness cleanup.</p>
+<h2 id="run-one-job">Run One Job</h2>
+<p>Process a single queued job:</p>
+<pre><code>tugboat daemon run-once --repo . --worker-id tugboat-daemon --lease-seconds 300</code></pre>
+<p><code>run-once</code> recovers stale leases, acquires one eligible job, records audited state transitions, and stops.</p>
+<h2 id="cycle-and-watch-traces">Cycle And Watch Traces</h2>
+<p>Run a bounded cycle that discovers trace files and processes jobs:</p>
+<pre><code>tugboat daemon cycle --repo . \
+  --trace-dir traces \
+  --max-jobs 1 \
+  --concurrency 1 \
+  --cycles 1</code></pre>
+<p>For repeated local cycles:</p>
+<pre><code>tugboat daemon cycle --repo . --trace-dir traces --cycles 5 --interval-seconds 2</code></pre>
+<p>Use rate limits for noisy trace directories:</p>
+<pre><code>tugboat daemon cycle --repo . \
+  --trace-dir traces \
+  --rate-limit-window-seconds 300 \
+  --rate-limit-max-jobs 3</code></pre>
+<h2 id="local-socket">Local Socket</h2>
+<p>Serve a Unix socket inside <code>.sidecar</code>:</p>
+<pre><code>tugboat daemon serve --repo . --socket .sidecar/daemon.sock --max-requests 10</code></pre>
+<p>Socket paths must resolve inside the repo sidecar. Public listeners are rejected; TCP bind addresses must be local-only when address validation is used.</p>
+<h2 id="worktree-profile">Worktree Profile</h2>
+<p>Record worktree-local app boot metadata and local observability references:</p>
+<pre><code>tugboat daemon profile --repo . \
+  --app-boot-json &#x27;{&quot;command&quot;:&quot;python -m app&quot;,&quot;healthcheck&quot;:&quot;http://127.0.0.1:8000/health&quot;}&#x27; \
+  --observability-ref http://127.0.0.1:8000/health</code></pre>
+<p>Observability refs must be local-only.</p>
+<h2 id="user-services">User Services</h2>
+<p>Run the daemon as a non-root user service only after the repo has passed <code>tugboat doctor --repo .</code>, <code>tugboat harness check --repo .</code>, and an operator has reviewed <code>.sidecar/policy.yaml</code>. User services should run bounded <code>daemon cycle</code> commands, not public listeners, and should rely on <code>.sidecar/read-only.kill</code> for emergency write-path shutdown.</p>
+<p>Linux <code>systemd --user</code> example:</p>
+<pre><code>[Unit]
+Description=Tugboat local sidecar cycle
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/absolute/path/to/repo
+ExecStart=/usr/bin/env tugboat daemon cycle --repo /absolute/path/to/repo --trace-dir traces --cycles 1 --interval-seconds 60 --max-jobs 1 --concurrency 1
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target</code></pre>
+<p>Install and inspect it as the repository owner:</p>
+<pre><code>mkdir -p ~/.config/systemd/user
+systemctl --user daemon-reload
+systemctl --user enable --now tugboat.service
+systemctl --user status tugboat.service
+journalctl --user -u tugboat.service</code></pre>
+<p>macOS LaunchAgent example:</p>
+<pre><code>&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;
+&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;
+&lt;plist version=&quot;1.0&quot;&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;
+  &lt;string&gt;com.example.tugboat&lt;/string&gt;
+  &lt;key&gt;WorkingDirectory&lt;/key&gt;
+  &lt;string&gt;/absolute/path/to/repo&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;
+  &lt;array&gt;
+    &lt;string&gt;/usr/bin/env&lt;/string&gt;
+    &lt;string&gt;tugboat&lt;/string&gt;
+    &lt;string&gt;daemon&lt;/string&gt;
+    &lt;string&gt;cycle&lt;/string&gt;
+    &lt;string&gt;--repo&lt;/string&gt;
+    &lt;string&gt;/absolute/path/to/repo&lt;/string&gt;
+    &lt;string&gt;--trace-dir&lt;/string&gt;
+    &lt;string&gt;traces&lt;/string&gt;
+    &lt;string&gt;--cycles&lt;/string&gt;
+    &lt;string&gt;1&lt;/string&gt;
+    &lt;string&gt;--interval-seconds&lt;/string&gt;
+    &lt;string&gt;60&lt;/string&gt;
+    &lt;string&gt;--max-jobs&lt;/string&gt;
+    &lt;string&gt;1&lt;/string&gt;
+    &lt;string&gt;--concurrency&lt;/string&gt;
+    &lt;string&gt;1&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;
+  &lt;true/&gt;
+  &lt;key&gt;KeepAlive&lt;/key&gt;
+  &lt;false/&gt;
+  &lt;key&gt;StartInterval&lt;/key&gt;
+  &lt;integer&gt;60&lt;/integer&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;</code></pre>
+<p>Load and inspect it as the logged-in user:</p>
+<pre><code>launchctl bootstrap &quot;gui/$(id -u)&quot; ~/Library/LaunchAgents/com.example.tugboat.plist
+launchctl print &quot;gui/$(id -u)/com.example.tugboat&quot;
+launchctl bootout &quot;gui/$(id -u)/com.example.tugboat&quot;</code></pre>
+<p>For either service manager, keep stdout/stderr logs local, keep the working directory repo-specific, and do not run <code>daemon serve</code> as a public listener. To stop mutation during an incident, create the read-only kill switch with <code>tugboat daemon read-only --repo . --enable</code> and confirm <code>.sidecar/read-only.kill</code> exists before restarting the service. Use <code>tugboat daemon status --repo .</code> and one manual <code>tugboat daemon run-once --repo .</code> after review to recover stale leases.</p>
+<h2 id="recovery">Recovery</h2>
+<p>If a worker crashes, <code>daemon status</code> reports <code>stuck_job_count</code>, <code>oldest_stuck_job_id</code>, and <code>oldest_stuck_lease_expires_at</code> for expired active leases. The next <code>run-once</code> or <code>cycle</code> recovers expired leases. Resume jobs must carry checkpoint metadata whose manifest hash still matches the current manifest. Mismatched checkpoints fail closed.</p>
+<p>Keep <code>.sidecar/daemon.sqlite</code> and <code>.sidecar/db.sqlite</code> together during backup and restore so queue state and audit state remain comparable.</p>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quickstart — Tugboat Docs</title>
+    <meta name="description" content="Run Tugboat in proposal-only mode." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="tugboat-quickstart">Tugboat Quickstart</h1>
+<h2 id="install">Install</h2>
+<p>Install the current release into the repository environment, then verify the CLI:</p>
+<pre><code>python -m pip install tugboat</code></pre>
+<p>For a local wheel release, install the retained wheel artifact instead:</p>
+<pre><code>python -m pip install dist/tugboat-1.0.0-py3-none-any.whl</code></pre>
+<p>Verify the installed command:</p>
+<pre><code>tugboat doctor</code></pre>
+<p>The default posture should be proposal-only with auto-apply disabled.</p>
+<h2 id="initialize">Initialize</h2>
+<p>Bootstrap proposal-only local policy, then index the current instruction corpus:</p>
+<pre><code>tugboat init
+tugboat index --repo .</code></pre>
+<p>The generated policy uses Tugboat&#x27;s shipped local fixture backend for <code>llmff</code>, with <code>allow_network: false</code> and no <code>allowed_providers</code>, so the proposal loop works without provider credentials.</p>
+<p>For monorepos, review <code>.sidecar/policy.yaml</code> before indexing. Add <code>instruction_files[].scope_root</code> entries for package or service instruction roots, such as <code>services/api</code> and <code>services/web</code>, so <code>tugboat index --repo .</code> observes the intended scoped instruction corpus.</p>
+<p>For CI or dry-run adoption, use:</p>
+<pre><code>tugboat index --repo . --check</code></pre>
+<h2 id="solo-local">Solo Local</h2>
+<p>Use the local path when you are evaluating Tugboat in one repository without provider credentials:</p>
+<pre><code>tugboat doctor
+tugboat init
+tugboat index --repo .
+tugboat optimize --repo . --trace traces/example.jsonl --suite all</code></pre>
+<p>Inspect <code>.sidecar/runs/&lt;run-id&gt;/report.md</code> and <code>candidate.diff</code> before deciding whether to apply anything. The default policy remains proposal-only.</p>
+<h2 id="team-proposal-only">Team Proposal-Only</h2>
+<p>Use the team path when candidates need review through normal branch or pull-request workflow:</p>
+<pre><code>tugboat optimize --repo . --trace traces/example.jsonl --suite all
+tugboat report --repo . --run latest
+tugboat inspect-decision --repo . --decision latest
+tugboat apply --repo . --candidate latest --mode pr --human-review --review-actor &lt;name&gt;</code></pre>
+<p><code>apply --mode pr</code> is VCS-gated and review-oriented. Keep humans in the approval path, inspect <code>optimization-summary.json</code>, and reject candidates that weaken safety, broaden authority, or lack evidence.</p>
+<h2 id="ci-adoption">CI Adoption</h2>
+<p>Use CI to prove the repo remains ready for proposal-only Tugboat workflows:</p>
+<pre><code>tugboat doctor
+tugboat ci --repo .
+tugboat index --repo . --check
+tugboat harness check --repo .
+python -m pytest --cov=src --cov-report=term-missing -q</code></pre>
+<p>CI must not run apply, auto-apply, rollback --execute, or mutation modes. Retain <code>.sidecar/ci/ci-report.json</code>, harness output, and any generated review artifacts for human inspection.</p>
+<h2 id="proposal-loop">Proposal Loop</h2>
+<p>Run the governed local optimization loop against a saved trace bundle:</p>
+<pre><code>tugboat optimize --repo . --trace traces/example.jsonl --suite all</code></pre>
+<p>Tugboat auto-detects generic JSONL, Codex JSONL, Claude transcript JSON/JSONL, MCP session JSONL, and CI failure JSON traces. Use <code>--trace-format</code> only when you need to override detection.</p>
+<p>For a training minibatch, pass multiple trace files and record any held-out or unseen validation metadata explicitly:</p>
+<pre><code>tugboat optimize --repo . --trace traces/failure.jsonl --train-trace traces/success.jsonl --suite held-out --held-out-episode held-out:no-regression --unseen-suite governance</code></pre>
+<p>This runs audit, proposal, held-out evaluation, and the final acceptance gate. It writes <code>optimization-summary.json</code> next to the candidate and eval artifacts.</p>
+<p>For debugging or CI decomposition, the same loop can be run step by step:</p>
+<pre><code>tugboat audit --repo . --trace traces/example.jsonl
+tugboat propose --repo . --audit latest
+tugboat eval --repo . --candidate latest --suite all
+tugboat report --repo . --run latest</code></pre>
+<p>This is designed to work under 15 minutes for an existing repo and does not require provider credentials in proposal-only mode after <code>tugboat init</code>; the default local fixture backend emits the same file-backed manifest outputs used by the proposal loop. <code>--mock-llmff-inspect</code> is audit-only smoke-test mode and cannot feed <code>propose</code>.</p>
+<p>Live provider smoke checks are opt-in. Without opt-in, the suite records a skipped live-provider report instead of making a provider call:</p>
+<pre><code>tugboat eval --repo . --candidate latest --suite provider-smoke</code></pre>
+<p>To enable the smoke preflight for a repo, add explicit policy and provide the local smoke command:</p>
+<pre><code>llmff:
+  allowed_providers:
+    - openai
+
+provider_smoke:
+  enabled: true
+  provider: openai
+  command: &quot;python scripts/provider_smoke.py&quot;</code></pre>
+<p><code>llmff.allowed_providers</code> is required for provider-backed manifests; keep it empty or omitted for credential-free local and fixture-backed runs.</p>
+<p>For one-off local checks, <code>TUGBOAT_PROVIDER_SMOKE_PROVIDER</code> and <code>TUGBOAT_PROVIDER_SMOKE_COMMAND</code> can fill in local values after repo policy enables provider smoke. Environment variables do not authorize provider-backed runs by themselves.</p>
+<h2 id="next-checks">Next Checks</h2>
+<p>Before applying any generated diff, run:</p>
+<pre><code>tugboat harness check --repo .
+python -m pytest -q</code></pre>
+<p>Review <code>.sidecar/runs/&lt;run-id&gt;/candidate.diff</code>, <code>eval-report.json</code>, <code>optimization-summary.json</code>, and <code>report.md</code>. When the candidate rewrites <code>SKILL.md</code>, inspect <code>eval-report.json</code> <code>skill_report</code> before applying; failing trigger, executability, ambiguity, overfit, held-out skill behavior, section, token-footprint, or safety checks should stay in review.</p>
+<p>For the complete command surface, see <a href="cli-reference.html">docs/cli-reference.md</a>. For reviewed mutation workflows, see <a href="apply-rollback.html">docs/apply-rollback.md</a>. For instruction-file structure, see <a href="instruction-best-practices.html">docs/instruction-best-practices.md</a>. For auto-apply, daemon, and troubleshooting operations, see <a href="auto-apply.html">docs/auto-apply.md</a>, <a href="daemon-guide.html">docs/daemon-guide.md</a>, and <a href="troubleshooting.html">docs/troubleshooting.md</a>.</p>
+<h2 id="read-only-mcp">Read-Only MCP</h2>
+<p>After <code>tugboat init --repo .</code>, attach MCP clients with the read-only profile:</p>
+<pre><code>tugboat mcp stdio --repo . --read-only</code></pre>
+<p>This profile exposes read tools such as status, instruction graph, latest runs, harness findings, candidate reports, and decision-trace artifact refs. It does not advertise write-intent tools and rejects repo overrides.</p>
+      </article>
+    </main>
+  </body>
+</html>

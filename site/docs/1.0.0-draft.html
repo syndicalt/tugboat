@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Release Notes — Tugboat Docs</title>
+    <meta name="description" content="Tugboat 1.0.0 release notes." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="tugboat-1-0-0-release-notes">Tugboat 1.0.0 Release Notes</h1>
+<h2 id="summary">Summary</h2>
+<p>Tugboat 1.0.0 is the stable release for local-first, governed agent instruction maintenance. It builds from the 0.1.0 foundation into a documented sidecar teams can use to monitor and improve <code>CODEX.md</code>, <code>AGENTS.md</code>, <code>SKILL.md</code>, runbooks, policies, and eval definitions.</p>
+<p>The release posture remains proposal-only by default. For 1.0.0, auto-apply remains opt-in and limited to narrow Class A lanes with policy, eval, VCS, burn-in, and rollback gates.</p>
+<h2 id="user-visible-changes-since-0-1-0">User-Visible Changes Since 0.1.0</h2>
+<ul>
+<li>Expanded review intelligence with rejected-edit memory, richer decision inspection, candidate comparison, highest-impact summaries, risk explanations, and rollback readiness.</li>
+<li>Hardened proposal provenance so audit, drift, optimizer, proposal, candidate, and reflection evidence refs remain bound to declared audit evidence.</li>
+<li>Expanded daemon operations with local queue recovery, read-only kill switch handling, status visibility, stale lease reporting, local socket constraints, and worktree run profiles.</li>
+<li>Expanded MCP read surfaces while preserving read-first behavior and avoiding direct apply authority.</li>
+<li>Added auto-apply preflight and shadow evidence, lane-level monitoring, pause controls, incident watch, and rollback-aware approval bundles.</li>
+<li>Added token-efficiency and skill-rewrite evaluation surfaces to harness and eval reporting.</li>
+<li>Added v1 migration, compatibility, contribution, issue-template, and security documentation.</li>
+</ul>
+<h2 id="compatibility-and-migration">Compatibility And Migration</h2>
+<p>Read <code>docs/migration-v1.md</code> before upgrading a 0.x repository to 1.0.0. Read <code>docs/compatibility-policy.md</code> before depending on CLI or artifact contracts.</p>
+<p>The supported upgrade posture is:</p>
+<ul>
+<li>back up <code>.sidecar</code>;</li>
+<li>run <code>tugboat ops migrate --repo .</code> before <code>tugboat ops migrate --repo . --apply</code>;</li>
+<li>block older binaries from silently reading newer <code>.sidecar/version.json</code> schemas;</li>
+<li>keep provider-backed <code>llmff</code> paths explicitly policy-gated.</li>
+</ul>
+<h2 id="verification-checklist">Verification Checklist</h2>
+<p>Retain release evidence for the exact release commit:</p>
+<pre><code>tugboat doctor --repo .
+tugboat index --repo . --check
+tugboat harness check --repo .
+tugboat ci --repo .
+python -m pytest --cov=src --cov-report=term-missing -q
+python -m build --wheel
+python -m twine check dist/&lt;wheel&gt;.whl</code></pre>
+<p>Installed-wheel smoke must install the built wheel in a clean virtual environment and run at least <code>tugboat --version</code>, <code>tugboat doctor</code>, <code>tugboat index --repo . --check</code>, and <code>tugboat harness check --repo .</code>.</p>
+<p><code>tugboat ops release-manifest --repo .</code> must retain coverage, build, twine, install-smoke, harness, CI, and security-review evidence.</p>
+<h2 id="known-limitations">Known Limitations</h2>
+<ul>
+<li>No public network daemon.</li>
+<li>No hosted web UI.</li>
+<li>No multi-user team server.</li>
+<li>No MCP path for direct apply.</li>
+<li>No provider credential management through MCP.</li>
+<li>No broad auto-apply beyond narrow Class A policy lanes.</li>
+<li>Provider-backed <code>llmff</code> execution requires explicit <code>llmff.allow_network: true</code> policy and reviewed provider configuration.</li>
+</ul>
+<h2 id="github-release-draft">GitHub Release Draft</h2>
+<p>Title: <code>Tugboat 1.0.0</code></p>
+<p>Body:</p>
+<pre><code>Tugboat 1.0.0 is the stable local sidecar for governed agent instruction maintenance.
+
+Default posture:
+- proposal-only by default
+- local-first operation
+- read-only kill switch for write-path shutdown
+- narrow Class A auto-apply only after explicit policy opt-in
+- VCS-backed apply and rollback
+
+Install:
+\```bash
+python -m pip install tugboat==1.0.0
+\```
+
+Start:
+\```bash
+tugboat doctor --repo .
+tugboat init --repo .
+tugboat index --repo . --check
+tugboat optimize --repo . --trace traces/example.jsonl --suite all
+\```
+
+Migration:
+- Read `docs/migration-v1.md`.
+- Back up `.sidecar`.
+- Run `tugboat ops migrate --repo .` before `tugboat ops migrate --repo . --apply`.
+
+Compatibility:
+- See `docs/compatibility-policy.md`.
+
+Verification:
+- `tugboat ci --repo .`
+- `tugboat harness check --repo .`
+- `python -m pytest --cov=src --cov-report=term-missing -q`
+- wheel build, twine check, installed CLI smoke, and release manifest retained for the release commit
+- verification evidence retained through `.sidecar/ops/release-artifact-manifest.json`
+
+Known limitations:
+- No public network daemon
+- No hosted web UI
+- No broad auto-apply
+- No direct MCP apply path</code></pre>
+      </article>
+    </main>
+  </body>
+</html>

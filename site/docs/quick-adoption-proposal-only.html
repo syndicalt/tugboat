@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Proposal-Only Adoption — Tugboat Docs</title>
+    <meta name="description" content="Team adoption path without credentials." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="quick-adoption-for-proposal-only-mode">Quick Adoption for Proposal-Only Mode</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Use this guide to adopt Tugboat in an existing repository in under 15 minutes without credentials. The goal is a local proposal loop that creates review artifacts but does not mutate instruction files.</p>
+<h2 id="assumptions">Assumptions</h2>
+<ul>
+<li>Python 3.11 or newer is available.</li>
+<li>Tugboat is installed from the source tree or package.</li>
+<li>The repository has at least one instruction or harness document, such as <code>AGENTS.md</code>, <code>CODEX.md</code>, <code>CLAUDE.md</code>, <code>SKILL.md</code>, or <code>docs/runbook.md</code>.</li>
+<li>Monorepos should map service or package instruction roots with <code>instruction_files[].scope_root</code> before indexing.</li>
+<li>The default policy stays <code>proposal_only</code>.</li>
+<li>No live provider credentials are configured or required.</li>
+</ul>
+<h2 id="fifteen-minute-adoption">Fifteen-Minute Adoption</h2>
+<p>From the target repository root:</p>
+<pre><code>tugboat doctor
+tugboat init --repo .
+tugboat index --repo .
+tugboat harness check --repo .</code></pre>
+<p>If <code>tugboat doctor</code> does not report <code>proposal_only</code> and disabled auto-apply, stop and review policy before continuing. <code>tugboat init --repo .</code> refuses to overwrite an existing <code>.sidecar/policy.yaml</code>; review any existing policy before continuing.</p>
+<h2 id="no-credentials-proposal-loop">No-Credentials Proposal Loop</h2>
+<p>Create a minimal trace fixture:</p>
+<pre><code>mkdir -p traces
+printf &#x27;{&quot;event&quot;:&quot;user_correction&quot;,&quot;message&quot;:&quot;The runbook missed the rollback command.&quot;}\n&#x27; &gt; traces/example.jsonl</code></pre>
+<p>Run the proposal loop without credentials. <code>tugboat init</code> writes this local fixture-backed <code>llmff</code> configuration by default:</p>
+<pre><code>llmff:
+  binary: python -m tugboat.llmff.fixture_backend
+  require_inspect: true
+  allow_network: false</code></pre>
+<pre><code>tugboat optimize --repo . --trace traces/example.jsonl --suite all
+tugboat report --repo . --run latest</code></pre>
+<p>Review the generated <code>.sidecar/runs/&lt;run-id&gt;/candidate.diff</code> before applying anything manually. Proposal-only adoption is successful when the team can inspect <code>audit.json</code>, <code>candidate.json</code>, <code>eval-report.json</code>, <code>optimization-summary.json</code>, and <code>report.md</code>, then reject or copy changes by hand. Do not use <code>--mock-llmff-inspect</code> for this loop; mock audit output is intentionally rejected by <code>propose</code>.</p>
+<h2 id="stop-criteria">Stop Criteria</h2>
+<p>Stop adoption and open a review if:</p>
+<ul>
+<li><code>tugboat doctor</code> does not report <code>proposal_only</code>.</li>
+<li>Tugboat asks for provider credentials.</li>
+<li>A candidate edits secrets, approvals, sandboxing, network, deployment, memory, provider routing, or policy authority.</li>
+<li><code>.sidecar/runs</code> contains unredacted credentials or private trace data.</li>
+<li><code>tugboat harness check --repo .</code> reports missing local knowledge-map references.</li>
+</ul>
+      </article>
+    </main>
+  </body>
+</html>

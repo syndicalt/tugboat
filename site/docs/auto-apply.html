@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auto-Apply — Tugboat Docs</title>
+    <meta name="description" content="Policy gates, shadow mode, and incident handling." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="auto-apply-guide">Auto-Apply Guide</h1>
+<h2 id="default-posture">Default Posture</h2>
+<p>Auto-apply defaults off. Proposal-only mode is the release posture:</p>
+<pre><code>tugboat doctor
+tugboat status --repo .</code></pre>
+<p>Do not enable auto-apply for policy, authority, provider routing, secrets, deployment, network, sandboxing, memory behavior, or approval changes.</p>
+<h2 id="eligibility">Eligibility</h2>
+<p>Auto-apply is only for narrow Class A changes in an enabled policy lane after a burn-in period. A candidate must have:</p>
+<ul>
+<li>explicit repo policy enabling auto-apply;</li>
+<li>matching policy version confirmation;</li>
+<li>at least the configured lane burn-in days;</li>
+<li>at least the production observation period, defaulting to 30 days;</li>
+<li>low rejection rate;</li>
+<li>low rollback rate;</li>
+<li>held-out eval pass;</li>
+<li>governance pass;</li>
+<li>evaluated instruction token delta within policy limits;</li>
+<li>VCS-backed commit path;</li>
+<li>one-command rollback;</li>
+<li>allowed change category;</li>
+<li>no protected policy-domain escalation.</li>
+</ul>
+<p>Default lane thresholds are intentionally usable but still bounded:</p>
+<ul>
+<li><code>docs_hygiene</code>: 3 burn-in days, 20% maximum rejection rate, 5% maximum rollback rate, 50 changed lines, and 50 added instruction tokens.</li>
+<li><code>skill_improvement</code>: 7 burn-in days, 15% maximum rejection rate, 3% maximum rollback rate, 30 changed lines, and 30 added instruction tokens.</li>
+</ul>
+<p>The lane burn-in threshold is not the same as production observation. Final auto-apply remains blocked until <code>auto_apply.production_observation_days</code> is satisfied. The default is 30 days of operator-reviewed proposal-only observation. A shorter lane threshold can be used only when <code>.sidecar/policy.yaml</code> records both <code>auto_apply.narrower_observation_risk_decision</code> and <code>auto_apply.observation_rollback_owner</code>; otherwise Tugboat fails closed with <code>production_observation_period_too_short</code> or <code>narrower_observation_risk_decision_required</code>.</p>
+<p>Repos can tighten these values in <code>.sidecar/policy.yaml</code>; runtime auto-apply commands cannot override them. The global <code>auto_apply.max_instruction_token_delta</code> is an absolute cap, and each lane can set an equal or stricter <code>max_instruction_token_delta</code>. Auto-apply fails closed with <code>instruction_token_delta_missing</code> if the eval artifact does not include <code>metrics.instruction_token_delta</code>, and with <code>max_instruction_token_delta_exceeded</code> if the evaluated candidate grows the instruction corpus beyond policy.</p>
+<p>For <code>skill_improvement</code>, <code>eval-report.json.skill_report.passed</code> must be true and the report must include held-out skill behavior evidence: <code>metrics.skill_held_out_behavior_cases &gt; 0</code>, <code>metrics.skill_held_out_behavior_failures == 0</code>, and <code>skill_report.metrics.held_out_behavior_score &gt;= 1.0</code>. Missing or failing held-out skill behavior evidence blocks with <code>skill_held_out_behavior_failed</code>. Skill rewrites that remove explicit non-goals or examples or fixtures from an existing <code>SKILL.md</code> fail the skill report and remain review-only.</p>
+<p>Allowed examples include typo fixes, broken internal links, formatting normalization, duplicate sentence removal, and verified stale command references.</p>
+<h2 id="pause-controls">Pause Controls</h2>
+<p>Pause controls are policy-owned. Do not use runtime flags to weaken or bypass them:</p>
+<pre><code>auto_apply:
+  paused_repositories:
+    - /absolute/path/to/repo
+  paused_lanes:
+    - docs_hygiene
+  paused_categories:
+    - typo_fix</code></pre>
+<p>Paused repositories, lanes, and categories block otherwise eligible candidates with explicit reasons in preflight reports and auto-apply decision events. The operations observability report treats explicitly paused lanes like disabled lanes when reporting staged-but-unapplied candidates.</p>
+<p>Active rollback incidents are a hard lifecycle blocker, independent of pause policy. Tugboat blocks auto-apply when it finds active incident evidence such as a <code>rollback.failed</code> audit event for an unresolved failed rollback. Preflight, shadow, and final auto-apply reports include <code>incident_active</code> and <code>active_incidents</code> under <code>checks.auto_apply</code>; missing or invalid referenced incident artifacts remain visible and fail closed until a later <code>rollback.applied</code> event for the same candidate supersedes the failed rollback.</p>
+<h2 id="dry-check">Dry Check</h2>
+<p>Run without confirmation first:</p>
+<pre><code>tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt;</code></pre>
+<p>The expected safe result for an unconfirmed or ineligible candidate is <code>auto-apply blocked:</code> with reasons in the candidate run artifacts.</p>
+<p>For a no-mutation eligibility report, use preflight:</p>
+<pre><code>tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; --preflight</code></pre>
+<p>Preflight writes <code>.sidecar/runs/&lt;run-id&gt;/auto-apply-preflight.json</code> and prints its path. It exits <code>0</code> when the report is produced, whether the candidate is eligible or ineligible. It does not apply patches, create branches, commit, write <code>apply-plan.json</code>, write <code>auto-apply-approval.json</code>, or append auto-apply decision events. The report includes policy, stored gate, eval, VCS, lane, readiness, and reasons so operators can see exactly why a candidate would or would not apply.</p>
+<p>Passing <code>--confirm-auto-apply --auto-apply-policy-version &lt;version&gt;</code> to preflight lets the report model confirmed execution and include a pending approval bundle for an otherwise eligible candidate. It still does not mutate the repository. The read-only kill switch blocks preflight because preflight writes an artifact.</p>
+<h2 id="shadow-mode">Shadow Mode</h2>
+<p>Use shadow mode for audited no-mutation canary telemetry:</p>
+<pre><code>tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; \
+  --shadow \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1</code></pre>
+<p>Shadow mode evaluates the same auto-apply gates, writes <code>.sidecar/runs/&lt;run-id&gt;/auto-apply-shadow.json</code>, and appends a small <code>auto_apply.shadowed</code> audit event with candidate id, run id, actor, lane, eligibility, reasons, and report path. It does not apply patches, create branches, commit, write <code>apply-plan.json</code>, write <code>auto-apply-approval.json</code>, or append <code>auto_apply.decided</code>. Operations observability counts shadowed candidates separately from eligible, staged, applied, and rolled-back candidates. The read-only kill switch blocks shadow mode because it writes an artifact and audit event.</p>
+<p>Confirmed auto-apply mutation requires a current passing shadow report for the same run and candidate. The shadow report must include <code>source_artifacts</code> for <code>candidate_diff</code>, <code>candidate_metadata</code>, <code>candidate_preview_manifest</code>, <code>candidate_preview_file</code>, <code>eval_report</code>, <code>policy</code>, and <code>policy_gate</code>, each with the current artifact path and SHA-256 digest. If <code>auto-apply-shadow.json</code> is missing, ineligible, malformed, stale, or no longer matches the candidate, eval report, policy, or policy gate artifact hashes, final commit-mode auto-apply blocks before branch creation or patch application with <code>shadow_evidence_required</code> or <code>shadow_evidence_stale</code>.</p>
+<p>Final approval is also bound to the shadow rehearsal. <code>auto-apply-approval.json</code> must match the shadow <code>approval_bundle</code> after the single expected transition from <code>vcs.commit_sha: pending</code> to the committed SHA. If the shadow approval actor, lane, rollback command, policy version, repository, branch, or readiness metrics differ, Tugboat records <code>shadow_approval_stale</code>, cleans up the generated local commit, and does not publish success apply artifacts.</p>
+<h2 id="confirmed-execution">Confirmed Execution</h2>
+<p>Only after review:</p>
+<pre><code>tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1</code></pre>
+<p>The command writes an audited commit-mode apply plan and records rollback metadata after confirming current shadow evidence. Burn-in, rejection rate, and rollback rate are computed from the ledger and checked against policy.</p>
+<h2 id="rollback">Rollback</h2>
+<p>Every successful auto-apply must record a one-command rollback:</p>
+<pre><code>tugboat rollback --repo . --decision latest --execute</code></pre>
+<p>Review <code>rollback-plan.json</code> and <code>decision-trace.json</code> after execution. If rollback execution fails before a revert commit is recorded, Tugboat writes <code>rollback-incident.json</code> with <code>rollback_applied: false</code> and records <code>rollback.failed</code>. If the revert commit succeeds but rollback-plan publication fails, Tugboat writes <code>rollback-incident.json</code> with <code>rollback_applied: true</code>, <code>rollback_plan_written: false</code>, and the <code>revert_commit</code>; it records <code>rollback.applied</code> followed by <code>rollback.failed</code> so rollback-rate metrics and incident checks both remain accurate.</p>
+<h2 id="monitoring">Monitoring</h2>
+<p>Use the operations summary to inspect lane-level auto-apply activity:</p>
+<pre><code>tugboat ops observability --repo .</code></pre>
+<p>The report is written to <code>.sidecar/ops/observability/summary.json</code>. Its <code>auto_apply_lanes</code> section counts shadowed, eligible, rejected, staged, applied, rolled-back, and paused candidates by lane. Counts are derived from append-only audit events such as <code>auto_apply.shadowed</code>, <code>auto_apply.decided</code>, <code>auto_apply.applied</code>, and <code>rollback.applied</code>; successful precheck and final decisions for the same candidate are deduplicated. Candidates blocked by repository, lane, category, or active rollback incidents are counted as paused rather than rejected so operational pauses and incident stops do not inflate policy rejection rates.</p>
+<h2 id="emergency-stop">Emergency Stop</h2>
+<p>Enable the read-only kill switch to block auto-apply and other direct write paths:</p>
+<pre><code>tugboat daemon read-only --repo . --enable</code></pre>
+<p>Do not disable it until candidate state, rollback state, and retained artifacts have been reviewed.</p>
+      </article>
+    </main>
+  </body>
+</html>

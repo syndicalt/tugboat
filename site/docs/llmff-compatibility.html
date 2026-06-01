@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>llmff Compatibility — Tugboat Docs</title>
+    <meta name="description" content="Pipeline runner contract matrix." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="llmff-compatibility-matrix">llmff Compatibility Matrix</h1>
+<h2 id="purpose">Purpose</h2>
+<p>This matrix documents the <code>llmff</code> runner and manifest contract surface Tugboat supports for v1. Tugboat uses <code>llmff</code> as the bounded pipeline runner; Tugboat policy, artifact validation, eval gates, VCS checks, and human review remain the authority layer.</p>
+<h2 id="supported-runners">Supported Runners</h2>
+<div class="table-row"><span>Runner</span><span>v1 support</span><span>Network</span><span>Notes</span></div>
+<div class="table-row"><span><code>tugboat-fixture-llmff</code> fixture backend</span><span>Supported</span><span>No</span><span>Default local and CI path for credential-free proposal loops.</span></div>
+<div class="table-row"><span>Reviewed local <code>llmff</code> binary compatible with Tugboat manifests</span><span>Supported with policy review</span><span>Policy dependent</span><span>Must satisfy manifest inspect/run contracts and artifact schemas.</span></div>
+<div class="table-row"><span>Provider-backed <code>llmff</code> runner</span><span>Experimental opt-in</span><span>Yes</span><span>Requires <code>llmff.allow_network: true</code>, approved providers, and reviewed or pinned manifests.</span></div>
+<p>The fixture backend remains the baseline compatibility target for local development, CI, docs examples, and proposal-only adoption.</p>
+<h2 id="bundled-manifest-contracts">Bundled Manifest Contracts</h2>
+<p>Tugboat ships and validates these manifest templates:</p>
+<div class="table-row"><span>Manifest</span><span>Purpose</span><span>Required output artifacts</span></div>
+<div class="table-row"><span><code>instruction-index.yaml</code></span><span>Build the instruction index</span><span><code>instruction-index.raw.json</code></span></div>
+<div class="table-row"><span><code>episode-audit.yaml</code></span><span>Score an episode against instructions</span><span><code>audit.raw.json</code>, <code>evidence-ids.raw.json</code></span></div>
+<div class="table-row"><span><code>drift-detect.yaml</code></span><span>Detect recurring instruction drift</span><span><code>drift.raw.json</code>, <code>optimizer-notes.raw.json</code></span></div>
+<div class="table-row"><span><code>patch-propose.yaml</code></span><span>Propose bounded edits</span><span><code>candidate.raw.json</code>, <code>proposal-rationale.raw.json</code></span></div>
+<div class="table-row"><span><code>patch-eval.yaml</code></span><span>Evaluate candidate patches</span><span><code>eval-report.raw.json</code>, <code>policy-decision.raw.json</code></span></div>
+<div class="table-row"><span><code>acceptance-summary.yaml</code></span><span>Summarize candidate disposition</span><span><code>acceptance-summary.raw.json</code></span></div>
+<p><code>tugboat ci --repo .</code> materializes the manifest registry and performs manifest contract validation offline. Contract validation checks required manifest presence, name/file consistency, declared inputs, declared outputs, and known JSON artifact schema names.</p>
+<h2 id="provider-backed-execution">Provider-Backed Execution</h2>
+<p>Provider-backed execution is not enabled by environment variables alone.</p>
+<p>Repositories must opt in through policy:</p>
+<pre><code>llmff:
+  allow_network: true
+  allowed_providers:
+    - openai
+  allowed_manifest_hashes:
+    - &lt;reviewed-manifest-sha256&gt;</code></pre>
+<p>Use <code>allowed_manifest_hashes</code> to pin reviewed manifests when using a non-fixture runner. Provider-backed release evidence must include network-required pipeline evidence and declared provider calls before a release can be approved as provider-backed.</p>
+<h2 id="version-policy">Version Policy</h2>
+<p>For v1, Tugboat supports the manifest contract shape bundled in the installed package. Compatible external <code>llmff</code> runners must:</p>
+<ul>
+<li>support inspect and run phases used by Tugboat;</li>
+<li>read and write file-backed inputs and outputs declared by the manifest;</li>
+<li>preserve declared artifact paths;</li>
+<li>report network requirements and provider calls during inspect;</li>
+<li>return nonzero exit codes for failed manifests without partially authorizing Tugboat changes.</li>
+</ul>
+<p>Breaking manifest contract changes require release notes, compatibility docs updates, and either backward-compatible readers or migration guidance.</p>
+<h2 id="verification">Verification</h2>
+<p>Before relying on a runner or manifest set, run:</p>
+<pre><code>tugboat doctor --repo .
+tugboat ci --repo .
+tugboat optimize --repo . --trace traces/example.jsonl --suite all</code></pre>
+<p>For provider-backed paths, also retain release evidence through:</p>
+<pre><code>tugboat ops release-manifest --repo . --wheel dist/&lt;wheel&gt;.whl --commit &lt;sha&gt; --ci-url &lt;url&gt; --approver &lt;name&gt; --security-review-decision approved_provider_backed --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt --evidence &lt;provider-backed-evidence.json&gt;</code></pre>
+      </article>
+    </main>
+  </body>
+</html>

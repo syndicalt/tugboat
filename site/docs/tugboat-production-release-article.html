@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Release Article — Tugboat Docs</title>
+    <meta name="description" content="Comprehensive product announcement." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="tugboat-production-harness-config-observability-for-coding-agents">Tugboat: production harness/config observability for coding agents</h1>
+<p>Repo: https://github.com/syndicalt/tugboat</p>
+<p>Tugboat is a local-first sidecar for the operational layer around coding agents: the instructions, skills, policies, runbooks, eval definitions, and harness configs that shape what agents are allowed to do and how their work is reviewed.</p>
+<p>The short version:</p>
+<pre><code>trace evidence -&gt; audit -&gt; bounded proposal -&gt; eval -&gt; review -&gt; governed apply</code></pre>
+<p>The default posture is still proposal-only. Tugboat does not silently rewrite repo instructions. It watches the harness/config layer, produces evidence-backed review artifacts, validates candidate edits, and records enough provenance for an operator to understand what changed, why it was proposed, and how to roll it back.</p>
+<h2 id="why-this-exists">Why This Exists</h2>
+<p>Modern coding agents do not operate only through model weights. They operate through a harness: repo-local instructions, policy files, tool rules, eval definitions, CI checks, memory guidance, and review workflows.</p>
+<p>When that layer is stale or ambiguous, agent behavior drifts. A user corrects the agent in one session, the task may get fixed, and the learning often disappears into the transcript. The durable operating knowledge remains unchanged, so the next run can repeat the same failure.</p>
+<p>Tugboat treats that operational layer as production state.</p>
+<p>It was shaped by two related ideas:</p>
+<ul>
+<li>OpenAI&#x27;s harness engineering framing: better agents require better environments, feedback loops, evals, observability, and mechanical checks around them.</li>
+<li>SkillOpt-style external-state optimization: natural-language skills and instructions can be improved from execution evidence without pretending every improvement belongs in the model.</li>
+</ul>
+<p>Tugboat brings those ideas into a repo-local workflow for software teams. The goal is not generic prompt fiddling. The goal is governed maintenance of the files agents actually rely on.</p>
+<h2 id="what-tugboat-monitors">What Tugboat Monitors</h2>
+<p>Tugboat indexes and reasons over repo-local operating files, including:</p>
+<ul>
+<li><code>CODEX.md</code></li>
+<li><code>AGENTS.md</code></li>
+<li><code>CLAUDE.md</code></li>
+<li><code>SKILL.md</code></li>
+<li><code>.codex/skills/**/SKILL.md</code></li>
+<li>runbooks</li>
+<li>eval definitions</li>
+<li>policy docs</li>
+<li>local harness and CI docs</li>
+</ul>
+<p>Those files are treated as an instruction graph with precedence, protected regions, content hashes, and review boundaries. Candidate edits must stay bounded to allowed files and sections.</p>
+<h2 id="the-core-workflow">The Core Workflow</h2>
+<p>Initialize a repo:</p>
+<pre><code>tugboat init --repo .
+tugboat index --repo .
+tugboat status --repo .</code></pre>
+<p>Run the proposal loop:</p>
+<pre><code>tugboat optimize --repo . --trace traces/example.jsonl --suite all</code></pre>
+<p>Or run the pipeline in explicit stages:</p>
+<pre><code>tugboat audit --repo . --trace traces/example.jsonl --trace-format auto
+tugboat propose --repo . --audit latest
+tugboat eval --repo . --candidate latest --suite all
+tugboat report --repo . --run latest
+tugboat inspect-decision --repo . --decision latest</code></pre>
+<p>Review the generated packet under <code>.sidecar/runs/&lt;run-id&gt;/</code>:</p>
+<ul>
+<li><code>candidate.diff</code></li>
+<li><code>candidate.json</code></li>
+<li><code>candidate.raw.json</code></li>
+<li><code>proposal-rationale.raw.json</code></li>
+<li><code>eval-report.json</code></li>
+<li><code>policy-gate.json</code></li>
+<li><code>optimization-summary.json</code></li>
+<li><code>decision-trace.json</code></li>
+<li><code>report.md</code></li>
+</ul>
+<p>That packet is the center of the product. It is where trace evidence, proposal rationale, eval results, policy decisions, rejected-edit memory, and review metadata meet.</p>
+<h2 id="llmff-as-the-pipeline-boundary">llmff As The Pipeline Boundary</h2>
+<p>Tugboat keeps <code>llmff</code> as the bounded orchestration layer for inspect, run, trace, event, checkpoint, and typed-output handling.</p>
+<p>That matters because optimization work needs reproducible boundaries. Provider-backed runs must be visible in policy. Inspect artifacts must declare external calls. Eval artifacts must validate against schema and include held-out provenance before a candidate can be accepted.</p>
+<p>The sidecar owns governance and storage. <code>llmff</code> owns the execution pipeline boundary.</p>
+<h2 id="proposal-first-by-default">Proposal-First By Default</h2>
+<p>The release posture is intentionally conservative where authority matters:</p>
+<ul>
+<li><code>mode: proposal_only</code></li>
+<li><code>auto_apply.enabled: false</code></li>
+<li>provider-backed <code>llmff</code> runs require explicit policy</li>
+<li>MCP write-intent tools require explicit allow entries</li>
+<li>the read-only kill switch blocks direct write paths</li>
+<li>protected policy, approvals, sandboxing, network, provider routing, secrets, deployment, and memory-behavior changes require human review or are rejected</li>
+</ul>
+<p>This is the difference between &quot;the agent changed my rules&quot; and &quot;the system produced a reviewable candidate with evidence.&quot;</p>
+<h2 id="apply-and-rollback">Apply And Rollback</h2>
+<p>When a candidate is ready, Tugboat supports reviewed mutation paths:</p>
+<pre><code>tugboat apply --repo . --candidate latest --mode proposal
+tugboat apply --repo . --candidate latest --mode branch --human-review --review-actor &lt;name&gt;
+tugboat apply --repo . --candidate latest --mode commit --human-review --review-actor &lt;name&gt;
+tugboat apply --repo . --candidate latest --mode pr --human-review --review-actor &lt;name&gt;</code></pre>
+<p>Rollback is part of the contract:</p>
+<pre><code>tugboat rollback --repo . --decision latest
+tugboat rollback --repo . --decision latest --execute</code></pre>
+<p>Apply and rollback flows are VCS-backed. They check base hashes, dirty targets, policy gate state, eval evidence, candidate provenance, and rollback metadata before recording durable decisions.</p>
+<h2 id="auto-apply-without-recklessness">Auto-Apply Without Recklessness</h2>
+<p>Tugboat includes auto-apply, but it is deliberately narrow.</p>
+<p>Auto-apply is not a blanket permission for an agent to mutate instructions. It is a policy-governed commit lane for low-risk Class A changes after the system has earned evidence.</p>
+<p>Runtime confirmation is explicit:</p>
+<pre><code>tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt;
+tugboat auto-apply --repo . --candidate latest --actor &lt;name&gt; \
+  --confirm-auto-apply \
+  --auto-apply-policy-version 1</code></pre>
+<p>Thresholds are not CLI overrides. They live in policy and are checked against ledger-derived metrics:</p>
+<pre><code>auto_apply:
+  enabled: false
+  max_changed_lines: 50
+  lanes:
+    docs_hygiene:
+      max_changed_lines: 50
+      minimum_burn_in_days: 3
+      maximum_rejection_rate: 0.20
+      maximum_rollback_rate: 0.05
+    skill_improvement:
+      max_changed_lines: 30
+      minimum_burn_in_days: 7
+      maximum_rejection_rate: 0.15
+      maximum_rollback_rate: 0.03</code></pre>
+<p>Even when enabled, auto-apply requires:</p>
+<ul>
+<li>explicit repo policy</li>
+<li>matching policy-version confirmation</li>
+<li>allowed repository</li>
+<li>allowed risk class</li>
+<li>allowed change category</li>
+<li>held-out eval pass</li>
+<li>governance pass</li>
+<li>VCS-backed commit</li>
+<li>one-command rollback</li>
+<li>acceptable ledger-derived burn-in, rejection rate, and rollback rate</li>
+</ul>
+<p>Class B is not enabled by default. Policy, authority, provider, network, sandbox, deployment, secrets, approval, and memory-behavior changes remain outside the default auto-apply lanes.</p>
+<h2 id="mcp-and-daemon-operations">MCP And Daemon Operations</h2>
+<p>Tugboat exposes MCP and daemon workflows without changing the authority model.</p>
+<p>Read-only MCP:</p>
+<pre><code>tugboat mcp stdio --repo . --read-only</code></pre>
+<p>Daemon status and bounded local processing:</p>
+<pre><code>tugboat daemon status --repo .
+tugboat daemon run-once --repo .
+tugboat daemon cycle --repo . --trace-dir traces --max-jobs 1</code></pre>
+<p>The daemon is local-only, queue-backed, audited, and kill-switchable:</p>
+<pre><code>tugboat daemon read-only --repo . --enable</code></pre>
+<p>It does not grant extra authority. It uses the same service layer, policy gates, sidecar storage, VCS checks, and read-only kill switch as the CLI.</p>
+<h2 id="release-evidence">Release Evidence</h2>
+<p>The production release surface is documented and tested.</p>
+<p>Important docs:</p>
+<ul>
+<li><code>docs/quickstart.md</code></li>
+<li><code>docs/cli-reference.md</code></li>
+<li><code>docs/apply-rollback.md</code></li>
+<li><code>docs/auto-apply.md</code></li>
+<li><code>docs/daemon-guide.md</code></li>
+<li><code>docs/troubleshooting.md</code></li>
+<li><code>docs/ops/release-checklist.md</code></li>
+</ul>
+<p>Release verification includes:</p>
+<pre><code>tugboat doctor
+tugboat index --repo . --check
+tugboat harness check --repo .
+tugboat ci --repo .
+python -m pytest --cov=src --cov-report=term-missing -q
+python -m build --wheel
+python -m twine check dist/&lt;wheel&gt;.whl</code></pre>
+<p>Release manifests are generated from retained evidence:</p>
+<pre><code>tugboat ops release-manifest --repo . \
+  --wheel dist/&lt;wheel&gt;.whl \
+  --commit &quot;$(git rev-parse HEAD)&quot; \
+  --ci-url &lt;url&gt; \
+  --approver &lt;name&gt; \
+  --security-review-decision approved_proposal_only \
+  --security-review-critical-high-findings 0 \
+  --evidence .sidecar/ci/doctor.txt \
+  --evidence .sidecar/ci/index-check.txt \
+  --evidence .sidecar/ci/harness.txt \
+  --evidence .sidecar/ci/ci-report.json \
+  --evidence .sidecar/ci/security-review.md \
+  --evidence .sidecar/ci/pytest-coverage.log \
+  --evidence .sidecar/ci/build-wheel.txt \
+  --evidence .sidecar/ci/twine-check.txt \
+  --evidence .sidecar/ci/install-smoke.txt</code></pre>
+<p>The release gate requires full-suite coverage at or above 90%, harness health, docs contracts, retained CI evidence, and exact-HEAD release manifest generation.</p>
+<h2 id="what-this-enables">What This Enables</h2>
+<p>Tugboat gives teams a way to treat agent-operating knowledge as governed production state:</p>
+<ul>
+<li>trace evidence becomes reviewable maintenance input</li>
+<li>recurring failures can become bounded instruction proposals</li>
+<li>proposal quality is checked against held-out evidence</li>
+<li>unsafe or repeated bad directions are remembered and suppressed</li>
+<li>config and instruction drift becomes observable</li>
+<li>review, apply, and rollback become explicit workflows</li>
+</ul>
+<p>The product is intentionally a sidecar. It does not replace Codex, Claude Code, <code>llmff</code>, CI, or human review. It gives those systems a durable maintenance loop around the files that shape agent behavior.</p>
+<h2 id="the-bet">The Bet</h2>
+<p>Agent traces should not just explain what went wrong.</p>
+<p>They should help maintain the operating layer that prevents the same failure next time.</p>
+<p>That operating layer is no longer just documentation. For agentic software development, it is part of the production harness.</p>
+<p>Tugboat is built for that layer.</p>
+<pre><code>observe -&gt; propose -&gt; validate -&gt; review -&gt; govern</code></pre>
+<p>No silent mutation. No generic prompt fiddling. A production-shaped loop for keeping agent instructions, skills, harness config, and policy honest.</p>
+<h2 id="short-x-post">Short X Post</h2>
+<p>Tugboat is a local-first sidecar for production harness/config observability around coding agents.</p>
+<p>Repo: https://github.com/syndicalt/tugboat</p>
+<p>It turns agent trace evidence into governed proposals for repo-local operating files like <code>CODEX.md</code>, <code>AGENTS.md</code>, <code>SKILL.md</code>, runbooks, eval docs, and policy config.</p>
+<pre><code>trace -&gt; audit -&gt; proposal -&gt; eval -&gt; review -&gt; governed apply</code></pre>
+<p>Default posture: proposal-only.</p>
+<p>Auto-apply exists, but narrowly: policy opt-in, Class A lanes only, ledger-derived burn-in/reliability, held-out eval, governance pass, VCS commit, one-command rollback.</p>
+<p>The goal is not prompt fiddling. It is production maintenance for the instruction/config layer agents rely on.</p>
+      </article>
+    </main>
+  </body>
+</html>

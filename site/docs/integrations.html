@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Integrations — Tugboat Docs</title>
+    <meta name="description" content="Trace sources and tool-specific setup." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="nav" aria-label="Documentation navigation">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">T</span><span>Tugboat</span></a>
+      <nav class="nav-links">
+        <a href="../index.html#workflow">Workflow</a>
+        <a href="../index.html#features">Features</a>
+        <a href="./index.html">Docs</a>
+        <a href="https://github.com/syndicalt/tugboat">GitHub</a>
+      </nav>
+    </header>
+    <main class="doc-shell">
+      <aside class="doc-sidebar">
+        <p class="kicker">Docs</p>
+        <nav><a href="README.html">Overview</a>
+<a href="quickstart.html">Quickstart</a>
+<a href="cli-reference.html">CLI Reference</a>
+<a href="architecture.html">Architecture</a>
+<a href="apply-rollback.html">Apply and Rollback</a>
+<a href="auto-apply.html">Auto-Apply</a>
+<a href="mcp-guide.html">MCP Guide</a>
+<a href="llmff-compatibility.html">llmff Compatibility</a>
+<a href="integrations.html">Integrations</a>
+<a href="instruction-best-practices.html">Instruction Best Practices</a>
+<a href="quick-adoption-proposal-only.html">Proposal-Only Adoption</a>
+<a href="operating-runbook.html">Operating Runbook</a>
+<a href="release-checklist.html">Release Checklist</a>
+<a href="daemon-guide.html">Daemon Guide</a>
+<a href="threat-model.html">Threat Model</a>
+<a href="troubleshooting.html">Troubleshooting</a>
+<a href="migration-v1.html">Migration to v1</a>
+<a href="1.0.0-draft.html">Release Notes</a>
+<a href="tugboat-production-release-article.html">Release Article</a>
+<a href="v1.0.0-roadmap.html">v1 Roadmap</a></nav>
+      </aside>
+      <article class="doc-content">
+        <h1 id="integration-guide">Integration Guide</h1>
+<h2 id="purpose">Purpose</h2>
+<p>This guide shows how to connect Tugboat to common local agent workflows without changing Tugboat&#x27;s authority model. Tugboat stays local-first and proposal-only by default. It ingests traces, produces review artifacts, and requires explicit VCS-backed apply or rollback commands for mutation.</p>
+<h2 id="common-setup">Common Setup</h2>
+<p>Run the same baseline setup for every integration:</p>
+<pre><code>tugboat doctor --repo .
+tugboat init --repo .
+tugboat index --repo . --check
+tugboat optimize --repo . --trace traces/example.jsonl --suite all</code></pre>
+<p>If <code>tugboat doctor --repo .</code> reports missing policy, initialize before running the proposal loop. If it reports provider-backed networking, confirm the repo policy and manifest hashes before using provider-backed pipelines.</p>
+<h2 id="codex">Codex</h2>
+<p>Use exported Codex session JSONL as the preferred trace source. The shared safe fixture is <code>tests/fixtures/traces/codex-local-session-export.jsonl</code>.</p>
+<pre><code>tugboat optimize --repo . --trace tests/fixtures/traces/codex-local-session-export.jsonl --trace-format codex --suite all</code></pre>
+<p>Codex traces can include base instruction snapshots and tool evidence. Tugboat treats those as evidence, not authority.</p>
+<h2 id="claude-code">Claude Code</h2>
+<p>Use Claude transcript JSON or JSONL exports when available. The shared safe fixture is <code>tests/fixtures/traces/claude-transcript.json</code>.</p>
+<pre><code>tugboat audit --repo . --trace tests/fixtures/traces/claude-transcript.json --trace-format claude</code></pre>
+<p>Review generated candidate diffs before applying them. Claude transcript content is untrusted until Tugboat&#x27;s deterministic gates and evals pass.</p>
+<h2 id="cursor">Cursor</h2>
+<p>For Cursor workflows, export or adapt agent session logs into generic JSONL, Codex-style JSONL, or MCP-session JSONL. Keep repository instructions in files Tugboat indexes, such as <code>CODEX.md</code>, <code>AGENTS.md</code>, and <code>SKILL.md</code>.</p>
+<p>Use <code>tugboat index --repo . --check</code> in CI to catch broken instruction references before accepting proposed harness changes.</p>
+<h2 id="aider">Aider</h2>
+<p>For Aider workflows, capture command output, final responses, and changed-file context into generic JSONL or CI failure JSON. Run Tugboat in proposal-only mode first:</p>
+<pre><code>tugboat audit --repo . --trace traces/aider-session.jsonl
+tugboat propose --repo . --audit latest
+tugboat eval --repo . --candidate latest --suite all</code></pre>
+<p>Do not point auto-apply at broad code-edit traces. Keep auto-apply limited to reviewed Class A harness/config maintenance lanes.</p>
+<h2 id="continue-dev">Continue.dev</h2>
+<p>For Continue.dev, capture local session traces or convert exported chat/tool records into generic JSONL. Store examples under a repo-local <code>traces/</code> directory that is safe to share or already redacted.</p>
+<p>Run <code>tugboat retention --repo . --redact-output</code> before sharing retained run artifacts outside the local machine.</p>
+<h2 id="mcp-clients">MCP Clients</h2>
+<p>Use the read-only profile first:</p>
+<pre><code>tugboat mcp stdio --repo . --read-only</code></pre>
+<p>MCP clients may read status, instruction graph, harness findings, latest runs, candidate reports, and decision trace references. Do not pass provider credentials through MCP. Do not expose MCP tools as a direct instruction mutation path.</p>
+<h2 id="ci-systems">CI Systems</h2>
+<p>CI should validate the harness and produce artifacts, not silently mutate instructions:</p>
+<pre><code>tugboat doctor --repo .
+tugboat ci --repo .
+tugboat index --repo . --check
+tugboat harness check --repo .
+python -m pytest --cov=src --cov-report=term-missing -q</code></pre>
+<p>Use CI failure traces to feed the proposal loop after review. The shared safe fixture is <code>tests/fixtures/traces/ci-failure.json</code>.</p>
+<h2 id="trace-fixtures">Trace Fixtures</h2>
+<p>Safe shared fixtures:</p>
+<ul>
+<li><code>tests/fixtures/traces/codex-local-session-export.jsonl</code>: Codex fixture proves session metadata, base instruction snapshots, tool calls, and final response events ingest as a canonical episode.</li>
+<li><code>tests/fixtures/traces/claude-transcript.json</code>: Claude fixture proves transcript JSON/JSONL exports preserve user corrections and assistant responses for drift evidence.</li>
+<li><code>tests/fixtures/traces/mcp-session.jsonl</code>: MCP fixture proves tool-call lifecycle events from read-only MCP clients become auditable trace evidence.</li>
+<li><code>tests/fixtures/traces/ci-failure.json</code>: CI fixture proves failing command output can feed proposal-only remediation without granting mutation authority.</li>
+</ul>
+<p>Each fixture should be credential-free, redacted, and ingestible by the real trace adapters. Add new fixtures only with tests that prove format detection and ingestion.</p>
+<h2 id="safety-defaults">Safety Defaults</h2>
+<p>The default posture is proposal-only. auto-apply remains disabled unless a repo explicitly enables a narrow Class A lane and passes policy, confirmation, ledger, eval, VCS, and rollback gates.</p>
+<p>Provider-backed execution remains opt-in. Keep <code>llmff.allow_network: false</code> unless the repo intentionally enables provider-backed manifests and pins or reviews manifest hashes.</p>
+      </article>
+    </main>
+  </body>
+</html>
