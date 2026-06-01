@@ -1998,6 +1998,42 @@ mcp:
     assert events[-1]["status"] == "failed"
 
 
+def test_record_episode_rechecks_trace_event_budget_after_active_context(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+trace:
+  max_events: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="trace event budget exceeded: 2 events, limit 1",
+    ):
+        tugboat_record_episode(repo, '{"type":"user_request","content":"Fix bug"}\n')
+
+    episode_dir = sidecar / "mcp" / "episodes"
+    assert not episode_dir.exists() or list(episode_dir.iterdir()) == []
+    with Store.open(sidecar / "db.sqlite") as store:
+        assert store.connection.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 0
+        assert store.connection.execute("SELECT COUNT(*) FROM trace_events").fetchone()[0] == 0
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_record_episode"
+    assert events[-1]["status"] == "failed"
+
+
 def test_record_episode_writes_private_episode_artifacts(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)

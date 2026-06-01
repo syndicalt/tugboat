@@ -29,7 +29,11 @@ from tugboat.report.decision_trace import write_decision_trace
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.adapters import ingest_mcp_session_bundle
-from tugboat.traces.ingest import TraceEventBudgetExceeded, ingest_jsonl_trace
+from tugboat.traces.ingest import (
+    TraceEventBudgetExceeded,
+    enforce_trace_event_budget,
+    ingest_jsonl_trace,
+)
 from tugboat.traces.schema import TraceBundle, TraceEvent
 
 
@@ -849,6 +853,7 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
                 ingest_mcp_session_bundle(path, max_events=policy.trace_max_events)
                 if trace_format == "mcp"
                 else ingest_jsonl_trace(path, max_events=policy.trace_max_events),
+                max_events=policy.trace_max_events,
             )
         except TraceEventBudgetExceeded as error:
             path.unlink(missing_ok=True)
@@ -891,10 +896,16 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
     )
 
 
-def _bundle_with_active_context(repo: Path, bundle: TraceBundle) -> TraceBundle:
+def _bundle_with_active_context(
+    repo: Path,
+    bundle: TraceBundle,
+    *,
+    max_events: int | None = None,
+) -> TraceBundle:
     events = list(bundle.events)
     next_line = max((event.line_number for event in events), default=0) + 1
     for payload in _active_context_payloads(repo):
+        enforce_trace_event_budget(len(events) + 1, max_events)
         events.append(
             TraceEvent(
                 evidence_id=_context_evidence_id(next_line, payload),
