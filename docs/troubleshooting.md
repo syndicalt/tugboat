@@ -55,6 +55,10 @@ Review the trace export before raising `trace.max_input_bytes` in `.sidecar/poli
 
 Review the trace export before raising `trace.max_events` in `.sidecar/policy.yaml`. Tugboat blocks over-event JSONL traces before building an unbounded trace bundle or invoking `llmff`.
 
+`audit blocked: redaction failed`
+
+Check filesystem permissions and available disk space under `.sidecar/runs`. Tugboat fails closed before invoking `llmff` when it cannot write redacted trace or canonical episode artifacts.
+
 `instruction index blocked: llmff inspect failed: binary not found`
 
 Check `.sidecar/policy.yaml` and verify `llmff.binary`. The default after `tugboat init --repo .` is `python -m tugboat.llmff.fixture_backend`.

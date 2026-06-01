@@ -372,6 +372,32 @@ def test_auto_apply_policy_pause_controls_block_by_repo_lane_and_category():
     )
 
 
+def test_auto_apply_disabled_lane_blocks_matching_candidate():
+    policy = _enabled_policy(
+        lanes=(
+            AutoApplyLanePolicy(
+                name="docs_hygiene",
+                enabled=False,
+                allowed_categories=("typo_fix",),
+                max_changed_lines=50,
+                max_instruction_token_delta=50,
+                minimum_burn_in_days=3,
+                maximum_rejection_rate=0.20,
+                maximum_rollback_rate=0.05,
+            ),
+        )
+    )
+
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(policy=policy),
+    )
+
+    assert decision.eligible is False
+    assert decision.lane == "docs_hygiene"
+    assert decision.reasons == ("auto_apply_lane_disabled",)
+
+
 def test_auto_apply_incident_pause_requires_active_incident():
     policy = _enabled_policy(pause_for_incident=True)
     incident = AutoApplyIncidentState(

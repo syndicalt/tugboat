@@ -734,6 +734,64 @@ def test_audit_empty_trace_returns_clear_error_without_traceback(tmp_path: Path,
     assert audit["llmff_failure_message"] == "trace contains no events"
 
 
+def test_audit_redaction_failure_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    def fail_redaction(*args, **kwargs):
+        raise OSError("simulated redaction write failure")
+
+    monkeypatch.setattr("tugboat.audit.pipeline._write_redacted_trace", fail_redaction)
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    assert "audit blocked: redaction failed: simulated redaction write failure" in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "redaction_failed"
+    assert audit["llmff_failure_kind"] == "redaction_failed"
+    assert audit["llmff_failure_message"] == "simulated redaction write failure"
+
+
+def test_optimize_redaction_failure_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    def fail_redaction(*args, **kwargs):
+        raise OSError("simulated redaction write failure")
+
+    monkeypatch.setattr("tugboat.audit.pipeline._write_redacted_trace", fail_redaction)
+
+    assert (
+        main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"])
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "audit blocked: redaction failed: simulated redaction write failure" in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "redaction_failed"
+    assert audit["llmff_failure_kind"] == "redaction_failed"
+
+
 def test_audit_forced_trace_format_mismatch_returns_actionable_hint(
     tmp_path: Path,
     capsys,

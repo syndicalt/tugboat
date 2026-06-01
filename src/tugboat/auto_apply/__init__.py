@@ -30,6 +30,7 @@ REASON_ORDER = (
     "explicit_policy_required",
     "auto_apply_disabled",
     "auto_apply_repository_paused",
+    "auto_apply_lane_disabled",
     "auto_apply_lane_paused",
     "auto_apply_category_paused",
     "auto_apply_incident_pause_active",
@@ -275,14 +276,16 @@ def evaluate_auto_apply(
     if policy is None:
         found_reasons.add("explicit_policy_required")
     else:
-        lane = _matching_lane(policy, candidate)
+        lane = _matching_lane(policy, candidate, include_disabled=True)
         if not policy.enabled:
             found_reasons.add("auto_apply_disabled")
+        if lane is not None and not lane.enabled:
+            found_reasons.add("auto_apply_lane_disabled")
         if candidate.repository not in policy.allowed_repositories:
             found_reasons.add("repository_not_allowlisted")
         if candidate.repository in policy.paused_repositories:
             found_reasons.add("auto_apply_repository_paused")
-        if lane is not None and lane.name in policy.paused_lanes:
+        if lane is not None and lane.enabled and lane.name in policy.paused_lanes:
             found_reasons.add("auto_apply_lane_paused")
         candidate_category_keys = {_category_key(category) for category in candidate.categories}
         if candidate_category_keys.intersection(policy.paused_categories):
@@ -385,12 +388,17 @@ def evaluate_auto_apply(
     )
 
 
-def _matching_lane(policy: AutoApplyPolicy, candidate: AutoApplyCandidate) -> AutoApplyLanePolicy | None:
+def _matching_lane(
+    policy: AutoApplyPolicy,
+    candidate: AutoApplyCandidate,
+    *,
+    include_disabled: bool = False,
+) -> AutoApplyLanePolicy | None:
     if candidate.change_class not in policy.allowed_change_classes:
         return None
     candidate_categories = {_category_key(category) for category in candidate.categories}
     for lane in policy.lanes:
-        if not lane.enabled:
+        if not include_disabled and not lane.enabled:
             continue
         if candidate.change_class not in lane.allowed_change_classes:
             continue

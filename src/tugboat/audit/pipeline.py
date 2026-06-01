@@ -190,13 +190,26 @@ def run_audit_pipeline(
         )
         return AuditPipelineResult(1, run_dir, f"audit blocked: invalid trace: {error}")
     redacted_trace = run_dir / "trace-redacted.jsonl"
-    _write_redacted_trace(bundle, redacted_trace)
     canonical_episode_path = run_dir / "canonical-episode.json"
-    _write_canonical_episode(
-        bundle,
-        canonical_episode_path,
-        instruction_snapshot_dir=run_dir / "instruction-snapshot",
-    )
+    try:
+        _write_redacted_trace(bundle, redacted_trace)
+        _write_canonical_episode(
+            bundle,
+            canonical_episode_path,
+            instruction_snapshot_dir=run_dir / "instruction-snapshot",
+        )
+    except (OSError, UnicodeError, ValueError, TypeError) as error:
+        message = _bounded_failure_message(error)
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash="preflight",
+                status="failed",
+                run_dir=run_dir,
+            )
+        write_audit(run_dir, _redaction_failure_audit_payload(message))
+        return AuditPipelineResult(1, run_dir, f"audit blocked: redaction failed: {message}")
     manifests = materialize_manifests(repo)
     try:
         require_manifest_contracts(manifests)
@@ -615,6 +628,26 @@ def _llmff_inspect_failure_audit_payload(
         "llmff_failure_kind": "inspect_failed",
         "llmff_failure_message": message,
     }
+
+
+def _redaction_failure_audit_payload(message: str) -> dict[str, object]:
+    return {
+        "audit_id": 0,
+        "edit_warranted": False,
+        "evidence_refs": [],
+        "failure_class": "redaction_failed",
+        "severity": "high",
+        "confidence": 1.0,
+        "llmff_failure_kind": "redaction_failed",
+        "llmff_failure_message": message,
+    }
+
+
+def _bounded_failure_message(error: BaseException, *, limit: int = 2000) -> str:
+    message = str(error) or error.__class__.__name__
+    if len(message) <= limit:
+        return message
+    return f"{message[:limit]}...[truncated]"
 
 
 def _file_sha256(path: Path) -> str:
