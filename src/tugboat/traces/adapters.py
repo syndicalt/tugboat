@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ def ingest_codex_session(path: Path) -> CanonicalEpisode:
 def ingest_codex_session_bundle(path: Path) -> TraceBundle:
     events: list[dict[str, Any]] = []
     tool_names_by_call_id: dict[str, str] = {}
-    for row in _read_jsonl(path):
+    for row in _iter_jsonl_objects(path):
         role = row.get("role")
         if role == "user":
             events.append({"type": "user_request", "content": row.get("content", "")})
@@ -43,7 +44,7 @@ def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
     events: list[dict[str, Any]] = []
     tool_names_by_id: dict[str, str] = {}
     if path.suffix == ".jsonl":
-        for row in _read_jsonl(path):
+        for row in _iter_jsonl_objects(path):
             if isinstance(row.get("message"), dict):
                 events.extend(_normalize_claude_message(row["message"], tool_names_by_id))
         return _bundle_from_payloads(path, _derive_test_results(events))
@@ -98,7 +99,7 @@ def ingest_mcp_session(path: Path) -> CanonicalEpisode:
 
 def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
     events: list[dict[str, Any]] = []
-    for row in _read_jsonl(path):
+    for row in _iter_jsonl_objects(path):
         event = row.get("event")
         if event == "request":
             events.append({"type": "user_request", "content": row.get("text", "")})
@@ -185,15 +186,18 @@ def _bool_from_mcp(value: object, default: bool = False) -> bool:
     return default
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _iter_jsonl_objects(path: Path) -> Iterator[dict[str, Any]]:
     with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
                 row = json.loads(line)
-                if isinstance(row, dict):
-                    rows.append(row)
-    return rows
+            except json.JSONDecodeError as error:
+                raise ValueError(f"trace line {line_number} contains invalid JSON") from error
+            if not isinstance(row, dict):
+                raise ValueError(f"trace line {line_number} must be a JSON object")
+            yield row
 
 
 def _normalize_codex_event(row: dict[str, Any]) -> dict[str, Any]:

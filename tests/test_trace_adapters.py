@@ -9,7 +9,9 @@ from tugboat.audit.pipeline import detect_trace_format
 from tugboat.traces.adapters import (
     ingest_ci_failure,
     ingest_claude_transcript,
+    ingest_codex_session_bundle,
     ingest_codex_session,
+    ingest_mcp_session_bundle,
     ingest_mcp_session,
 )
 
@@ -115,6 +117,63 @@ def test_ingest_codex_session_maps_response_item_envelopes(tmp_path: Path):
     }
     assert episode.test_results == ()
     assert episode.final_answer == "Done"
+
+
+def test_ingest_codex_session_rejects_non_object_jsonl_line_with_line_number(
+    tmp_path: Path,
+):
+    session = tmp_path / "codex-session.jsonl"
+    session.write_text(
+        json.dumps(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Fix bug"}],
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(["not", "an", "object"])
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trace line 2 must be a JSON object"):
+        ingest_codex_session(session)
+
+
+def test_ingest_codex_large_response_item_trace_preserves_order_and_evidence_ids(
+    tmp_path: Path,
+):
+    session = tmp_path / "codex-large.jsonl"
+    rows = [
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": f"Fix issue {index}"}],
+            },
+        }
+        for index in range(150)
+    ]
+    session.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    bundle = ingest_codex_session_bundle(session)
+
+    assert len(bundle.events) == 150
+    assert [event.payload["content"] for event in bundle.events[:3]] == [
+        "Fix issue 0",
+        "Fix issue 1",
+        "Fix issue 2",
+    ]
+    assert [event.line_number for event in bundle.events[-3:]] == [148, 149, 150]
+    assert len({event.evidence_id for event in bundle.events}) == 150
 
 
 def test_ingest_codex_session_derives_test_result_from_process_exit_status(
@@ -538,6 +597,22 @@ def test_ingest_mcp_session_maps_live_tool_events(tmp_path: Path):
     assert episode.tool_calls[0].payload["tool"] == "apply_patch"
     assert episode.command_outputs[0].payload["exit_code"] == 0
     assert episode.final_answer == "Done"
+
+
+def test_ingest_mcp_session_rejects_non_object_jsonl_line_with_line_number(
+    tmp_path: Path,
+):
+    session = tmp_path / "mcp-session.jsonl"
+    session.write_text(
+        json.dumps({"event": "request", "text": "Update docs"})
+        + "\n"
+        + json.dumps("not an object")
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trace line 2 must be a JSON object"):
+        ingest_mcp_session_bundle(session)
 
 
 @pytest.mark.parametrize(
