@@ -37,6 +37,7 @@ from tugboat.mcp import (
     tugboat_request_eval,
     tugboat_request_optimization,
     tugboat_request_proposal,
+    tugboat_recent_decisions,
     tugboat_run_report,
     tugboat_status,
 )
@@ -1103,6 +1104,113 @@ def test_decision_trace_returns_artifact_ref_without_raw_payloads(tmp_path: Path
     assert "rationale" not in serialized
     assert (repo / ".sidecar" / "runs" / "seed-review-target" / "decision-trace.json").exists()
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_decision_trace"
+
+
+def test_recent_decisions_returns_redacted_review_history(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    _, candidate_id = _seed_review_target(repo)
+    eval_report = runs_dir(repo) / "seed-review-target" / "eval-report.json"
+    eval_report.write_text('{"passed":true}\n', encoding="utf-8")
+    trace_path = runs_dir(repo) / "seed-review-target" / "decision-trace.json"
+    trace_path.write_text('{"schema_version":1}\n', encoding="utf-8")
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={"held_out_score": 0.93},
+        )
+        older_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="reviewer",
+            policy="proposal_only",
+            decision="needs_review",
+            reason="older decision",
+        )
+        newer_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="sk-thissecretkeyvalue1234567890",
+            policy="proposal_only",
+            decision="rejected",
+            reason="contains sk-thissecretkeyvalue1234567890",
+        )
+        store.connection.execute(
+            "UPDATE decisions SET created_at = ? WHERE id = ?",
+            ("2026-05-30T10:00:00+00:00", older_id),
+        )
+        store.connection.execute(
+            "UPDATE decisions SET created_at = ? WHERE id = ?",
+            ("2026-05-31T10:00:00+00:00", newer_id),
+        )
+        store.connection.commit()
+
+    result = tugboat_recent_decisions(repo, limit=1)
+
+    assert result["decisions"] == [
+        {
+            "decision_id": newer_id,
+            "created_at": "2026-05-31T10:00:00+00:00",
+            "actor": "[REDACTED:openai_api_key]",
+            "policy": "proposal_only",
+            "decision": "rejected",
+            "reason_summary": "contains [REDACTED:openai_api_key]",
+            "candidate": {
+                "candidate_id": candidate_id,
+                "base_file": "CODEX.md",
+                "risk_class": "instruction_clarification",
+                "state": "needs_review",
+            },
+            "latest_eval": {
+                "suite_id": "all",
+                "passed": True,
+                "artifact": {
+                    "kind": "eval_report",
+                    "path": ".sidecar/runs/seed-review-target/eval-report.json",
+                },
+            },
+            "artifacts": [
+                {
+                    "kind": "candidate_diff",
+                    "path": ".sidecar/runs/seed-review-target/candidate.diff",
+                },
+                {
+                    "kind": "decision_trace",
+                    "path": ".sidecar/runs/seed-review-target/decision-trace.json",
+                },
+            ],
+        }
+    ]
+    serialized = json.dumps(result, sort_keys=True)
+    assert "seeded candidate" not in serialized
+    assert "sk-thissecret" not in serialized
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_recent_decisions"
+
+
+def test_bound_read_only_mcp_stdio_includes_recent_decisions(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
+    _, candidate_id, decision_id = _seed_decision_trace_target(tmp_path)
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "tugboat_recent_decisions",
+                    "arguments": {"limit": 5},
+                },
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    payload = responses[0]["result"]["content"][0]["json"]
+    assert payload["decisions"][0]["decision_id"] == decision_id
+    assert payload["decisions"][0]["candidate"]["candidate_id"] == candidate_id
 
 
 def test_auto_update_status_exposes_read_only_lane_observability(tmp_path: Path):
@@ -3008,6 +3116,7 @@ def test_mcp_tool_registry_exposes_only_approved_non_mutating_tools():
         "tugboat_instruction_graph",
         "tugboat_latest_audit",
         "tugboat_latest_runs",
+        "tugboat_recent_decisions",
         "tugboat_run_report",
         "tugboat_status",
     }

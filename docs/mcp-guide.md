@@ -23,10 +23,11 @@ tugboat mcp stdio
 
 ## Read Tools
 
-Read tools include `tugboat_status`, `tugboat_auto_update_status`, `tugboat_instruction_graph`, `tugboat_harness_findings`, `tugboat_latest_runs`, `tugboat_run_report`, `tugboat_candidate`, and `tugboat_decision_trace`.
+Read tools include `tugboat_status`, `tugboat_auto_update_status`, `tugboat_instruction_graph`, `tugboat_harness_findings`, `tugboat_latest_runs`, `tugboat_recent_decisions`, `tugboat_run_report`, `tugboat_candidate`, and `tugboat_decision_trace`.
 
 Responses return summaries and artifact references, not raw prompt or model payloads. `tugboat_decision_trace` writes a local `decision-trace.json` artifact and returns its repo-relative path and hash.
 `tugboat_auto_update_status` reports the current auto-apply enablement state, kill-switch state, paused lanes, daemon queue summary, and lane counters derived from append-only audit events.
+`tugboat_recent_decisions` reports recent review decisions with redacted actor and reason summaries, candidate metadata, latest eval status, and artifact references.
 
 ## Write-Intent Tools
 

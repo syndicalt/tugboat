@@ -97,6 +97,10 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         {"repo": _REPO_SCHEMA, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
         ("repo",),
     ),
+    "tugboat_recent_decisions": _object_schema(
+        {"repo": _REPO_SCHEMA, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+        ("repo",),
+    ),
     "tugboat_record_episode": _object_schema(
         {"repo": _REPO_SCHEMA, "trace_jsonl": {"type": "string"}},
         ("repo", "trace_jsonl"),
@@ -615,6 +619,91 @@ def tugboat_decision_trace(repo: str | Path, decision: str) -> dict[str, Any]:
     return _audit_call(repo_path, "tugboat_decision_trace", {"decision": decision}, read)
 
 
+def tugboat_recent_decisions(repo: str | Path, limit: int = 10) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+    normalized_limit = _normalize_limit(limit)
+
+    def read() -> dict[str, Any]:
+        with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
+            rows = store.connection.execute(
+                """
+                SELECT
+                  d.id,
+                  d.created_at,
+                  d.actor,
+                  d.policy,
+                  d.decision,
+                  d.reason,
+                  c.id,
+                  c.base_file,
+                  c.diff_path,
+                  c.risk_class,
+                  c.state
+                FROM decisions d
+                JOIN candidates c ON c.id = d.candidate_id
+                ORDER BY d.created_at DESC, d.id DESC
+                LIMIT ?
+                """,
+                (normalized_limit,),
+            ).fetchall()
+            decisions = []
+            for row in rows:
+                candidate_id = int(row[6])
+                eval_row = store.connection.execute(
+                    """
+                    SELECT suite_id, passed, report_path
+                    FROM evals
+                    WHERE candidate_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (candidate_id,),
+                ).fetchone()
+                diff_path = _stored_path(repo_path, row[8])
+                item: dict[str, Any] = {
+                    "decision_id": int(row[0]),
+                    "created_at": str(row[1]),
+                    "actor": redact_text(str(row[2])),
+                    "policy": str(row[3]),
+                    "decision": str(row[4]),
+                    "reason_summary": _summarize_text(str(row[5])),
+                    "candidate": {
+                        "candidate_id": candidate_id,
+                        "base_file": str(row[7]),
+                        "risk_class": str(row[9]),
+                        "state": str(row[10]),
+                    },
+                    "latest_eval": None,
+                    "artifacts": _recent_decision_artifacts(repo_path, diff_path),
+                }
+                if eval_row is not None:
+                    item["latest_eval"] = {
+                        "suite_id": str(eval_row[0]),
+                        "passed": bool(eval_row[1]),
+                        "artifact": {
+                            "kind": "eval_report",
+                            "path": _relative_ref(repo_path, _stored_path(repo_path, eval_row[2])),
+                        },
+                    }
+                decisions.append(item)
+        return {"decisions": decisions}
+
+    return _audit_call(
+        repo_path,
+        "tugboat_recent_decisions",
+        {"limit": normalized_limit},
+        read,
+    )
+
+
+def _recent_decision_artifacts(repo: Path, diff_path: Path) -> list[dict[str, str]]:
+    artifacts = [{"kind": "candidate_diff", "path": _relative_ref(repo, diff_path)}]
+    trace_path = diff_path.parent / "decision-trace.json"
+    if trace_path.is_file():
+        artifacts.append({"kind": "decision_trace", "path": _relative_ref(repo, trace_path)})
+    return artifacts
+
+
 def tugboat_daemon_status(repo: str | Path) -> dict[str, Any]:
     repo_path = _resolve_local_repo(repo)
 
@@ -1049,6 +1138,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_instruction_graph": tugboat_instruction_graph,
     "tugboat_latest_audit": tugboat_latest_audit,
     "tugboat_latest_runs": tugboat_latest_runs,
+    "tugboat_recent_decisions": tugboat_recent_decisions,
     "tugboat_record_episode": tugboat_record_episode,
     "tugboat_request_audit": tugboat_request_audit,
     "tugboat_request_eval": tugboat_request_eval,

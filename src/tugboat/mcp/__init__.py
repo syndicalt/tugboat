@@ -20,6 +20,7 @@ from tugboat.mcp.contracts import (
     tugboat_request_eval,
     tugboat_request_optimization,
     tugboat_request_proposal,
+    tugboat_recent_decisions,
     tugboat_run_report,
     tugboat_status,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "tugboat_request_eval",
     "tugboat_request_optimization",
     "tugboat_request_proposal",
+    "tugboat_recent_decisions",
     "tugboat_run_report",
     "tugboat_status",
 ]
