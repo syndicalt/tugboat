@@ -371,6 +371,170 @@ def test_inspect_decision_compares_candidate_metadata_without_payloads(
     assert "rationale should not print" not in output
 
 
+def test_inspect_decision_summarizes_human_rejection_memory_without_payloads(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    codex.write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace_path = repo / "trace.jsonl"
+    trace_path.write_text(
+        '{"type":"user_request","text":"Raw trace text must stay out of summary"}\n',
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    diff = "--- a/CODEX.md\n+++ b/CODEX.md\n@@ -1,3 +1,4 @@\n # Rules\n \n Use tests.\n+Use broad process notes.\n"
+    diff_path = run_dir / "candidate.diff"
+    diff_path.write_text(diff, encoding="utf-8")
+
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(
+            repo=repo,
+            bundle=TraceBundle(
+                trace_path=trace_path,
+                events=(
+                    TraceEvent(
+                        evidence_id="ev-1",
+                        event_type="user_request",
+                        source_trust="user",
+                        line_number=1,
+                        payload={"text": "Raw trace text must stay out of summary"},
+                    ),
+                ),
+            ),
+        )
+        store.insert_run(
+            run_id="run-1",
+            stage="proposal",
+            manifest_hash="manifest-hash",
+            status="completed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.82,
+            evidence_refs=["ev-1"],
+            instruction_refs=["CODEX.md#Rules"],
+        )
+        candidate = CandidatePatch(
+            audit_id=audit_id,
+            base_file="CODEX.md",
+            base_hash=CandidatePatch.hash_file(codex),
+            diff=diff,
+            risk_class="instruction_clarification",
+            rationale="Candidate rationale must stay out of summary.",
+            expected_behavior_change="Agents keep reviewable guidance.",
+            evals_required=("all",),
+            sources=(SourceRef("ev-1", trusted=True),),
+            bounded_edit_metadata=(
+                {
+                    "operator": "add",
+                    "file": "CODEX.md",
+                    "section": "Rules",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
+                },
+            ),
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=candidate,
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        store.insert_decision(
+            candidate_id=candidate_id,
+            actor="tugboat",
+            policy="deterministic_policy_gate",
+            decision="needs_review",
+            reason="held_out_improved",
+        )
+    candidate_payload = {
+        "schema_version": 1,
+        "candidate_id": candidate_id,
+        **candidate.to_json_dict(),
+    }
+    (run_dir / "candidate.json").write_text(
+        json.dumps(candidate_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "decision.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": candidate_id,
+                "decision": "needs_review",
+                "policy_allowed": True,
+                "policy_reasons": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "review",
+                "reject",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "alice",
+                "--template",
+                "too-broad",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_edit",
+            key="legacy-unrelated",
+            payload={
+                "category": "policy_regression",
+                "failure_pattern": "unrelated legacy memory",
+                "file": "AGENTS.md",
+                "future_proposal_suppression_signal": "suppress_matching_bounded_edit_fingerprint",
+                "operator": "replace",
+                "rejection_reason": "safety_weakening",
+                "review_actor": "mallory",
+                "review_template": "weakens-safety",
+                "section": "Safety",
+                "semantic_fingerprint": "legacy-unrelated",
+                "source_refs": "candidate:999",
+            },
+        )
+
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
+
+    output = capsys.readouterr().out
+    assert "review_rejection: actor=alice reason=too_broad template=too-broad" in output
+    assert (
+        "rejected_edit_memory: CODEX.md#Rules operator=add "
+        "category=bounded_edit_quality failure_pattern=edit exceeds requested scope "
+        "suppression=suppress_matching_bounded_edit_fingerprint"
+    ) in output
+    assert "payload_snippet" not in output
+    assert "Candidate rationale must stay out of summary" not in output
+    assert "Raw trace text must stay out of summary" not in output
+    assert "AGENTS.md#Safety" not in output
+    assert "unrelated legacy memory" not in output
+    assert "template=weakens-safety" not in output
+
+
 def test_inspect_decision_prints_highest_impact_metadata_only(
     tmp_path: Path,
     capsys,

@@ -4685,6 +4685,10 @@ def _print_decision_inspection_summary(trace_path: Path) -> None:
     print(f"evals: {_decision_trace_eval_summary(payload)}")
     print(f"rollback_ready: {_decision_trace_rollback_ready(decision, artifacts)}")
     print(f"rollback_readiness: {_decision_trace_rollback_readiness(trace_path, decision)}")
+    for summary in _decision_trace_review_rejection_summaries(payload):
+        print(f"review_rejection: {summary}")
+    for summary in _decision_trace_rejected_edit_memory_summaries(payload):
+        print(f"rejected_edit_memory: {summary}")
     print(f"highest_impact: {_decision_trace_highest_impact_summary(trace_path, artifacts)}")
     next_artifact = artifacts.get("report") or artifacts.get("candidate_diff") or trace_path.as_posix()
     print(f"review_next: inspect {next_artifact}")
@@ -4817,6 +4821,78 @@ def _decision_trace_artifact_path(
 def _json_object_field(payload: dict[str, object], field: str) -> dict[str, object]:
     value = payload.get(field, {})
     return value if isinstance(value, dict) else {}
+
+
+def _decision_trace_review_rejection_summaries(payload: dict[str, object]) -> list[str]:
+    review_actions = payload.get("review_actions", [])
+    if not isinstance(review_actions, list):
+        return []
+    template = _candidate_rejection_template(payload)
+    summaries: list[str] = []
+    for action in review_actions:
+        if not isinstance(action, dict) or action.get("action") != "rejected":
+            continue
+        summary = (
+            f"actor={action.get('actor', '')} "
+            f"reason={action.get('reason', '')}"
+        )
+        if template:
+            summary += f" template={template}"
+        summaries.append(summary)
+    return summaries
+
+
+def _decision_trace_rejected_edit_memory_summaries(payload: dict[str, object]) -> list[str]:
+    candidate = _json_object_field(payload, "candidate")
+    candidate_id = str(candidate.get("candidate_id", ""))
+    optimizer_memory = payload.get("optimizer_memory", [])
+    if not isinstance(optimizer_memory, list):
+        return []
+    summaries: list[str] = []
+    for record in optimizer_memory:
+        if not isinstance(record, dict) or record.get("memory_type") != "rejected_edit":
+            continue
+        memory_payload = record.get("payload", {})
+        if not isinstance(memory_payload, dict):
+            continue
+        if candidate_id and not _memory_payload_matches_candidate(memory_payload, candidate_id):
+            continue
+        file = str(memory_payload.get("file", ""))
+        section = str(memory_payload.get("section", ""))
+        target = f"{file}#{section}" if file and section else file or section or str(record.get("key", ""))
+        summaries.append(
+            f"{target} "
+            f"operator={memory_payload.get('operator', '')} "
+            f"category={memory_payload.get('category', '')} "
+            f"failure_pattern={memory_payload.get('failure_pattern', '')} "
+            f"suppression={memory_payload.get('future_proposal_suppression_signal', '')}"
+        )
+    return summaries
+
+
+def _candidate_rejection_template(payload: dict[str, object]) -> str:
+    candidate = _json_object_field(payload, "candidate")
+    candidate_id = str(candidate.get("candidate_id", ""))
+    optimizer_memory = payload.get("optimizer_memory", [])
+    if not isinstance(optimizer_memory, list):
+        return ""
+    for record in optimizer_memory:
+        if not isinstance(record, dict) or record.get("memory_type") != "rejected_edit":
+            continue
+        memory_payload = record.get("payload", {})
+        if not isinstance(memory_payload, dict):
+            continue
+        if candidate_id and not _memory_payload_matches_candidate(memory_payload, candidate_id):
+            continue
+        template = memory_payload.get("review_template")
+        if isinstance(template, str):
+            return template
+    return ""
+
+
+def _memory_payload_matches_candidate(memory_payload: dict[str, object], candidate_id: str) -> bool:
+    source_refs = memory_payload.get("source_refs", [])
+    return isinstance(source_refs, list) and f"candidate:{candidate_id}" in source_refs
 
 
 def _decision_trace_eval_summary(payload: dict[str, object]) -> str:
