@@ -289,6 +289,8 @@ def _token_metrics(repo: Path, knowledge_map: dict[str, list[str]]) -> dict[str,
         "duplicate_rule_estimated_tokens": duplicate_rule_tokens,
         "instruction_files": sorted(instruction_files, key=lambda item: str(item["path"])),
         "active_context_files": active_context_files,
+        "retrieval_pack_estimated_tokens": sum(active_files.values()),
+        "retrieval_pack_file_count": len(active_context_files),
     }
 
 

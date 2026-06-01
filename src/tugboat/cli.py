@@ -1046,6 +1046,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{token_metrics['active_context_estimated_tokens']}"
         )
         print(
+            "retrieval_pack_file_count: "
+            f"{token_metrics['retrieval_pack_file_count']}"
+        )
+        print(
+            "retrieval_pack_estimated_tokens: "
+            f"{token_metrics['retrieval_pack_estimated_tokens']}"
+        )
+        print(
             "duplicate_rule_estimated_tokens: "
             f"{token_metrics['duplicate_rule_estimated_tokens']}"
         )

@@ -1494,6 +1494,8 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "instruction_corpus_estimated_tokens": {"type": "integer"},
                     "active_context_estimated_tokens": {"type": "integer"},
                     "duplicate_rule_estimated_tokens": {"type": "integer"},
+                    "retrieval_pack_estimated_tokens": {"type": "integer"},
+                    "retrieval_pack_file_count": {"type": "integer"},
                     "instruction_files": {
                         "type": "array",
                         "items": {

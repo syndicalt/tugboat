@@ -1256,6 +1256,8 @@ def test_validate_harness_report_artifact_accepts_current_schema():
                 "instruction_corpus_estimated_tokens": 12,
                 "active_context_estimated_tokens": 20,
                 "duplicate_rule_estimated_tokens": 4,
+                "retrieval_pack_estimated_tokens": 20,
+                "retrieval_pack_file_count": 2,
                 "instruction_files": [
                     {"path": "AGENTS.md", "estimated_tokens": 12, "line_count": 3}
                 ],
@@ -1279,6 +1281,33 @@ def test_validate_harness_report_artifact_accepts_legacy_without_token_metrics()
             "orphaned_runbooks": [],
             "recurring_failures_without_docs": [],
             "doc_gardening_tasks": [],
+        },
+    )
+
+
+def test_validate_harness_report_artifact_accepts_legacy_token_metrics_without_retrieval_pack():
+    validate_json_artifact(
+        "harness-report.json",
+        {
+            "schema_version": 1,
+            "knowledge_map": {"AGENTS.md": ["docs/runbook.md"]},
+            "missing_docs": [],
+            "stale_docs": [],
+            "orphaned_runbooks": [],
+            "recurring_failures_without_docs": [],
+            "doc_gardening_tasks": [],
+            "token_metrics": {
+                "instruction_corpus_estimated_tokens": 12,
+                "active_context_estimated_tokens": 20,
+                "duplicate_rule_estimated_tokens": 4,
+                "instruction_files": [
+                    {"path": "AGENTS.md", "estimated_tokens": 12, "line_count": 3}
+                ],
+                "active_context_files": [
+                    {"path": "AGENTS.md", "estimated_tokens": 12},
+                    {"path": "docs/runbook.md", "estimated_tokens": 8},
+                ],
+            },
         },
     )
 

@@ -556,6 +556,8 @@ def test_generate_harness_report_includes_token_efficiency_metrics(tmp_path: Pat
         "instruction_files": [
             {"estimated_tokens": 29, "line_count": 5, "path": "AGENTS.md"},
         ],
+        "retrieval_pack_estimated_tokens": 49,
+        "retrieval_pack_file_count": 2,
     }
 
 
