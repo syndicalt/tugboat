@@ -91,31 +91,38 @@ def run_propose_pipeline(repo: Path, audit_ref: str) -> ProposePipelineResult:
             candidate_id=candidate_id,
             candidate=candidate,
         )
-    _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
-    _write_policy_gate(run_dir, allowed=decision_allowed, reasons=decision_reasons)
-    _write_private_json_artifact(
-        run_dir / "decision.json",
-        "decision.json",
-        _decision_payload(
-            candidate_id=candidate_id,
-            decision_value="needs_review" if decision_allowed else "rejected",
-            policy_allowed=decision_allowed,
-            policy_reasons=decision_reasons,
-        ),
-    )
-    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
-        store.insert_decision(
-            candidate_id=candidate_id,
-            actor="tugboat",
-            policy="deterministic_policy_gate",
-            decision="needs_review" if decision_allowed else "rejected",
-            reason=",".join(decision_reasons),
+    try:
+        _merge_json(artifacts.json_path, {"candidate_id": candidate_id})
+        _write_policy_gate(run_dir, allowed=decision_allowed, reasons=decision_reasons)
+        _write_private_json_artifact(
+            run_dir / "decision.json",
+            "decision.json",
+            _decision_payload(
+                candidate_id=candidate_id,
+                decision_value="needs_review" if decision_allowed else "rejected",
+                policy_allowed=decision_allowed,
+                policy_reasons=decision_reasons,
+            ),
         )
-        store.update_candidate_state(
-            candidate_id=candidate_id,
-            state="needs_review" if decision_allowed else "rejected",
-            reason=",".join(decision_reasons),
-        )
+    except (OSError, RuntimeError, ValueError, TypeError, SecretScanError) as error:
+        return ProposePipelineResult(1, run_dir, f"propose blocked: {error}")
+    try:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_decision(
+                candidate_id=candidate_id,
+                actor="tugboat",
+                policy="deterministic_policy_gate",
+                decision="needs_review" if decision_allowed else "rejected",
+                reason=",".join(decision_reasons),
+            )
+            store.update_candidate_state(
+                candidate_id=candidate_id,
+                state="needs_review" if decision_allowed else "rejected",
+                reason=",".join(decision_reasons),
+            )
+    except (OSError, RuntimeError, ValueError, TypeError) as error:
+        _cleanup_incomplete_decision(repo, run_dir, candidate_id=candidate_id)
+        return ProposePipelineResult(1, run_dir, f"propose blocked: {error}")
     return ProposePipelineResult(
         0 if decision_allowed else 1,
         run_dir,
@@ -1334,3 +1341,14 @@ def _write_private_json_artifact(path: Path, artifact_name: str, payload: dict[s
         raise SecretScanError(findings)
     write_text_artifact(path, text)
     mark_private_file(path)
+
+
+def _cleanup_incomplete_decision(repo: Path, run_dir: Path, *, candidate_id: int) -> None:
+    (run_dir / "decision.json").unlink(missing_ok=True)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.connection.execute("DELETE FROM decisions WHERE candidate_id = ?", (candidate_id,))
+        store.connection.execute(
+            "UPDATE candidates SET state = ? WHERE id = ?",
+            ("artifact_pending", candidate_id),
+        )
+        store.connection.commit()

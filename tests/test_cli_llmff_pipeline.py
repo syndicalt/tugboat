@@ -2097,8 +2097,10 @@ llmff:
 
     monkeypatch.setattr("tugboat.propose.pipeline._write_policy_gate", fail_policy_gate)
 
-    with pytest.raises(RuntimeError, match="policy-gate write failed"):
-        run_propose_pipeline(repo, "latest")
+    result = run_propose_pipeline(repo, "latest")
+
+    assert result.exit_code == 1
+    assert result.message == "propose blocked: policy-gate write failed"
 
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         candidate_states = [
@@ -2108,6 +2110,148 @@ llmff:
 
     assert "needs_review" not in candidate_states
     assert decision_count == 0
+
+
+def test_audit_marks_run_failed_when_final_audit_artifact_publish_fails(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    real_write_audit = __import__("tugboat.audit.pipeline", fromlist=["write_audit"]).write_audit
+
+    def fail_final_audit_write(run_dir: Path, payload: dict[str, object]) -> object:
+        if "audit_id" in payload:
+            raise OSError("simulated audit publish failure")
+        return real_write_audit(run_dir, payload)
+
+    monkeypatch.setattr("tugboat.audit.pipeline.write_audit", fail_final_audit_write)
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "audit blocked: audit artifact publish failed: simulated audit publish failure" in output
+    assert not (run_dir / "audit.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rows = store.connection.execute(
+            "SELECT stage, status FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchall()
+    assert rows[-1] == ("audit", "failed")
+    assert ("audit", "completed") not in rows
+
+
+def test_propose_cli_blocks_when_policy_artifact_publish_fails(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    capsys.readouterr()
+
+    def fail_policy_gate(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated policy-gate publish failure")
+
+    monkeypatch.setattr("tugboat.propose.pipeline._write_policy_gate", fail_policy_gate)
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert "propose blocked: simulated policy-gate publish failure" in output
+    assert not (run_dir / "policy-gate.json").exists()
+    assert not (run_dir / "decision.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        states = [row[0] for row in store.connection.execute("SELECT state FROM candidates")]
+        decision_count = store.connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+    assert states == ["artifact_pending"]
+    assert decision_count == 0
+
+
+def test_propose_cleans_decision_when_candidate_state_finalization_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff")
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+
+    def fail_state_update(self: Store, **kwargs: object) -> None:
+        raise RuntimeError("simulated candidate state finalization failure")
+
+    monkeypatch.setattr(Store, "update_candidate_state", fail_state_update)
+
+    result = run_propose_pipeline(repo, "latest")
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    assert result.exit_code == 1
+    assert result.message == "propose blocked: simulated candidate state finalization failure"
+    assert not (run_dir / "decision.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        rows = store.connection.execute(
+            """
+            SELECT candidates.state, COUNT(decisions.id)
+            FROM candidates
+            LEFT JOIN decisions ON decisions.candidate_id = candidates.id
+            GROUP BY candidates.id, candidates.state
+            """
+        ).fetchall()
+    assert rows == [("artifact_pending", 0)]
 
 
 def test_propose_rejects_candidate_source_not_in_audit_evidence(tmp_path: Path, capsys):
@@ -4958,6 +5102,54 @@ llmff:
         "source_refs": [canonical["events"][0]["evidence_id"]],
     }
     assert rejected_memory[3] is not None
+
+
+def test_eval_does_not_publish_report_without_policy_gate(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix bug"}\n', encoding="utf-8")
+    fake_llmff = _write_fake_llmff(tmp_path / "fake-llmff", eval_passed=True)
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    original_policy_gate = (run_dir / "policy-gate.json").read_text(encoding="utf-8")
+    capsys.readouterr()
+
+    def fail_policy_gate(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated eval policy-gate publish failure")
+
+    monkeypatch.setattr("tugboat.eval.pipeline._write_policy_gate", fail_policy_gate)
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked: simulated eval policy-gate publish failure" in output
+    assert (run_dir / "policy-gate.json").read_text(encoding="utf-8") == original_policy_gate
+    assert not (run_dir / "eval-report.json").exists()
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        assert store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0] == 0
+        assert store.connection.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0] == 0
+        assert store.connection.execute("SELECT COUNT(*) FROM validation_splits").fetchone()[0] == 0
+        assert store.connection.execute("SELECT COUNT(*) FROM eval_cases").fetchone()[0] == 0
 
 
 def test_rejected_optimization_memory_suppresses_next_matching_proposal(tmp_path: Path):

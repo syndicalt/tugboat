@@ -229,29 +229,36 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
             ),
         }
 
-    report_path = write_eval_report(
-        repo,
-        run_dir.name,
-        candidate_id=candidate_id,
-        suite_id=suite_id,
-        passed=passed,
-        metrics=metrics,
-        trigger_score=trigger_score,
-        held_out_score=held_out_score,
-        governance_passed=governance_passed,
-        recommendation=recommendation,
-        live_provider_required=live_provider_required,
-        longitudinal_metrics=longitudinal_metrics,
-        validation_splits=validation_splits,
-        eval_cases=_eval_case_payloads(eval_cases) if eval_cases else None,
-        skill_report=skill_report,
-    )
-    if policy_decision_payload is not None:
-        _write_policy_gate(
-            run_dir,
-            allowed=bool(policy_decision_payload["allowed"]),
-            reasons=list(policy_decision_payload.get("reasons", [])),
+    try:
+        report_path = write_eval_report(
+            repo,
+            run_dir.name,
+            candidate_id=candidate_id,
+            suite_id=suite_id,
+            passed=passed,
+            metrics=metrics,
+            trigger_score=trigger_score,
+            held_out_score=held_out_score,
+            governance_passed=governance_passed,
+            recommendation=recommendation,
+            live_provider_required=live_provider_required,
+            longitudinal_metrics=longitudinal_metrics,
+            validation_splits=validation_splits,
+            eval_cases=_eval_case_payloads(eval_cases) if eval_cases else None,
+            skill_report=skill_report,
         )
+    except (OSError, UnicodeError, ValueError, TypeError, SecretScanError) as error:
+        return EvalPipelineResult(1, run_dir, f"eval blocked: {error}")
+    if policy_decision_payload is not None:
+        try:
+            _write_policy_gate(
+                run_dir,
+                allowed=bool(policy_decision_payload["allowed"]),
+                reasons=list(policy_decision_payload.get("reasons", [])),
+            )
+        except (OSError, UnicodeError, ValueError, TypeError, SecretScanError) as error:
+            report_path.unlink(missing_ok=True)
+            return EvalPipelineResult(1, run_dir, f"eval blocked: {error}")
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.insert_eval(
             candidate_id=candidate_id,

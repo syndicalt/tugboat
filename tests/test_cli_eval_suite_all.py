@@ -646,6 +646,39 @@ def test_eval_rejects_unsupported_offline_suite_without_accepting_report(tmp_pat
     assert not (run_dir / "eval-report.json").exists()
 
 
+def test_eval_blocks_without_db_row_when_report_publish_fails(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    _write_candidate_preview(
+        run_dir,
+        "# Policy\n\nYou must run tests before final answers.\n",
+    )
+    _write_candidate_json(run_dir)
+
+    def fail_write_eval_report(*args: object, **kwargs: object) -> Path:
+        raise OSError("simulated eval report publish failure")
+
+    monkeypatch.setattr("tugboat.eval.pipeline.write_eval_report", fail_write_eval_report)
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked: simulated eval report publish failure" in output
+    assert not (run_dir / "eval-report.json").exists()
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        assert store.connection.execute("SELECT COUNT(*) FROM evals").fetchone()[0] == 0
+        assert store.connection.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0] == 0
+
+
 def test_eval_provider_smoke_requires_explicit_opt_in(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("TUGBOAT_PROVIDER_SMOKE", raising=False)
     repo = tmp_path / "repo"

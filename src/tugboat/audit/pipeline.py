@@ -570,14 +570,6 @@ def run_audit_pipeline(
             ),
         )
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
-        store.insert_run(
-            run_id=run_dir.name,
-            stage="audit",
-            manifest_hash=inspect.manifest_hash,
-            status="completed",
-            run_dir=run_dir,
-            episode_id=episode_id,
-        )
         audit_id = store.insert_audit(
             run_id=run_dir.name,
             failure_class=str(audit_payload["failure_class"]),
@@ -589,7 +581,33 @@ def run_audit_pipeline(
     audit_payload["audit_id"] = audit_id
     audit_payload["evidence_refs"] = evidence_refs
     audit_payload["instruction_refs"] = instruction_refs
-    write_audit(run_dir, audit_payload)
+    try:
+        write_audit(run_dir, audit_payload)
+    except (OSError, UnicodeError, ValueError, TypeError, SecretScanError) as error:
+        message = _bounded_failure_message(error)
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash=inspect.manifest_hash,
+                status="failed",
+                run_dir=run_dir,
+                episode_id=episode_id,
+            )
+        return AuditPipelineResult(
+            1,
+            run_dir,
+            f"audit blocked: audit artifact publish failed: {message}",
+        )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id=run_dir.name,
+            stage="audit",
+            manifest_hash=inspect.manifest_hash,
+            status="completed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
     return AuditPipelineResult(0, run_dir, f"audit run: {run_dir.name}")
 
 
