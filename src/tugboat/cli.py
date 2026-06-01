@@ -721,6 +721,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "doctor":
         repo = Path(args.repo).resolve()
+        if _sidecar_schema_preflight_blocked("doctor", repo):
+            return 1
         try:
             return _print_doctor_report(repo)
         except (OSError, ValueError, YAMLError) as error:

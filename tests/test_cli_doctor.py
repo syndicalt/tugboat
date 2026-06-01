@@ -1,3 +1,5 @@
+import json
+
 from tugboat.cli import main
 
 
@@ -21,6 +23,24 @@ def test_doctor_reports_proposal_only(tmp_path, capsys):
     assert "tugboat: ok" in out
     assert "mode: proposal_only" in out
     assert "auto_apply: disabled" in out
+
+
+def test_doctor_blocks_future_sidecar_schema_without_reporting_ok(tmp_path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text("version: 1\nmode: proposal_only\n", encoding="utf-8")
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["doctor", "--repo", str(tmp_path)])
+
+    assert exit_code == 1
+    output = capsys.readouterr().out
+    assert "doctor blocked: sidecar schema version 999 is newer than supported" in output
+    assert "tugboat: ok" not in output
+    assert "Traceback" not in output
 
 
 def test_doctor_reports_missing_policy_with_actionable_next_steps(tmp_path, capsys):
