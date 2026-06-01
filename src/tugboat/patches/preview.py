@@ -317,6 +317,8 @@ def _parse_ranged_hunk_header(line: str) -> _RangedHunk | None:
     old_count = int(match.group("old_count") or "1")
     new_start = int(match.group("new_start"))
     new_count = int(match.group("new_count") or "1")
+    if (old_count > 0 and old_start == 0) or (new_count > 0 and new_start == 0):
+        return None
     return _RangedHunk(
         old_start=old_start,
         old_count=old_count,

@@ -32,6 +32,45 @@ def test_apply_unified_diff_rejects_hunk_count_mismatch():
     assert apply_unified_diff(base, diff) is None
 
 
+def test_apply_unified_diff_rejects_zero_start_with_nonzero_span():
+    base = "alpha\n"
+    old_zero_diff = (
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -0,1 +1,1 @@\n"
+        "-alpha\n"
+        "+beta\n"
+    )
+    new_zero_diff = (
+        "--- a/CODEX.md\n"
+        "+++ b/CODEX.md\n"
+        "@@ -1,1 +0,1 @@\n"
+        "-alpha\n"
+        "+beta\n"
+    )
+
+    for diff in (old_zero_diff, new_zero_diff):
+        assert apply_unified_diff(base, diff, expected_path="CODEX.md") is None
+        assert (
+            classify_markdown_diff_operations(base, diff, expected_path="CODEX.md")
+            == ()
+        )
+        assert bounded_edit_metadata_mismatch_fields(
+            base,
+            diff,
+            (
+                {
+                    "operator": "replace",
+                    "file": "CODEX.md",
+                    "section": "Document",
+                    "changed_lines": 1,
+                    "normative_changes": 0,
+                },
+            ),
+            expected_path="CODEX.md",
+        ) == ("diff",)
+
+
 def test_apply_unified_diff_applies_valid_ranged_hunk():
     base = "alpha\nbeta\ngamma\n"
     diff = (

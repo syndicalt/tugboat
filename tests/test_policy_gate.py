@@ -370,6 +370,38 @@ def test_policy_gate_rejects_diff_over_configured_line_budget(tmp_path: Path):
     assert "max_changed_lines_exceeded" in decision.reasons
 
 
+def test_policy_gate_rejects_zero_start_bounded_edit_diff(tmp_path: Path):
+    base_file = tmp_path / "CODEX.md"
+    base_file.write_text("# Notes\n\nUse local fixture.\n", encoding="utf-8")
+    candidate = _candidate(
+        base_hash=CandidatePatch.hash_file(base_file),
+        risk_class="A",
+        diff=(
+            "--- a/CODEX.md\n"
+            "+++ b/CODEX.md\n"
+            "@@ -0,1 +1,1 @@\n"
+            "-# Notes\n"
+            "+# Guidance\n"
+        ),
+        bounded_edit_metadata=(
+            {
+                "operator": "replace",
+                "file": "CODEX.md",
+                "section": "Notes",
+                "changed_lines": 1,
+                "normative_changes": 0,
+            },
+        ),
+    )
+
+    decision = evaluate_candidate(tmp_path, Policy(auto_apply_enabled=True), candidate)
+
+    assert decision.allowed is False
+    assert "bounded_edit_diff_mismatch" in decision.reasons
+    assert "markdown_parse_invalid" in decision.reasons
+    assert decision.auto_apply_eligible is False
+
+
 def test_policy_gate_rejects_class_b_over_risk_specific_changed_line_budget(
     tmp_path: Path,
 ):
