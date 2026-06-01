@@ -6,7 +6,13 @@ from pathlib import Path
 
 import yaml
 
-from tugboat.artifacts import SCHEMA_VERSION, validate_json_artifact, write_json_artifact
+from tugboat.artifacts import (
+    SCHEMA_VERSION,
+    load_json_object_artifact,
+    validate_json_artifact,
+    write_json_artifact,
+    write_text_artifact,
+)
 from tugboat.config import as_positive_version
 
 
@@ -176,29 +182,38 @@ def execute_migration_plan(
     if plan.current_version == 0:
         return plan
     validate_migration_report(plan)
-    write_pre_migration_snapshot(repo, plan)
+    snapshot_path = write_pre_migration_snapshot(repo, plan)
 
     sidecar = repo / ".sidecar"
     policy_path = sidecar / "policy.yaml"
-    policy_payload = None
-    if policy_path.exists():
-        policy_payload = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(policy_payload, dict):
-            raise ValueError(".sidecar/policy.yaml must contain a mapping")
-        policy_payload["version"] = plan.target_version
+    observability_dir = sidecar / "ops" / "observability"
+    ops_dir = sidecar / "ops"
+    preexisting_dirs = {
+        observability_dir: observability_dir.exists(),
+        ops_dir: ops_dir.exists(),
+    }
+    try:
+        policy_payload = None
+        if policy_path.exists():
+            policy_payload = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
+            if not isinstance(policy_payload, dict):
+                raise ValueError(".sidecar/policy.yaml must contain a mapping")
+            policy_payload["version"] = plan.target_version
 
-    version_json = sidecar / "version.json"
-    version_json.write_text(
-        json.dumps({"schema_version": plan.target_version}, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    if any(step.migration_id == "sidecar-v2-to-v3" for step in plan.steps):
-        (sidecar / "ops" / "observability").mkdir(parents=True, exist_ok=True)
+        version_json = sidecar / "version.json"
+        write_json_artifact(version_json, {"schema_version": plan.target_version})
+        if any(step.migration_id == "sidecar-v2-to-v3" for step in plan.steps):
+            observability_dir.mkdir(parents=True, exist_ok=True)
 
-    if policy_payload is not None:
-        policy_path.write_text(yaml.safe_dump(policy_payload, sort_keys=True), encoding="utf-8")
+        if policy_payload is not None:
+            write_text_artifact(policy_path, yaml.safe_dump(policy_payload, sort_keys=True))
 
-    report_path = write_migration_report(repo, plan)
+        report_path = write_migration_report(repo, plan)
+    except Exception:
+        restore_pre_migration_snapshot(repo, snapshot_path)
+        _restore_empty_created_directory(observability_dir, preexisting_dirs[observability_dir])
+        _restore_empty_created_directory(ops_dir, preexisting_dirs[ops_dir])
+        raise
     return MigrationPlan(
         current_version=plan.current_version,
         target_version=plan.target_version,
@@ -211,10 +226,8 @@ def write_migration_report(repo: Path, plan: MigrationPlan) -> Path:
     payload = migration_report_payload(plan)
     validate_json_artifact("sidecar-migration-report.json", payload)
     migrations_dir = repo / ".sidecar" / "migrations"
-    migrations_dir.mkdir(parents=True, exist_ok=True)
     report_path = migrations_dir / "migration-report.json"
-    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return report_path
+    return write_json_artifact(report_path, payload)
 
 
 def write_pre_migration_snapshot(repo: Path, plan: MigrationPlan) -> Path:
@@ -223,6 +236,46 @@ def write_pre_migration_snapshot(repo: Path, plan: MigrationPlan) -> Path:
     migrations_dir = repo / ".sidecar" / "migrations"
     snapshot_path = migrations_dir / "pre-migration-state.json"
     return write_json_artifact(snapshot_path, payload)
+
+
+def restore_pre_migration_snapshot(repo: Path, snapshot_path: Path) -> None:
+    payload = load_json_object_artifact(snapshot_path, "sidecar-migration-snapshot.json")
+    validate_json_artifact("sidecar-migration-snapshot.json", payload)
+    allowed_paths = {
+        ".sidecar/VERSION",
+        ".sidecar/policy.yaml",
+        ".sidecar/version.json",
+    }
+    captured_files = payload["captured_files"]
+    if not isinstance(captured_files, list):
+        raise ValueError("sidecar migration snapshot captured_files must be a list")
+    for captured in captured_files:
+        if not isinstance(captured, dict):
+            raise ValueError("sidecar migration snapshot captured file must be an object")
+        relative_path = captured["path"]
+        if relative_path not in allowed_paths:
+            raise ValueError(f"sidecar migration snapshot has unsupported path: {relative_path}")
+        path = repo / relative_path
+        if captured["existed"]:
+            content = captured["content"]
+            if not isinstance(content, str):
+                raise ValueError(
+                    f"sidecar migration snapshot missing content for {relative_path}"
+                )
+            write_text_artifact(path, content)
+        else:
+            path.unlink(missing_ok=True)
+
+
+def _restore_empty_created_directory(path: Path, existed_before_migration: bool) -> None:
+    if existed_before_migration:
+        return
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
 
 
 def validate_migration_report(plan: MigrationPlan) -> None:

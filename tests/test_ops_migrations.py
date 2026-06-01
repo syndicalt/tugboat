@@ -18,6 +18,7 @@ from tugboat.ops.migrations import (
     current_sidecar_version,
     dry_run_migration_plan,
     ordered_migrations_after,
+    restore_pre_migration_snapshot,
     write_migration_report,
 )
 from tugboat.security.secrets import SecretScanError
@@ -339,3 +340,125 @@ def test_execute_migration_plan_validates_policy_before_mutating_sidecar(
     assert policy.read_text(encoding="utf-8") == "- not\n- a\n- mapping\n"
     assert not (sidecar / "ops").exists()
     assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_execute_migration_plan_restores_sidecar_when_report_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tugboat.ops import migrations
+
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    legacy_marker = sidecar / "VERSION"
+    version_json = sidecar / "version.json"
+    policy = sidecar / "policy.yaml"
+    observability_dir = sidecar / "ops" / "observability"
+    legacy_marker.write_text("2\n", encoding="utf-8")
+    version_json.write_text('{"schema_version": 2}\n', encoding="utf-8")
+    policy.write_text("version: 2\nmode: proposal_only\n", encoding="utf-8")
+    observability_dir.mkdir(parents=True)
+    (observability_dir / ".keep").write_text("preserve\n", encoding="utf-8")
+
+    def fail_report_write(repo: Path, plan: MigrationPlan) -> Path:
+        raise OSError("simulated migration report failure")
+
+    monkeypatch.setattr(migrations, "write_migration_report", fail_report_write)
+
+    with pytest.raises(OSError, match="simulated migration report failure"):
+        execute_migration_plan(tmp_path)
+
+    assert legacy_marker.read_text(encoding="utf-8") == "2\n"
+    assert version_json.read_text(encoding="utf-8") == '{"schema_version": 2}\n'
+    assert policy.read_text(encoding="utf-8") == "version: 2\nmode: proposal_only\n"
+    assert json.loads(
+        (sidecar / "migrations" / "pre-migration-state.json").read_text(encoding="utf-8")
+    )["captured_version"] == 2
+    assert (observability_dir / ".keep").read_text(encoding="utf-8") == "preserve\n"
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_execute_migration_plan_removes_new_schema_marker_when_restoring_v1_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tugboat.ops import migrations
+
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    policy = sidecar / "policy.yaml"
+    policy.write_text("version: 1\nmode: proposal_only\n", encoding="utf-8")
+
+    def fail_report_write(repo: Path, plan: MigrationPlan) -> Path:
+        raise OSError("simulated migration report failure")
+
+    monkeypatch.setattr(migrations, "write_migration_report", fail_report_write)
+
+    with pytest.raises(OSError, match="simulated migration report failure"):
+        execute_migration_plan(tmp_path)
+
+    assert policy.read_text(encoding="utf-8") == "version: 1\nmode: proposal_only\n"
+    assert not (sidecar / "VERSION").exists()
+    assert not (sidecar / "version.json").exists()
+    assert not (sidecar / "ops").exists()
+    assert not (sidecar / "migrations" / "migration-report.json").exists()
+
+
+def test_restore_pre_migration_snapshot_rejects_unsupported_paths(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / ".sidecar" / "migrations" / "pre-migration-state.json"
+    snapshot_path.parent.mkdir(parents=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifact_kind": "sidecar_migration_snapshot",
+                "captured_version": 2,
+                "captured_files": [
+                    {
+                        "path": ".sidecar/not-allowed.txt",
+                        "existed": False,
+                        "content": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="sidecar migration snapshot has unsupported path: .sidecar/not-allowed.txt",
+    ):
+        restore_pre_migration_snapshot(tmp_path, snapshot_path)
+
+
+def test_restore_pre_migration_snapshot_requires_content_for_existing_files(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / ".sidecar" / "migrations" / "pre-migration-state.json"
+    snapshot_path.parent.mkdir(parents=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifact_kind": "sidecar_migration_snapshot",
+                "captured_version": 2,
+                "captured_files": [
+                    {
+                        "path": ".sidecar/version.json",
+                        "existed": True,
+                        "content": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="sidecar migration snapshot missing content for .sidecar/version.json",
+    ):
+        restore_pre_migration_snapshot(tmp_path, snapshot_path)
