@@ -41,14 +41,14 @@ This fixture backend is local, credential-free, and intended for proposal-only a
 llmff:
   binary: llmff
   require_inspect: true
-  allow_network: false
+  allow_network: true
   allowed_providers:
     - openai
   allowed_manifest_hashes:
     - replace-with-reviewed-manifest-hash
 ```
 
-Provider-backed runs require explicit provider policy and reviewed manifest hashes. Omit `allowed_providers` for credential-free local and fixture-backed runs.
+Provider-backed runs require explicit provider policy, `allow_network: true`, and reviewed manifest hashes. Omit `allowed_providers` for credential-free local and fixture-backed runs.
 
 ## Pull Request Apply Mode
 

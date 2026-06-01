@@ -58,7 +58,7 @@ If `.sidecar/version.json` is newer than supported, Tugboat blocks instead of at
 
 ## llmff Compatibility
 
-The fixture backend remains supported for local development, CI, and credential-free proposal loops.
+The fixture backend remains supported for local development, CI, and credential-free proposal loops. The v1 runner and manifest matrix is published in `docs/llmff-compatibility.md`.
 
 Provider-backed execution is explicitly policy-gated. Repos must opt in with `llmff.allow_network: true`, reviewed provider configuration, and approved manifests or manifest hashes. Tugboat does not treat provider output as authority; it remains evidence that must pass policy, eval, and review gates.
 

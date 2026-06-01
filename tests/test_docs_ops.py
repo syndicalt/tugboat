@@ -138,6 +138,30 @@ DOC_CONTRACTS = {
             "No hosted web UI",
         ],
     },
+    "docs/llmff-compatibility.md": {
+        "sections": [
+            "## Purpose",
+            "## Supported Runners",
+            "## Bundled Manifest Contracts",
+            "## Provider-Backed Execution",
+            "## Version Policy",
+            "## Verification",
+        ],
+        "required_text": [
+            "fixture backend",
+            "tugboat-fixture-llmff",
+            "instruction-index.yaml",
+            "episode-audit.yaml",
+            "drift-detect.yaml",
+            "patch-propose.yaml",
+            "patch-eval.yaml",
+            "acceptance-summary.yaml",
+            "tugboat ci --repo .",
+            "allowed_manifest_hashes",
+            "llmff.allow_network: true",
+            "manifest contract validation",
+        ],
+    },
     "CHANGELOG.md": {
         "sections": [
             "## Unreleased",
@@ -204,6 +228,7 @@ DOC_CONTRACTS = {
             ".sidecar/ops/release-artifact-manifest.json",
             "docs/migration-v1.md",
             "docs/compatibility-policy.md",
+            "docs/llmff-compatibility.md",
         ],
     },
     "docs/ci/ci-guide.md": {
@@ -638,6 +663,7 @@ DOC_CONTRACTS = {
             ".sidecar/policy.yaml",
             "instruction_files",
             "allowed_providers",
+            "allow_network: true",
             "allowed_repositories",
             "tool_policy",
             "auto_apply",
