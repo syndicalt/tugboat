@@ -6,7 +6,12 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from tugboat.traces.ingest import _evidence_id, canonical_episode_from_bundle, source_trust_for_event_type
+from tugboat.traces.ingest import (
+    _evidence_id,
+    canonical_episode_from_bundle,
+    enforce_trace_event_budget,
+    source_trust_for_event_type,
+)
 from tugboat.traces.schema import CanonicalEpisode, TraceBundle, TraceEvent
 
 
@@ -14,10 +19,10 @@ def ingest_codex_session(path: Path) -> CanonicalEpisode:
     return canonical_episode_from_bundle(ingest_codex_session_bundle(path))
 
 
-def ingest_codex_session_bundle(path: Path) -> TraceBundle:
+def ingest_codex_session_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
     events: list[dict[str, Any]] = []
     tool_names_by_call_id: dict[str, str] = {}
-    for row in _iter_jsonl_objects(path):
+    for row in _iter_jsonl_objects(path, max_events=max_events):
         role = row.get("role")
         if role == "user":
             events.append({"type": "user_request", "content": row.get("content", "")})
@@ -33,21 +38,23 @@ def ingest_codex_session_bundle(path: Path) -> TraceBundle:
             events.append(_normalize_codex_turn_context(row["payload"]))
         elif row.get("type") == "response_item" and isinstance(row.get("payload"), dict):
             events.extend(_normalize_codex_response_item(row["payload"], tool_names_by_call_id))
-    return _bundle_from_payloads(path, _derive_test_results(events))
+        enforce_trace_event_budget(len(events), max_events)
+    return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
 
 def ingest_claude_transcript(path: Path) -> CanonicalEpisode:
     return canonical_episode_from_bundle(ingest_claude_transcript_bundle(path))
 
 
-def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
+def ingest_claude_transcript_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
     events: list[dict[str, Any]] = []
     tool_names_by_id: dict[str, str] = {}
     if path.suffix == ".jsonl":
-        for row in _iter_jsonl_objects(path):
+        for row in _iter_jsonl_objects(path, max_events=max_events):
             if isinstance(row.get("message"), dict):
                 events.extend(_normalize_claude_message(row["message"], tool_names_by_id))
-        return _bundle_from_payloads(path, _derive_test_results(events))
+            enforce_trace_event_budget(len(events), max_events)
+        return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     messages = payload.get("messages", [])
@@ -69,14 +76,14 @@ def ingest_claude_transcript_bundle(path: Path) -> TraceBundle:
                     "summary": message.get("content", ""),
                 }
             )
-    return _bundle_from_payloads(path, _derive_test_results(events))
+    return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
 
 def ingest_ci_failure(path: Path) -> CanonicalEpisode:
     return canonical_episode_from_bundle(ingest_ci_failure_bundle(path))
 
 
-def ingest_ci_failure_bundle(path: Path) -> TraceBundle:
+def ingest_ci_failure_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
     payload = json.loads(path.read_text(encoding="utf-8"))
     suite = str(payload.get("suite", "ci"))
     exit_code = int(payload.get("exit_code", 1))
@@ -90,16 +97,21 @@ def ingest_ci_failure_bundle(path: Path) -> TraceBundle:
         {"type": "test_result", "suite": suite, "passed": exit_code == 0},
         {"type": "outcome_label", "label": "ci_failed" if exit_code else "ci_passed"},
     ]
-    return _bundle_from_payloads(path, events, trusted_outcome_assertions=True)
+    return _bundle_from_payloads(
+        path,
+        events,
+        trusted_outcome_assertions=True,
+        max_events=max_events,
+    )
 
 
 def ingest_mcp_session(path: Path) -> CanonicalEpisode:
     return canonical_episode_from_bundle(ingest_mcp_session_bundle(path))
 
 
-def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
+def ingest_mcp_session_bundle(path: Path, *, max_events: int | None = None) -> TraceBundle:
     events: list[dict[str, Any]] = []
-    for row in _iter_jsonl_objects(path):
+    for row in _iter_jsonl_objects(path, max_events=max_events):
         event = row.get("event")
         if event == "request":
             events.append({"type": "user_request", "content": row.get("text", "")})
@@ -169,7 +181,8 @@ def ingest_mcp_session_bundle(path: Path) -> TraceBundle:
             )
         elif event == "agent.final":
             events.append({"type": "final_answer", "content": row.get("text", "")})
-    return _bundle_from_payloads(path, events)
+        enforce_trace_event_budget(len(events), max_events)
+    return _bundle_from_payloads(path, events, max_events=max_events)
 
 
 def _bool_from_mcp(value: object, default: bool = False) -> bool:
@@ -186,7 +199,8 @@ def _bool_from_mcp(value: object, default: bool = False) -> bool:
     return default
 
 
-def _iter_jsonl_objects(path: Path) -> Iterator[dict[str, Any]]:
+def _iter_jsonl_objects(path: Path, *, max_events: int | None = None) -> Iterator[dict[str, Any]]:
+    event_count = 0
     with path.open(encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
@@ -197,6 +211,8 @@ def _iter_jsonl_objects(path: Path) -> Iterator[dict[str, Any]]:
                 raise ValueError(f"trace line {line_number} contains invalid JSON") from error
             if not isinstance(row, dict):
                 raise ValueError(f"trace line {line_number} must be a JSON object")
+            event_count += 1
+            enforce_trace_event_budget(event_count, max_events)
             yield row
 
 
@@ -599,7 +615,9 @@ def _bundle_from_payloads(
     payloads: list[dict[str, Any]],
     *,
     trusted_outcome_assertions: bool = False,
+    max_events: int | None = None,
 ) -> TraceBundle:
+    enforce_trace_event_budget(len(payloads), max_events)
     events = tuple(
         TraceEvent(
             evidence_id=_evidence_id(index, payload),

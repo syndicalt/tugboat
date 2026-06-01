@@ -240,6 +240,140 @@ instruction_files:
     assert "Traceback" not in output
 
 
+def test_audit_trace_input_budget_failure_exits_before_run_artifacts(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+trace:
+  max_input_bytes: 10
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"This is too large"}\n', encoding="utf-8")
+    trace_size = trace.stat().st_size
+
+    exit_code = main(["audit", "--repo", str(repo), "--trace", str(trace)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert (
+        f"audit blocked: trace input size budget exceeded: {trace_size} bytes, limit 10"
+        in output
+    )
+    assert "Traceback" not in output
+    assert not (sidecar / "runs").exists()
+    assert not (sidecar / "db.sqlite").exists()
+
+
+def test_optimize_train_trace_input_budget_failure_exits_before_run_artifacts(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+trace:
+  max_input_bytes: 10
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trigger = repo / "trigger.jsonl"
+    trigger.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    train = repo / "train.jsonl"
+    train.write_text('{"type":"user_request","text":"Training trace is too large"}\n', encoding="utf-8")
+    train_size = train.stat().st_size
+
+    exit_code = main(
+        [
+            "optimize",
+            "--repo",
+            str(repo),
+            "--trace",
+            str(trigger),
+            "--train-trace",
+            str(train),
+            "--suite",
+            "all",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert (
+        f"audit blocked: trace input size budget exceeded: {train_size} bytes, limit 10"
+        in output
+    )
+    assert "Traceback" not in output
+    assert not (sidecar / "runs").exists()
+    assert not (sidecar / "db.sqlite").exists()
+
+
+def test_audit_trace_event_budget_failure_writes_failed_audit_without_raw_payload(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+trace:
+  max_events: 2
+instruction_files:
+  - path: CODEX.md
+    kind: agent_policy
+    precedence: 70
+    protected: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trace = repo / "trace.jsonl"
+    trace.write_text(
+        '{"type":"user_request","text":"Fix one"}\n'
+        '{"type":"tool_call","tool":"pytest"}\n'
+        '{"type":"tool_result","tool":"pytest","output":"RAW_PAYLOAD_SHOULD_NOT_LEAK"}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "audit",
+            "--repo",
+            str(repo),
+            "--trace",
+            str(trace),
+            "--trace-format",
+            "generic-jsonl",
+            "--mock-llmff-inspect",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "audit blocked: trace event budget exceeded: 3 events, limit 2" in output
+    assert "Traceback" not in output
+    run_dir = next((sidecar / "runs").iterdir())
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "trace_event_budget_exceeded"
+    assert audit["llmff_failure_message"] == "trace event budget exceeded: 3 events, limit 2"
+    assert "RAW_PAYLOAD_SHOULD_NOT_LEAK" not in json.dumps(audit)
+
+
 def test_optimize_missing_trace_cli_exits_cleanly_without_python_traceback(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

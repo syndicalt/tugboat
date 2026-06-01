@@ -44,6 +44,8 @@ tugboat inspect-decision --repo . --decision latest --compare <decision-id>
 
 Supported `--trace-format` values are `auto`, `generic-jsonl`, `codex`, `claude`, `ci`, and `mcp`.
 
+Trace ingestion honors policy-owned `trace.max_input_bytes` and `trace.max_events`. Oversized trace files are blocked before copying into `.sidecar/runs`, oversized MCP episode payloads are blocked before persistence, and over-event JSONL traces are blocked before building an unbounded trace bundle.
+
 `report` writes `.sidecar/runs/<run-id>/report.md` with artifact references, eval scores, longitudinal metrics, optimization summary fields, and a `highest_impact_summary` derived from bounded edit metadata plus eval metrics. The impact summary is metadata-only: target file/section, edit operator, changed lines, held-out delta, instruction token delta, and governance status.
 
 `inspect-decision` writes `.sidecar/runs/<run-id>/decision-trace.json` and prints a metadata-only operator summary:

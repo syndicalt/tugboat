@@ -209,6 +209,32 @@ def test_ingest_codex_large_response_item_trace_preserves_order_and_evidence_ids
     assert len({event.evidence_id for event in bundle.events}) == 150
 
 
+def test_ingest_codex_session_blocks_event_budget_while_iterating_jsonl(
+    tmp_path: Path,
+):
+    session = tmp_path / "codex-large.jsonl"
+    session.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": f"Fix issue {index}"}],
+                    },
+                }
+            )
+            + "\n"
+            for index in range(3)
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trace event budget exceeded: 3 events, limit 2"):
+        ingest_codex_session_bundle(session, max_events=2)
+
+
 def test_ingest_codex_session_derives_test_result_from_process_exit_status(
     tmp_path: Path,
 ):

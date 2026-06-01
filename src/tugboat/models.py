@@ -147,6 +147,8 @@ class Policy:
     checkpoints_retention_days: int = 7
     retention_scan_file_budget: int = 100_000
     index_max_instruction_files: int = 10_000
+    trace_max_input_bytes: int = 50_000_000
+    trace_max_events: int = 100_000
     provider_smoke_enabled: bool = False
     provider_smoke_provider: str = ""
     provider_smoke_command: str = ""

@@ -196,6 +196,7 @@ def load_policy(repo: Path) -> Policy:
     provider_smoke = raw.get("provider_smoke", {}) or {}
     retention = raw.get("retention", {}) or {}
     index = raw.get("index", {}) or {}
+    trace = raw.get("trace", {}) or {}
     roadmap = raw.get("roadmap", {}) or {}
     vcs = raw.get("vcs", {}) or {}
     pull_request = vcs.get("pull_request", {}) or {}
@@ -362,6 +363,14 @@ def load_policy(repo: Path) -> Policy:
         index_max_instruction_files=_as_positive_int(
             index.get("max_instruction_files", Policy().index_max_instruction_files),
             "index.max_instruction_files",
+        ),
+        trace_max_input_bytes=_as_positive_int(
+            trace.get("max_input_bytes", Policy().trace_max_input_bytes),
+            "trace.max_input_bytes",
+        ),
+        trace_max_events=_as_positive_int(
+            trace.get("max_events", Policy().trace_max_events),
+            "trace.max_events",
         ),
         provider_smoke_enabled=bool(
             provider_smoke.get("enabled", Policy().provider_smoke_enabled)

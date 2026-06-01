@@ -214,6 +214,10 @@ def _initialize_repo_policy(repo: Path) -> Path:
         "index": {
             "max_instruction_files": Policy().index_max_instruction_files,
         },
+        "trace": {
+            "max_input_bytes": Policy().trace_max_input_bytes,
+            "max_events": Policy().trace_max_events,
+        },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,

@@ -38,7 +38,11 @@ from tugboat.traces.adapters import (
     ingest_codex_session_bundle,
     ingest_mcp_session_bundle,
 )
-from tugboat.traces.ingest import canonical_episode_from_bundle, ingest_jsonl_trace
+from tugboat.traces.ingest import (
+    TraceEventBudgetExceeded,
+    canonical_episode_from_bundle,
+    ingest_jsonl_trace,
+)
 from tugboat.traces.threats import detect_trace_threats
 
 
@@ -61,6 +65,13 @@ def run_audit_pipeline(
         return AuditPipelineResult(1, sidecar_dir(repo), trace_problem)
 
     policy = load_policy(repo)
+    trace_budget_problem = _trace_input_budget_problem(
+        trace,
+        max_input_bytes=policy.trace_max_input_bytes,
+    )
+    if trace_budget_problem is not None:
+        return AuditPipelineResult(1, sidecar_dir(repo), trace_budget_problem)
+
     run_dir = new_run_dir(repo)
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
         store.insert_run(
@@ -130,7 +141,30 @@ def run_audit_pipeline(
         )
         return AuditPipelineResult(1, run_dir, "audit blocked: secret detected")
     try:
-        bundle = _ingest_trace(trace, trace_format)
+        bundle = _ingest_trace(trace, trace_format, max_events=policy.trace_max_events)
+    except TraceEventBudgetExceeded as error:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash="preflight",
+                status="failed",
+                run_dir=run_dir,
+            )
+        write_audit(
+            run_dir,
+            {
+                "audit_id": 0,
+                "edit_warranted": False,
+                "evidence_refs": [],
+                "failure_class": "trace_event_budget_exceeded",
+                "severity": "high",
+                "confidence": 1.0,
+                "llmff_failure_kind": "trace_event_budget_exceeded",
+                "llmff_failure_message": str(error),
+            },
+        )
+        return AuditPipelineResult(1, run_dir, f"audit blocked: {error}")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
             store.insert_run(
@@ -662,20 +696,20 @@ def _instruction_source_ref(document, chunk) -> str:
     return f"{document.path}#bytes-{chunk.byte_start}-{chunk.byte_end}"
 
 
-def _ingest_trace(trace: Path, trace_format: str):
+def _ingest_trace(trace: Path, trace_format: str, *, max_events: int | None = None):
     requested_trace_format = trace_format
     if trace_format == "auto":
         trace_format = detect_trace_format(trace)
     if trace_format == "generic-jsonl":
-        bundle = ingest_jsonl_trace(trace)
+        bundle = ingest_jsonl_trace(trace, max_events=max_events)
     elif trace_format == "codex":
-        bundle = ingest_codex_session_bundle(trace)
+        bundle = ingest_codex_session_bundle(trace, max_events=max_events)
     elif trace_format == "claude":
-        bundle = ingest_claude_transcript_bundle(trace)
+        bundle = ingest_claude_transcript_bundle(trace, max_events=max_events)
     elif trace_format == "ci":
-        bundle = ingest_ci_failure_bundle(trace)
+        bundle = ingest_ci_failure_bundle(trace, max_events=max_events)
     elif trace_format == "mcp":
-        bundle = ingest_mcp_session_bundle(trace)
+        bundle = ingest_mcp_session_bundle(trace, max_events=max_events)
     else:
         raise ValueError(f"unsupported trace format: {trace_format}")
     if not bundle.events:
@@ -694,6 +728,16 @@ def _trace_input_problem(trace: Path) -> str | None:
         return f"audit blocked: trace file not found: {trace}"
     if not trace.is_file():
         return f"audit blocked: trace path is not a file: {trace}"
+    return None
+
+
+def _trace_input_budget_problem(trace: Path, *, max_input_bytes: int) -> str | None:
+    size_bytes = trace.stat().st_size
+    if size_bytes > max_input_bytes:
+        return (
+            "audit blocked: trace input size budget exceeded: "
+            f"{size_bytes} bytes, limit {max_input_bytes}"
+        )
     return None
 
 

@@ -36,6 +36,9 @@ retention:
   max_scan_files: 100000
 index:
   max_instruction_files: 10000
+trace:
+  max_input_bytes: 50000000
+  max_events: 100000
 llmff:
   binary: python -m tugboat.llmff.fixture_backend
   require_inspect: true
@@ -49,6 +52,8 @@ This fixture backend is local, credential-free, and intended for proposal-only a
 `retention.max_scan_files` bounds local `.sidecar/runs` retention and redaction scans. When the budget is exceeded, Tugboat blocks cleanup before deletion or export so operators can review sidecar growth instead of running unbounded maintenance work.
 
 `index.max_instruction_files` bounds configured instruction discovery before parsing or index writes. When the budget is exceeded, `tugboat index` blocks without writing `.sidecar/db.sqlite`, which keeps large repository onboarding deterministic.
+
+`trace.max_input_bytes` bounds audit, optimize, train-trace, and MCP episode trace inputs before Tugboat copies or persists the payload. `trace.max_events` bounds normalized JSONL ingestion before Tugboat builds an unbounded trace bundle. Raise these only for reviewed large-trace workflows.
 
 ## Provider Backed
 

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 import tugboat.cli as cli_module
+import tugboat.daemon.runner as runner_module
 import tugboat.mcp.contracts as mcp_contracts
 from tugboat.cli import main
 from tugboat.daemon.queue import DaemonQueue, FileKillSwitch, JobState
@@ -1233,6 +1234,58 @@ def test_daemon_cycle_cli_watches_trace_dir_and_reports_discovery(tmp_path: Path
             "trace_format": "generic-jsonl",
             "trace_path": str(trace_dir / "episode.jsonl"),
         }
+
+
+def test_daemon_cycle_skips_oversized_trace_before_secret_scan(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    trace_dir = tmp_path / "traces"
+    sidecar = tmp_path / ".sidecar"
+    trace_dir.mkdir()
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+trace:
+  max_input_bytes: 10
+""".lstrip(),
+        encoding="utf-8",
+    )
+    oversized = trace_dir / "episode.jsonl"
+    oversized.write_text(
+        '{"type":"user_request","text":"This trace is too large"}\n',
+        encoding="utf-8",
+    )
+
+    def fail_if_called(path: Path):
+        if path == oversized:
+            raise AssertionError("oversized trace should be skipped before secret scan")
+        return ()
+
+    monkeypatch.setattr(runner_module, "scan_path", fail_if_called)
+
+    exit_code = main(
+        [
+            "daemon",
+            "cycle",
+            "--repo",
+            str(tmp_path),
+            "--trace-dir",
+            str(trace_dir),
+            "--max-jobs",
+            "0",
+            "--concurrency",
+            "0",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["trace_discovery"] == {"discovered": 0, "skipped": 1}
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        assert queue.get_job(1) is None
 
 
 def test_daemon_cycle_cli_can_run_bounded_loop(tmp_path: Path, capsys):

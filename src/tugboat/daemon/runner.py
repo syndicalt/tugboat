@@ -54,6 +54,7 @@ def discover_trace_jobs(
     *,
     now: datetime | None = None,
 ) -> dict[str, int]:
+    policy = load_policy(repo)
     registry = _load_discovered_traces(repo)
     eligible_traces: list[tuple[Path, str, str]] = []
     planned_registry = set(registry)
@@ -77,6 +78,13 @@ def discover_trace_jobs(
                 continue
             trace_key = str(trace_target)
             if trace_key in planned_registry:
+                skipped += 1
+                continue
+            try:
+                if path.stat().st_size > policy.trace_max_input_bytes:
+                    skipped += 1
+                    continue
+            except OSError:
                 skipped += 1
                 continue
             try:

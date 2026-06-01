@@ -27,6 +27,17 @@ TRUST_BY_EVENT_TYPE = {
 }
 
 
+class TraceEventBudgetExceeded(ValueError):
+    pass
+
+
+def enforce_trace_event_budget(event_count: int, max_events: int | None) -> None:
+    if max_events is not None and event_count > max_events:
+        raise TraceEventBudgetExceeded(
+            f"trace event budget exceeded: {event_count} events, limit {max_events}"
+        )
+
+
 def _canonical_payload(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -38,7 +49,7 @@ def _evidence_id(line_number: int, payload: dict[str, Any]) -> str:
     return f"ev_{digest[:16]}"
 
 
-def ingest_jsonl_trace(path: Path) -> TraceBundle:
+def ingest_jsonl_trace(path: Path, *, max_events: int | None = None) -> TraceBundle:
     events: list[TraceEvent] = []
     with path.open(encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -50,6 +61,7 @@ def ingest_jsonl_trace(path: Path) -> TraceBundle:
                 raise ValueError(f"trace line {line_number} contains invalid JSON") from error
             if not isinstance(payload, dict):
                 raise ValueError(f"trace line {line_number} must be a JSON object")
+            enforce_trace_event_budget(len(events) + 1, max_events)
             event_type = str(payload.get("type", "unknown"))
             events.append(
                 TraceEvent(

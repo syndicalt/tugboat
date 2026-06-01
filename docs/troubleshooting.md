@@ -47,6 +47,14 @@ Validate that the trace is JSONL or JSON matching the selected `--trace-format`.
 
 The file is a JSON object that does not match a supported object-based trace shape, such as Claude transcript JSON or CI failure JSON. Export the session as JSONL, use a supported trace fixture shape, or pass an explicit non-auto `--trace-format` only when the file truly matches that adapter.
 
+`audit blocked: trace input size budget exceeded`
+
+Review the trace export before raising `trace.max_input_bytes` in `.sidecar/policy.yaml`. Tugboat blocks before copying oversized audit, optimize, or train-trace files into `.sidecar/runs`.
+
+`audit blocked: trace event budget exceeded`
+
+Review the trace export before raising `trace.max_events` in `.sidecar/policy.yaml`. Tugboat blocks over-event JSONL traces before building an unbounded trace bundle or invoking `llmff`.
+
 `instruction index blocked: llmff inspect failed: binary not found`
 
 Check `.sidecar/policy.yaml` and verify `llmff.binary`. The default after `tugboat init --repo .` is `python -m tugboat.llmff.fixture_backend`.

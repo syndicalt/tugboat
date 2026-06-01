@@ -1889,6 +1889,78 @@ mcp:
     assert events[-1]["status"] == "failed"
 
 
+def test_record_episode_blocks_trace_input_budget_failure_before_persisting_episode(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+trace:
+  max_input_bytes: 10
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trace_jsonl = '{"type":"user_request","content":"This payload is too large"}\n'
+    trace_size = len(trace_jsonl.encode("utf-8"))
+
+    with pytest.raises(
+        ValueError,
+        match=f"trace input size budget exceeded: {trace_size} bytes, limit 10",
+    ):
+        tugboat_record_episode(repo, trace_jsonl)
+
+    assert not (sidecar / "mcp" / "episodes").exists()
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_record_episode"
+    assert events[-1]["status"] == "failed"
+
+
+def test_record_episode_blocks_trace_event_budget_failure_without_persisting_episode(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+trace:
+  max_events: 2
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trace_jsonl = (
+        '{"type":"user_request","content":"Fix one"}\n'
+        '{"type":"tool_call","tool":"pytest"}\n'
+        '{"type":"tool_result","tool":"pytest","output":"ok"}\n'
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="trace event budget exceeded: 3 events, limit 2",
+    ):
+        tugboat_record_episode(repo, trace_jsonl)
+
+    episode_dir = sidecar / "mcp" / "episodes"
+    assert not episode_dir.exists() or list(episode_dir.iterdir()) == []
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_record_episode"
+    assert events[-1]["status"] == "failed"
+
+
 def test_record_episode_writes_private_episode_artifacts(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)

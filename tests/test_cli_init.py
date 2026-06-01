@@ -82,6 +82,10 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
         "index": {
             "max_instruction_files": 10000,
         },
+        "trace": {
+            "max_input_bytes": 50000000,
+            "max_events": 100000,
+        },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,

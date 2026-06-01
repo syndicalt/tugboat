@@ -28,7 +28,7 @@ from tugboat.report.decision_trace import write_decision_trace
 from tugboat.security.redaction import redact_payload, redact_text
 from tugboat.security.secrets import SecretScanError, scan_path
 from tugboat.traces.adapters import ingest_mcp_session_bundle
-from tugboat.traces.ingest import ingest_jsonl_trace
+from tugboat.traces.ingest import TraceEventBudgetExceeded, ingest_jsonl_trace
 from tugboat.traces.schema import TraceBundle, TraceEvent
 
 
@@ -820,6 +820,13 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
     repo_path = _resolve_local_repo(repo)
 
     def write() -> dict[str, Any]:
+        policy = load_policy(repo_path)
+        payload_size = len(trace_jsonl.encode("utf-8"))
+        if payload_size > policy.trace_max_input_bytes:
+            raise ValueError(
+                "trace input size budget exceeded: "
+                f"{payload_size} bytes, limit {policy.trace_max_input_bytes}"
+            )
         trace_id = f"mcp-trace-{_stamp()}"
         mcp_dir = sidecar_dir(repo_path) / "mcp"
         episode_dir = mcp_dir / "episodes"
@@ -838,10 +845,13 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
         try:
             bundle = _bundle_with_active_context(
                 repo_path,
-                ingest_mcp_session_bundle(path)
+                ingest_mcp_session_bundle(path, max_events=policy.trace_max_events)
                 if trace_format == "mcp"
-                else ingest_jsonl_trace(path),
+                else ingest_jsonl_trace(path, max_events=policy.trace_max_events),
             )
+        except TraceEventBudgetExceeded as error:
+            path.unlink(missing_ok=True)
+            raise ValueError(str(error)) from error
         except InstructionIndexBudgetExceeded as error:
             path.unlink(missing_ok=True)
             raise ValueError(str(error)) from error
