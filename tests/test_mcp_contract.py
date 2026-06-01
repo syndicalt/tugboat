@@ -23,6 +23,7 @@ from tugboat.mcp import (
     list_mcp_tools,
     run_stdio_server,
     tugboat_active_instructions,
+    tugboat_auto_update_status,
     tugboat_candidate,
     tugboat_candidate_report,
     tugboat_decision_trace,
@@ -1102,6 +1103,70 @@ def test_decision_trace_returns_artifact_ref_without_raw_payloads(tmp_path: Path
     assert "rationale" not in serialized
     assert (repo / ".sidecar" / "runs" / "seed-review-target" / "decision-trace.json").exists()
     assert _mcp_events(repo)[-1]["tool"] == "tugboat_decision_trace"
+
+
+def test_auto_update_status_exposes_read_only_lane_observability(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "auto_apply.shadowed",
+            {"candidate_id": "7", "lane": "docs_hygiene"},
+        )
+        store.append_audit_event(
+            "auto_apply.decided",
+            {
+                "candidate_id": "7",
+                "lane": "docs_hygiene",
+                "eligible": True,
+                "phase": "precheck",
+            },
+        )
+        store.append_audit_event(
+            "auto_apply.applied",
+            {"candidate_id": "7", "approval_bundle": {"lane": "docs_hygiene"}},
+        )
+        store.append_audit_event(
+            "rollback.applied",
+            {"candidate_id": "7"},
+        )
+
+    result = tugboat_auto_update_status(repo)
+
+    assert result["auto_apply_enabled"] is False
+    assert result["kill_switch_enabled"] is False
+    assert result["lanes"]["docs_hygiene"] == {
+        "shadowed": 1,
+        "eligible": 1,
+        "rejected": 0,
+        "staged": 1,
+        "applied": 1,
+        "rolled_back": 1,
+        "paused": 0,
+    }
+    assert result["daemon_queue"]["jobs_by_state"] == {}
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_auto_update_status"
+
+
+def test_bound_read_only_mcp_stdio_includes_auto_update_status(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "tugboat_auto_update_status", "arguments": {}},
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    payload = responses[0]["result"]["content"][0]["json"]
+    assert payload["auto_apply_enabled"] is False
+    assert set(payload["lanes"]) >= {"docs_hygiene", "skill_improvement"}
 
 
 def test_repo_must_be_local_path():
@@ -2933,6 +2998,7 @@ def test_bound_read_only_mcp_stdio_lists_only_read_tools(tmp_path: Path):
 def test_mcp_tool_registry_exposes_only_approved_non_mutating_tools():
     approved_read_tools = {
         "tugboat_active_instructions",
+        "tugboat_auto_update_status",
         "tugboat_candidate",
         "tugboat_candidate_report",
         "tugboat_daemon_status",

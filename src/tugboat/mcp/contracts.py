@@ -17,6 +17,7 @@ from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility
+from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.report.decision_trace import write_decision_trace
@@ -74,6 +75,7 @@ _DECIMAL_ID_SCHEMA = {"pattern": r"^[0-9]+$", "type": "string"}
 
 MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "tugboat_active_instructions": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_auto_update_status": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_candidate": _object_schema(
         {"repo": _REPO_SCHEMA, "candidate_id": _INTEGER_ID_SCHEMA},
         ("repo", "candidate_id"),
@@ -206,6 +208,49 @@ def tugboat_status(repo: str | Path) -> dict[str, Any]:
         }
 
     return _audit_call(repo_path, "tugboat_status", {}, read)
+
+
+def tugboat_auto_update_status(repo: str | Path) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        policy = load_policy(repo_path)
+        summary = summarize_sidecar_observability(repo_path)
+        daemon_queue = summary.get("daemon_queue")
+        if not isinstance(daemon_queue, dict):
+            daemon_queue = daemon_status(repo_path, kill_switch=default_kill_switch(repo_path))
+        raw_lanes = summary.get("auto_apply_lanes")
+        lanes = (
+            raw_lanes
+            if isinstance(raw_lanes, dict) and raw_lanes
+            else {lane.name: _empty_lane_counts() for lane in policy.auto_apply_lanes}
+        )
+        paused_lanes = {*policy.auto_apply_paused_lanes}
+        paused_lanes.update(lane.name for lane in policy.auto_apply_lanes if not lane.enabled)
+        return {
+            "auto_apply_enabled": policy.auto_apply_enabled,
+            "kill_switch_enabled": bool(daemon_queue.get("kill_switch_enabled", False)),
+            "paused_lanes": sorted(paused_lanes),
+            "lanes": lanes,
+            "daemon_queue": {
+                "jobs_by_state": daemon_queue.get("jobs_by_state", {}),
+                "oldest_queued_job_id": daemon_queue.get("oldest_queued_job_id"),
+            },
+        }
+
+    return _audit_call(repo_path, "tugboat_auto_update_status", {}, read)
+
+
+def _empty_lane_counts() -> dict[str, int]:
+    return {
+        "shadowed": 0,
+        "eligible": 0,
+        "rejected": 0,
+        "staged": 0,
+        "applied": 0,
+        "rolled_back": 0,
+        "paused": 0,
+    }
 
 
 def _latest_llmff_failure_kind(store: Store, job_id: int) -> str | None:
@@ -994,6 +1039,7 @@ def handle_jsonrpc_request(
 
 MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_active_instructions": tugboat_active_instructions,
+    "tugboat_auto_update_status": tugboat_auto_update_status,
     "tugboat_candidate": tugboat_candidate,
     "tugboat_candidate_report": tugboat_candidate_report,
     "tugboat_daemon_status": tugboat_daemon_status,
