@@ -334,6 +334,96 @@ def test_audit_forced_trace_format_mismatch_returns_actionable_hint(
     )
 
 
+def test_propose_missing_latest_run_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 1
+
+    output = capsys.readouterr().out
+    assert "propose blocked: no tugboat run directories exist" in output
+    assert "Traceback" not in output
+
+
+def test_eval_missing_latest_run_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "latest", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked: no tugboat run directories exist" in output
+    assert "Traceback" not in output
+
+
+def test_propose_malformed_audit_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "audit.json").write_text("{}\n", encoding="utf-8")
+
+    assert main(["propose", "--repo", str(repo), "--audit", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "propose blocked: audit.json missing required field: schema_version" in output
+    assert "Traceback" not in output
+
+
+def test_propose_missing_audit_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    (repo / ".sidecar" / "runs" / "run-1").mkdir(parents=True)
+
+    assert main(["propose", "--repo", str(repo), "--audit", "run-1"]) == 1
+
+    output = capsys.readouterr().out
+    assert "propose blocked:" in output
+    assert "audit.json" in output
+    assert "Traceback" not in output
+
+
+def test_eval_malformed_candidate_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "candidate.json").write_text("{}\n", encoding="utf-8")
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked: candidate.json missing required field: schema_version" in output
+    assert "Traceback" not in output
+
+
+def test_eval_missing_candidate_artifact_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    (repo / ".sidecar" / "runs" / "run-1").mkdir(parents=True)
+
+    assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked:" in output
+    assert "candidate.json" in output
+    assert "Traceback" not in output
+
+
 def _write_fake_llmff(path: Path) -> Path:
     path.write_text(
         """#!/usr/bin/env python3

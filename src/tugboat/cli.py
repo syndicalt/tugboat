@@ -783,20 +783,42 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "propose":
         repo = Path(args.repo)
-        result = run_propose_pipeline(repo, args.audit)
+        try:
+            result = run_propose_pipeline(repo, args.audit)
+        except (
+            ArtifactValidationError,
+            FileNotFoundError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as error:
+            print(f"propose blocked: {error}")
+            return 1
         print(result.message)
         return result.exit_code
 
     if args.command == "eval":
         repo = Path(args.repo)
-        result = run_eval_pipeline(repo, args.candidate, args.suite)
+        try:
+            result = run_eval_pipeline(repo, args.candidate, args.suite)
+        except (
+            ArtifactValidationError,
+            FileNotFoundError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as error:
+            print(f"eval blocked: {error}")
+            return 1
         print(result.message)
-        return _finalize_governed_candidate_evaluation(
-            repo,
-            result.run_dir,
-            suite_id=args.suite,
-            eval_exit_code=result.exit_code,
-        )
+        try:
+            return _finalize_governed_candidate_evaluation(
+                repo,
+                result.run_dir,
+                suite_id=args.suite,
+                eval_exit_code=result.exit_code,
+            )
+        except (ArtifactValidationError, KeyError, ValueError) as error:
+            print(f"eval blocked: {error}")
+            return 1
 
     if args.command == "optimize":
         repo = Path(args.repo)
