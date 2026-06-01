@@ -64,7 +64,7 @@ from tugboat.harness.checks import (
     generate_harness_report,
 )
 from tugboat.llmff.contracts import LlmffRunFailed
-from tugboat.llmff.runner import inspect_manifest, run_manifest
+from tugboat.llmff.runner import command_prefix, inspect_manifest, run_manifest
 from tugboat.manifests import (
     manifests_are_allowed_by_policy,
     materialize_manifests,
@@ -221,10 +221,11 @@ def _initialize_repo_policy(repo: Path) -> Path:
     return policy_path
 
 
-def _print_doctor_report(repo: Path) -> None:
+def _print_doctor_report(repo: Path) -> int:
     policy_path = repo / ".sidecar" / "policy.yaml"
     policy_exists = policy_path.exists()
     policy = load_policy(repo)
+    llmff_binary_status, llmff_binary_reason = _doctor_llmff_binary_status(policy)
     auto_apply_state = "enabled" if policy.auto_apply_enabled else "disabled"
     llmff_network_state = "enabled" if policy.llmff_allow_network else "disabled"
     allowed_providers = ", ".join(policy.llmff_allowed_providers) or "none"
@@ -240,17 +241,47 @@ def _print_doctor_report(repo: Path) -> None:
     print(f"mode: {policy.mode}")
     print(f"auto_apply: {auto_apply_state}")
     print(f"llmff_network: {llmff_network_state}")
+    print(f"llmff_binary: {llmff_binary_status}")
     print(f"allowed_providers: {allowed_providers}")
     print(f"manifest_policy: {manifest_policy}")
-    recommendations = _doctor_recommendations(repo, policy, policy_exists)
+    recommendations = _doctor_recommendations(
+        repo,
+        policy,
+        policy_exists,
+        llmff_binary_status=llmff_binary_status,
+        llmff_binary_reason=llmff_binary_reason,
+    )
     if recommendations:
         for recommendation in recommendations:
             print(f"recommendation: {recommendation}")
     else:
         print("recommendation: none")
+    return 0
 
 
-def _doctor_recommendations(repo: Path, policy: Policy, policy_exists: bool) -> tuple[str, ...]:
+def _doctor_llmff_binary_status(policy: Policy) -> tuple[str, str | None]:
+    try:
+        command = command_prefix(policy.llmff_binary)
+    except ValueError as error:
+        return "invalid", str(error)
+    executable = command[0]
+    if Path(executable).is_absolute() or "/" in executable:
+        if Path(executable).exists():
+            return "available", None
+        return "missing", f"configured executable does not exist: {executable}"
+    if shutil.which(executable) is None:
+        return "missing", f"configured executable is not on PATH: {executable}"
+    return "available", None
+
+
+def _doctor_recommendations(
+    repo: Path,
+    policy: Policy,
+    policy_exists: bool,
+    *,
+    llmff_binary_status: str,
+    llmff_binary_reason: str | None,
+) -> tuple[str, ...]:
     if not policy_exists:
         return (
             f"run `tugboat init --repo {repo}`",
@@ -258,6 +289,14 @@ def _doctor_recommendations(repo: Path, policy: Policy, policy_exists: bool) -> 
         )
 
     recommendations: list[str] = []
+    if llmff_binary_status in {"invalid", "missing"}:
+        reason_suffix = f" ({llmff_binary_reason})" if llmff_binary_reason else ""
+        recommendations.append(
+            "fix llmff.binary in .sidecar/policy.yaml or rerun "
+            f"`tugboat init --repo {repo}` on a fresh sidecar "
+            f"[llmff_binary_{llmff_binary_status}]"
+            f"{reason_suffix}"
+        )
     if policy.mode != "proposal_only":
         recommendations.append("review policy mode before running apply or auto-apply")
     if policy.auto_apply_enabled:
@@ -466,12 +505,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "doctor":
         repo = Path(args.repo).resolve()
         try:
-            _print_doctor_report(repo)
+            return _print_doctor_report(repo)
         except (OSError, ValueError, YAMLError) as error:
             print(f"doctor blocked: policy invalid: {error}")
             print(f"recommendation: fix .sidecar/policy.yaml and rerun `tugboat doctor --repo {repo}`")
             return 1
-        return 0
 
     if args.command == "init":
         repo = Path(args.repo).resolve()

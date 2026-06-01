@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from tugboat.config import load_policy
+from tugboat.models import DEFAULT_FIXTURE_LLMFF_BINARY
 from tugboat.paths import sidecar_dir
 
 
@@ -45,6 +46,24 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
         "SKILL.md",
         ".codex/skills/**/SKILL.md",
     ]
+
+
+def test_load_policy_yaml_defaults_missing_llmff_binary_to_fixture_backend(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+mode: proposal_only
+llmff:
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.llmff_binary == DEFAULT_FIXTURE_LLMFF_BINARY
 
 
 def test_load_policy_yaml_overrides_instruction_files(tmp_path: Path):

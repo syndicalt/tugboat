@@ -289,7 +289,7 @@ def load_policy(repo: Path) -> Policy:
             )
         ),
         forbidden_terms=tuple(auto_apply.get("forbidden_terms", Policy().forbidden_terms)),
-        llmff_binary=str(llmff.get("binary", "llmff")),
+        llmff_binary=str(llmff.get("binary", Policy().llmff_binary)),
         llmff_require_inspect=bool(llmff.get("require_inspect", True)),
         llmff_allow_network=bool(llmff.get("allow_network", False)),
         llmff_timeout_ms=_as_positive_int(

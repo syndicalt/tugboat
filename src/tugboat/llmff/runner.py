@@ -404,6 +404,10 @@ def _command_prefix(binary: str) -> list[str]:
     return prefix
 
 
+def command_prefix(binary: str) -> list[str]:
+    return _command_prefix(binary)
+
+
 def _fixture_backend_env(command: list[str]) -> dict[str, str] | None:
     if not _is_fixture_backend_command(command):
         return None

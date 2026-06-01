@@ -1,6 +1,18 @@
 from tugboat.cli import main
 
 
+def test_doctor_reports_default_fixture_llmff_binary_available_after_init(tmp_path, capsys):
+    assert main(["init", "--repo", str(tmp_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(["doctor", "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "llmff_binary: available" in out
+    assert "llmff_binary_missing" not in out
+
+
 def test_doctor_reports_proposal_only(tmp_path, capsys):
     exit_code = main(["doctor", "--repo", str(tmp_path)])
 
@@ -49,6 +61,60 @@ llmff:
     assert "allowed_providers: openai" in out
     assert "recommendation: review auto-apply lanes before running `tugboat auto-apply`" in out
     assert "recommendation: confirm provider manifests are reviewed and pinned" in out
+
+
+def test_doctor_reports_missing_configured_llmff_binary_without_traceback(tmp_path, capsys):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+mode: proposal_only
+llmff:
+  binary: missing-tugboat-llmff
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["doctor", "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "tugboat: ok" in captured.out
+    assert "llmff_binary: missing" in captured.out
+    assert "llmff_binary_missing" in captured.out
+    assert "recommendation: fix llmff.binary in .sidecar/policy.yaml" in captured.out
+    assert "Traceback" not in captured.out
+
+
+def test_doctor_reports_empty_llmff_binary_as_invalid_without_traceback(tmp_path, capsys):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+mode: proposal_only
+llmff:
+  binary: ""
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["doctor", "--repo", str(tmp_path)])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "tugboat: ok" in captured.out
+    assert "llmff_binary: invalid" in captured.out
+    assert "llmff_binary_invalid" in captured.out
+    assert "recommendation: fix llmff.binary in .sidecar/policy.yaml" in captured.out
+    assert "Traceback" not in captured.out
 
 
 def test_doctor_blocks_malformed_policy_without_traceback(tmp_path, capsys):
