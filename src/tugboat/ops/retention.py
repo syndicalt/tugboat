@@ -39,9 +39,14 @@ class RedactionExportResult:
     redaction_candidates: tuple[dict[str, object], ...]
 
 
+class RetentionScanBudgetExceeded(ValueError):
+    pass
+
+
 def apply_retention_policy(repo: Path, policy: Policy, *, dry_run: bool = True) -> RetentionResult:
     repo = repo.resolve()
     runs_root = runs_dir(repo).resolve()
+    _enforce_scan_file_budget(runs_root, policy.retention_scan_file_budget)
     candidates = _expired_runtime_artifacts(
         repo,
         runs_root=runs_root,
@@ -61,10 +66,19 @@ def apply_retention_policy(repo: Path, policy: Policy, *, dry_run: bool = True) 
     )
 
 
-def export_redacted_artifacts(repo: Path, output_dir: Path) -> RedactionExportResult:
+def export_redacted_artifacts(
+    repo: Path,
+    output_dir: Path,
+    *,
+    scan_file_budget: int | None = None,
+) -> RedactionExportResult:
     repo = repo.resolve()
     output_dir = output_dir.resolve()
     _require_outside_sidecar(repo, output_dir, "redaction output")
+    _enforce_scan_file_budget(
+        runs_dir(repo).resolve(),
+        Policy().retention_scan_file_budget if scan_file_budget is None else scan_file_budget,
+    )
     candidates = _redaction_scan_artifacts(repo, ())
     redaction_candidates = _redaction_candidates(repo, candidates)
     exported: list[str] = []
@@ -110,6 +124,20 @@ def _expired_runtime_artifacts(
         elif (path.name in CHECKPOINT_FILES or path.name.startswith("checkpoint")) and age_days > checkpoint_days:
             candidates.append(path)
     return tuple(sorted(candidates, key=lambda item: _relative(repo, item)))
+
+
+def _enforce_scan_file_budget(runs_root: Path, max_scan_files: int) -> None:
+    if not runs_root.exists():
+        return
+    count = 0
+    for path in runs_root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        count += 1
+        if count > max_scan_files:
+            raise RetentionScanBudgetExceeded(
+                f"scan budget exceeded: found more than {max_scan_files} files under .sidecar/runs"
+            )
 
 
 def _redaction_scan_artifacts(repo: Path, candidates: tuple[Path, ...]) -> tuple[Path, ...]:

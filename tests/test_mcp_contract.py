@@ -461,6 +461,39 @@ def test_status_reports_retention_redaction_candidate_count(tmp_path: Path):
     assert result["retention_redaction_candidates"] == 1
 
 
+def test_status_reports_retention_scan_budget_exceeded_without_raw_exception(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sidecar = repo / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+retention:
+  max_scan_files: 1
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "trace-input.jsonl").write_text("{}\n", encoding="utf-8")
+    (run_dir / "events.jsonl").write_text("{}\n", encoding="utf-8")
+
+    result = tugboat_status(repo)
+
+    assert result["retention_candidates"] is None
+    assert result["retention_redaction_candidates"] is None
+    assert result["retention_error"].startswith("scan budget exceeded:")
+    event = _mcp_events(repo)[-1]
+    assert event["tool"] == "tugboat_status"
+    assert event["status"] == "completed"
+
+
 def test_mcp_call_rows_are_reachable_from_append_only_audit_event(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)

@@ -40,6 +40,7 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.vcs_pull_request_draft is True
     assert policy.raw_traces_retention_days == 14
     assert policy.checkpoints_retention_days == 7
+    assert policy.retention_scan_file_budget == 100_000
     assert [entry.path for entry in policy.instruction_files] == [
         "AGENTS.md",
         "CODEX.md",
@@ -588,6 +589,7 @@ version: 1
 retention:
   raw_traces_days: 30
   checkpoints_days: 10
+  max_scan_files: 5000
 """.lstrip(),
         encoding="utf-8",
     )
@@ -596,6 +598,7 @@ retention:
 
     assert policy.raw_traces_retention_days == 30
     assert policy.checkpoints_retention_days == 10
+    assert policy.retention_scan_file_budget == 5000
 
 
 def test_load_policy_yaml_rejects_negative_retention_days(tmp_path: Path):
@@ -612,6 +615,26 @@ retention:
     )
 
     with pytest.raises(ValueError, match="retention.raw_traces_days"):
+        load_policy(tmp_path)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", '"many"'])
+def test_load_policy_yaml_rejects_invalid_retention_scan_budget(
+    tmp_path: Path,
+    value: str,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+retention:
+  max_scan_files: {value}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="retention.max_scan_files"):
         load_policy(tmp_path)
 
 

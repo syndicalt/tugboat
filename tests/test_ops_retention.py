@@ -142,6 +142,38 @@ def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp
     assert (run_dir / "candidate.diff").exists()
 
 
+def test_retention_cli_apply_blocks_when_scan_file_budget_exceeded_without_deleting(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  raw_traces_days: 14
+  checkpoints_days: 7
+  max_scan_files: 3
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    expired = run_dir / "trace-input.jsonl"
+    _touch_old(expired, days_old=15)
+    _touch_old(run_dir / "trace-redacted.jsonl", days_old=15)
+    _touch_old(run_dir / "events.jsonl", days_old=8)
+    _touch_old(run_dir / "checkpoint.json", days_old=8)
+
+    assert main(["retention", "--repo", str(tmp_path), "--apply"]) == 1
+
+    output = capsys.readouterr().out
+    assert "retention blocked: scan budget exceeded" in output
+    assert "Traceback" not in output
+    assert expired.exists()
+    assert not (policy_dir / "ops" / "retention" / "retention-report.json").exists()
+
+
 def test_retention_policy_skips_symlinked_runtime_artifacts_without_reading_target(
     tmp_path: Path,
 ):
@@ -568,6 +600,45 @@ def test_retention_redact_output_writes_redacted_copy_without_mutating_original(
     redacted_report = export_dir / ".sidecar" / "runs" / "run-1" / "report.md"
     assert redacted_report.read_text(encoding="utf-8") == "token [REDACTED:openai_api_key]\n"
     assert secret in report.read_text(encoding="utf-8")
+
+
+def test_retention_redact_output_blocks_when_scan_file_budget_exceeded(
+    tmp_path: Path,
+    capsys,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  max_scan_files: 1
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    _touch_old(run_dir / "trace-input.jsonl", days_old=15)
+    _touch_old(run_dir / "events.jsonl", days_old=8)
+    export_dir = tmp_path / "redacted-export"
+
+    assert (
+        main(
+            [
+                "retention",
+                "--repo",
+                str(tmp_path),
+                "--redact-output",
+                str(export_dir),
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "redaction blocked: scan budget exceeded" in output
+    assert "Traceback" not in output
+    assert not export_dir.exists()
+    assert not (policy_dir / "ops" / "retention" / "retention-report.json").exists()
 
 
 def test_retention_redact_output_is_blocked_by_read_only_kill_switch(

@@ -18,7 +18,7 @@ from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility, generate_harness_report
 from tugboat.ops.observability import summarize_sidecar_observability
-from tugboat.ops.retention import apply_retention_policy
+from tugboat.ops.retention import RetentionScanBudgetExceeded, apply_retention_policy
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.report.decision_trace import write_decision_trace
 from tugboat.security.redaction import redact_payload, redact_text
@@ -184,7 +184,12 @@ def tugboat_status(repo: str | Path) -> dict[str, Any]:
                 ).fetchone()[0]
             )
             indexed_documents = store.count("documents")
-        retention = apply_retention_policy(repo_path, policy, dry_run=True)
+        retention_error = None
+        try:
+            retention = apply_retention_policy(repo_path, policy, dry_run=True)
+        except RetentionScanBudgetExceeded as error:
+            retention = None
+            retention_error = str(error)
         manifest_policy = (
             f"pinned {len(policy.allowed_manifest_hashes)}"
             if policy.allowed_manifest_hashes
@@ -211,9 +216,12 @@ def tugboat_status(repo: str | Path) -> dict[str, Any]:
             ),
             "latest_llmff_failure_kind": latest_failure_kind,
             "pending_candidates": pending_candidates,
-            "retention_candidates": len(retention.candidates),
-            "retention_redaction_candidates": len(retention.redaction_candidates),
+            "retention_candidates": len(retention.candidates) if retention is not None else None,
+            "retention_redaction_candidates": (
+                len(retention.redaction_candidates) if retention is not None else None
+            ),
             "manifest_policy": manifest_policy,
+            **({"retention_error": retention_error} if retention_error is not None else {}),
         }
 
     return _audit_call(repo_path, "tugboat_status", {}, read)

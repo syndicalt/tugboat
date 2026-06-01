@@ -127,6 +127,10 @@ Stop and upgrade Tugboat before running more commands against that sidecar. A ne
 
 ## Secrets And Redaction
 
+`retention blocked: scan budget exceeded`
+
+Increase `retention.max_scan_files` in `.sidecar/policy.yaml` only after reviewing `.sidecar/runs` growth, or archive/delete old sidecar runs manually. Tugboat blocks before deletion or redaction export when the scan budget is exceeded.
+
 If a secret appears in a trace, prompt, event, checkpoint, diff, or report:
 
 ```bash

@@ -354,6 +354,10 @@ def load_policy(repo: Path) -> Policy:
             retention.get("checkpoints_days", Policy().checkpoints_retention_days),
             "retention.checkpoints_days",
         ),
+        retention_scan_file_budget=_as_positive_int(
+            retention.get("max_scan_files", Policy().retention_scan_file_budget),
+            "retention.max_scan_files",
+        ),
         provider_smoke_enabled=bool(
             provider_smoke.get("enabled", Policy().provider_smoke_enabled)
         ),

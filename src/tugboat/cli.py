@@ -84,7 +84,11 @@ from tugboat.ops.observability import (
     observability_metrics_text,
     summarize_sidecar_observability,
 )
-from tugboat.ops.retention import apply_retention_policy, export_redacted_artifacts
+from tugboat.ops.retention import (
+    RetentionScanBudgetExceeded,
+    apply_retention_policy,
+    export_redacted_artifacts,
+)
 from tugboat.optimization import (
     REJECTED_EDIT_SUPPRESSION_SIGNAL,
     EpisodeOutcome,
@@ -738,7 +742,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ).fetchone()[0]
             )
             indexed_documents = store.count("documents")
-        retention = apply_retention_policy(repo, policy, dry_run=True)
+        try:
+            retention = apply_retention_policy(repo, policy, dry_run=True)
+        except RetentionScanBudgetExceeded as error:
+            print(f"status blocked: {error}")
+            return 1
         manifest_policy = (
             f"pinned {len(policy.allowed_manifest_hashes)}"
             if policy.allowed_manifest_hashes
@@ -801,7 +809,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 1
             try:
                 result = apply_retention_policy(repo, policy, dry_run=True)
-                redaction_export = export_redacted_artifacts(repo, Path(args.redact_output))
+                redaction_export = export_redacted_artifacts(
+                    repo,
+                    Path(args.redact_output),
+                    scan_file_budget=policy.retention_scan_file_budget,
+                )
             except ValueError as error:
                 print(f"redaction blocked: {error}")
                 return 1
@@ -816,7 +828,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.apply:
             if _write_blocked_by_read_only(repo, "retention"):
                 return 1
-            preflight = apply_retention_policy(repo, policy, dry_run=True)
+            try:
+                preflight = apply_retention_policy(repo, policy, dry_run=True)
+            except RetentionScanBudgetExceeded as error:
+                print(f"retention blocked: {error}")
+                return 1
             report_path = _write_retention_report(
                 repo,
                 mode="apply",
@@ -825,7 +841,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 deleted=(),
                 redaction_candidates=preflight.redaction_candidates,
             )
-            result = apply_retention_policy(repo, policy, dry_run=False)
+            try:
+                result = apply_retention_policy(repo, policy, dry_run=False)
+            except RetentionScanBudgetExceeded as error:
+                print(f"retention blocked: {error}")
+                return 1
             report_path = _write_retention_report(
                 repo,
                 mode="apply",
@@ -835,7 +855,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 redaction_candidates=result.redaction_candidates,
             )
         else:
-            result = apply_retention_policy(repo, policy, dry_run=True)
+            try:
+                result = apply_retention_policy(repo, policy, dry_run=True)
+            except RetentionScanBudgetExceeded as error:
+                print(f"retention blocked: {error}")
+                return 1
             report_path = _write_retention_report(
                 repo,
                 mode="dry-run",

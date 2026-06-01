@@ -58,6 +58,33 @@ def test_status_reports_invalid_policy_without_traceback(tmp_path: Path, capsys)
     assert not (sidecar / "status-report.json").exists()
 
 
+def test_status_blocks_when_retention_scan_file_budget_exceeded(
+    tmp_path: Path,
+    capsys,
+):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+retention:
+  max_scan_files: 1
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = sidecar / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "trace-input.jsonl").write_text("{}\n", encoding="utf-8")
+    (run_dir / "events.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert main(["status", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "status blocked: scan budget exceeded" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "status-report.json").exists()
+
+
 def test_status_reports_indexed_documents_and_latest_run(tmp_path: Path, capsys):
     (tmp_path / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
     trace = tmp_path / "trace.jsonl"
