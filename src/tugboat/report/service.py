@@ -24,7 +24,10 @@ def write_report(
     report_path = run_dir / "report.md"
     evidence_chain = _evidence_chain_lines(repo, run_dir, eval_report_path)
     eval_summary = _eval_summary_lines(eval_report_path)
-    optimization_summary = _optimization_summary_lines(repo, run_dir / "optimization-summary.json")
+    eval_payload = _validated_eval_payload(eval_report_path)
+    optimization_summary_path = run_dir / "optimization-summary.json"
+    optimization_summary = _optimization_summary_lines(repo, optimization_summary_path)
+    impact_summary = _highest_impact_summary_lines(eval_payload, optimization_summary_path)
     text = "\n".join(
         [
             "# Tugboat Report",
@@ -36,6 +39,7 @@ def write_report(
             f"- policy_reasons: {','.join(decision.reasons)}",
             *evidence_chain,
             *eval_summary,
+            *impact_summary,
             *optimization_summary,
             "",
             "## Rationale",
@@ -76,12 +80,9 @@ def _evidence_chain_lines(repo: Path, run_dir: Path, eval_report_path: Path) -> 
 
 
 def _eval_summary_lines(eval_report_path: Path) -> list[str]:
-    if not eval_report_path.exists():
+    payload = _validated_eval_payload(eval_report_path)
+    if not payload:
         return []
-    payload: Any = json.loads(eval_report_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("eval report must be a JSON object")
-    validate_json_artifact("eval-report.json", payload)
     fields = (
         "trigger_score",
         "held_out_score",
@@ -92,6 +93,16 @@ def _eval_summary_lines(eval_report_path: Path) -> list[str]:
     return [
         f"- {field}: {_report_scalar(payload[field])}" for field in fields if field in payload
     ] + _longitudinal_summary_lines(payload)
+
+
+def _validated_eval_payload(eval_report_path: Path) -> dict[str, Any]:
+    if not eval_report_path.exists():
+        return {}
+    payload: Any = json.loads(eval_report_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("eval report must be a JSON object")
+    validate_json_artifact("eval-report.json", payload)
+    return payload
 
 
 def _longitudinal_summary_lines(payload: dict[str, Any]) -> list[str]:
@@ -119,10 +130,7 @@ def _longitudinal_summary_lines(payload: dict[str, Any]) -> list[str]:
 def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> list[str]:
     if not optimization_summary_path.exists():
         return []
-    payload: Any = json.loads(optimization_summary_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("optimization summary must be a JSON object")
-    validate_json_artifact("optimization-summary.json", payload)
+    payload = _validated_optimization_summary_payload(optimization_summary_path)
     fields = (
         ("decision", "optimization_decision"),
         ("suite_id", "optimization_suite_id"),
@@ -157,6 +165,105 @@ def _optimization_summary_lines(repo: Path, optimization_summary_path: Path) -> 
             else []
         ),
     ]
+
+
+def _highest_impact_summary_lines(
+    eval_payload: dict[str, Any],
+    optimization_summary_path: Path,
+) -> list[str]:
+    if not eval_payload or not optimization_summary_path.exists():
+        return []
+    optimization_payload = _validated_optimization_summary_payload(optimization_summary_path)
+    fields = highest_impact_summary_fields(eval_payload, optimization_payload)
+    if fields is None:
+        return []
+    return [
+        "- highest_impact_summary: "
+        f"{fields['target']} {fields['operator']} "
+        f"changed_lines={fields['changed_lines']} "
+        f"held_out_delta={fields['held_out_delta']} "
+        f"instruction_token_delta={fields['instruction_token_delta']} "
+        f"governance_passed={fields['governance_passed']}"
+    ]
+
+
+def highest_impact_summary_fields(
+    eval_payload: dict[str, Any],
+    optimization_payload: dict[str, Any],
+) -> dict[str, str] | None:
+    edit = _highest_impact_edit(optimization_payload)
+    if edit is None:
+        return None
+    metrics = eval_payload.get("metrics", {})
+    token_delta = (
+        metrics.get("instruction_token_delta")
+        if isinstance(metrics, dict)
+        else None
+    )
+    return {
+        "target": _impact_target(edit),
+        "operator": _report_scalar(edit.get("operator", "unknown")),
+        "changed_lines": str(_int_or_zero(edit.get("changed_lines"))),
+        "normative_changes": str(_int_or_zero(edit.get("normative_changes"))),
+        "held_out_delta": _score_delta(
+            eval_payload.get("held_out_score"),
+            eval_payload.get("trigger_score"),
+        ),
+        "instruction_token_delta": _report_scalar(
+            token_delta if token_delta is not None else "unknown"
+        ),
+        "governance_passed": _report_scalar(eval_payload.get("governance_passed", "unknown")),
+    }
+
+
+def _validated_optimization_summary_payload(optimization_summary_path: Path) -> dict[str, Any]:
+    payload: Any = json.loads(optimization_summary_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("optimization summary must be a JSON object")
+    validate_json_artifact("optimization-summary.json", payload)
+    return payload
+
+
+def _highest_impact_edit(payload: dict[str, Any]) -> dict[str, object] | None:
+    edits = payload.get("accepted_bounded_edit_metadata", [])
+    if not isinstance(edits, list):
+        return None
+    edit_objects = [edit for edit in edits if isinstance(edit, dict)]
+    if not edit_objects:
+        return None
+    return max(
+        edit_objects,
+        key=lambda edit: (
+            _int_or_zero(edit.get("normative_changes")),
+            _int_or_zero(edit.get("changed_lines")),
+            _report_scalar(edit.get("file", "")),
+            _report_scalar(edit.get("section", "")),
+        ),
+    )
+
+
+def _impact_target(edit: dict[str, object]) -> str:
+    file_name = _report_scalar(edit.get("file", "unknown"))
+    section = _report_scalar(edit.get("section", ""))
+    return f"{file_name}#{section}" if section else file_name
+
+
+def _score_delta(held_out_score: object, trigger_score: object) -> str:
+    try:
+        delta = float(held_out_score) - float(trigger_score)
+    except (TypeError, ValueError):
+        return "unknown"
+    return f"{delta:.2f}"
+
+
+def _int_or_zero(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return 0
 
 
 def _report_scalar(value: object) -> str:

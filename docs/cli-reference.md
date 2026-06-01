@@ -43,6 +43,8 @@ tugboat inspect-decision --repo . --decision latest --compare <decision-id>
 
 Supported `--trace-format` values are `auto`, `generic-jsonl`, `codex`, `claude`, `ci`, and `mcp`.
 
+`report` writes `.sidecar/runs/<run-id>/report.md` with artifact references, eval scores, longitudinal metrics, optimization summary fields, and a `highest_impact_summary` derived from bounded edit metadata plus eval metrics. The impact summary is metadata-only: target file/section, edit operator, changed lines, held-out delta, instruction token delta, and governance status.
+
 `inspect-decision` writes `.sidecar/runs/<run-id>/decision-trace.json` and prints a metadata-only operator summary:
 
 ```text
@@ -55,6 +57,7 @@ candidate_state: needs_review
 risk_class: <class>
 evals: all=passed
 rollback_ready: no
+highest_impact: target=CODEX.md#Testing operator=add changed_lines=1 normative_changes=0 held_out_delta=0.08 instruction_token_delta=6 governance_passed=true
 review_next: inspect .sidecar/runs/<run-id>/candidate.diff
 ```
 

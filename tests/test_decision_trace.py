@@ -364,7 +364,156 @@ def test_inspect_decision_compares_candidate_metadata_without_payloads(
     assert "decision: needs_review -> rejected" in output
     assert "evals: all=passed -> all=failed" in output
     assert "rollback_ready: no -> no" in output
+    assert "highest_impact: none" in output
     assert "changed_fields: candidate_id, candidate_file, candidate_state, risk_class, decision, evals" in output
     assert "Sensitive customer request" not in output
     assert "payload_snippet" not in output
     assert "rationale should not print" not in output
+
+
+def test_inspect_decision_prints_highest_impact_metadata_only(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    codex.write_text("# Rules\n\nUse regression tests.\n", encoding="utf-8")
+    trace_path = repo / "trace.jsonl"
+    trace_path.write_text('{"type":"user_request","text":"Secret payload"}\n', encoding="utf-8")
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    diff_path = run_dir / "candidate.diff"
+    diff_path.write_text("--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use held-out tests.\n", encoding="utf-8")
+    eval_report = run_dir / "eval-report.json"
+    eval_report.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 1,
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "metrics": {"instruction_token_delta": 6},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "all",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "optimization-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "audit_run": "run-1",
+                "candidate_id": 1,
+                "decision": "needs_review",
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "recommendation": "accept",
+                "suite_id": "all",
+                "trigger_score": 0.84,
+                "validation_baseline_score": None,
+                "acceptance_decision_recommendation": "needs_review",
+                "acceptance_evidence": ["audit:1"],
+                "acceptance_reasons": ["policy gate and eval report passed"],
+                "acceptance_summary_path": ".sidecar/runs/run-1/acceptance-summary.raw.json",
+                "accepted_bounded_edit_metadata": [
+                    {
+                        "changed_lines": 1,
+                        "file": "CODEX.md",
+                        "normative_changes": 0,
+                        "operator": "add",
+                        "section": "Testing",
+                    },
+                    {
+                        "changed_lines": 2,
+                        "file": "CODEX.md",
+                        "normative_changes": 1,
+                        "operator": "replace",
+                        "section": "Safety",
+                    },
+                ],
+                "reviewer_checklist": ["Review candidate diff"],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(
+            repo=repo,
+            bundle=TraceBundle(
+                trace_path=trace_path,
+                events=(
+                    TraceEvent(
+                        evidence_id="ev-1",
+                        event_type="user_request",
+                        source_trust="user",
+                        line_number=1,
+                        payload={"text": "Sensitive customer request"},
+                    ),
+                ),
+            ),
+        )
+        store.insert_run(
+            run_id="run-1",
+            stage="proposal",
+            manifest_hash="manifest-hash",
+            status="completed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.7,
+            evidence_refs=["ev-1"],
+            instruction_refs=["CODEX.md#Rules"],
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=CandidatePatch(
+                audit_id=audit_id,
+                base_file="CODEX.md",
+                base_hash=CandidatePatch.hash_file(codex),
+                diff=diff_path.read_text(encoding="utf-8"),
+                risk_class="instruction_clarification",
+                rationale="Rationale should not print.",
+                sources=(SourceRef("ev-1", trusted=True),),
+            ),
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={"instruction_token_delta": 6},
+        )
+        decision_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="tugboat",
+            policy="optimization_acceptance_gate",
+            decision="needs_review",
+            reason="held_out_improved",
+        )
+
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", str(decision_id)]) == 0
+    output = capsys.readouterr().out
+
+    assert (
+        "highest_impact: target=CODEX.md#Safety operator=replace changed_lines=2 "
+        "normative_changes=1 held_out_delta=0.08 instruction_token_delta=6 "
+        "governance_passed=true"
+    ) in output
+    assert "Sensitive customer request" not in output
+    assert "payload_snippet" not in output
+    assert "Rationale should not print" not in output
+    assert "+Use held-out tests." not in output

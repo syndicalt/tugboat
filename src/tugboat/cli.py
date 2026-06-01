@@ -92,7 +92,7 @@ from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_d
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
-from tugboat.report.service import write_report
+from tugboat.report.service import highest_impact_summary_fields, write_report
 from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 from tugboat.vcs import PullRequestResult, VcsAdapter, VcsStateError
@@ -972,7 +972,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"inspect decision blocked: {error}")
             return 1
         print(f"decision_trace: {trace_path}")
-        _print_decision_inspection_summary(trace_path)
+        try:
+            _print_decision_inspection_summary(trace_path)
+        except (ArtifactValidationError, KeyError, ValueError) as error:
+            print(f"inspect decision blocked: {error}")
+            return 1
         if args.compare:
             try:
                 compare_trace_path = write_decision_trace(repo, args.compare)
@@ -4596,6 +4600,7 @@ def _print_decision_inspection_summary(trace_path: Path) -> None:
     print(f"risk_class: {candidate.get('risk_class', '')}")
     print(f"evals: {_decision_trace_eval_summary(payload)}")
     print(f"rollback_ready: {_decision_trace_rollback_ready(decision, artifacts)}")
+    print(f"highest_impact: {_decision_trace_highest_impact_summary(trace_path, artifacts)}")
     next_artifact = artifacts.get("report") or artifacts.get("candidate_diff") or trace_path.as_posix()
     print(f"review_next: inspect {next_artifact}")
 
@@ -4632,6 +4637,57 @@ def _decision_comparison_fields(payload: dict[str, object]) -> dict[str, str]:
         "evals": _decision_trace_eval_summary(payload),
         "rollback_ready": _decision_trace_rollback_ready(decision, artifacts),
     }
+
+
+def _decision_trace_highest_impact_summary(
+    trace_path: Path,
+    artifacts: dict[str, object],
+) -> str:
+    eval_report = _decision_trace_artifact_path(trace_path, artifacts, "eval_report")
+    optimization_summary = _decision_trace_artifact_path(
+        trace_path,
+        artifacts,
+        "optimization_summary",
+    )
+    if eval_report is None or optimization_summary is None:
+        return "none"
+    try:
+        eval_payload = load_json_object_artifact(eval_report, "eval-report.json")
+        validate_json_artifact("eval-report.json", eval_payload)
+        optimization_payload = load_json_object_artifact(
+            optimization_summary,
+            "optimization-summary.json",
+        )
+        validate_json_artifact("optimization-summary.json", optimization_payload)
+    except OSError:
+        return "none"
+    fields = highest_impact_summary_fields(eval_payload, optimization_payload)
+    if fields is None:
+        return "none"
+    return (
+        f"target={fields['target']} "
+        f"operator={fields['operator']} "
+        f"changed_lines={fields['changed_lines']} "
+        f"normative_changes={fields['normative_changes']} "
+        f"held_out_delta={fields['held_out_delta']} "
+        f"instruction_token_delta={fields['instruction_token_delta']} "
+        f"governance_passed={fields['governance_passed']}"
+    )
+
+
+def _decision_trace_artifact_path(
+    trace_path: Path,
+    artifacts: dict[str, object],
+    artifact_name: str,
+) -> Path | None:
+    raw_ref = artifacts.get(artifact_name)
+    if not isinstance(raw_ref, str) or not raw_ref:
+        return None
+    repo = trace_path.resolve().parents[3]
+    path = (repo / raw_ref).resolve()
+    if not path.is_relative_to(repo):
+        return None
+    return path
 
 
 def _json_object_field(payload: dict[str, object], field: str) -> dict[str, object]:

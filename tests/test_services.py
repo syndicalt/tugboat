@@ -8,7 +8,7 @@ from tugboat.artifacts import ArtifactValidationError
 from tugboat.eval.service import write_eval_report
 from tugboat.policy.gate import CandidatePatch, PolicyDecision, SourceRef
 from tugboat.propose.service import write_candidate
-from tugboat.report.service import write_report
+from tugboat.report.service import highest_impact_summary_fields, write_report
 from tugboat.security.secrets import SecretScanError
 
 
@@ -38,6 +38,98 @@ def _candidate(
         sources=(SourceRef("trace-1", trusted=True),),
         bounded_edit_metadata=BOUNDED_EDIT_METADATA,
     )
+
+
+def test_highest_impact_summary_fields_rank_bounded_edits_and_degrade_unknowns():
+    fields = highest_impact_summary_fields(
+        {
+            "governance_passed": True,
+            "held_out_score": "not-a-score",
+            "metrics": "not-an-object",
+            "trigger_score": 0.84,
+        },
+        {
+            "accepted_bounded_edit_metadata": [
+                {
+                    "changed_lines": 8,
+                    "file": "CODEX.md",
+                    "normative_changes": 0,
+                    "operator": "add",
+                    "section": "Testing",
+                },
+                {
+                    "changed_lines": 2,
+                    "file": "AGENTS.md",
+                    "normative_changes": 1,
+                    "operator": "replace",
+                },
+            ],
+        },
+    )
+
+    assert fields == {
+        "changed_lines": "2",
+        "governance_passed": "true",
+        "held_out_delta": "unknown",
+        "instruction_token_delta": "unknown",
+        "normative_changes": "1",
+        "operator": "replace",
+        "target": "AGENTS.md",
+    }
+
+
+def test_highest_impact_summary_fields_treats_non_numeric_edit_counts_as_zero():
+    fields = highest_impact_summary_fields(
+        {
+            "governance_passed": False,
+            "held_out_score": 1.0,
+            "metrics": {"instruction_token_delta": -2},
+            "trigger_score": 0.75,
+        },
+        {
+            "accepted_bounded_edit_metadata": [
+                {
+                    "changed_lines": True,
+                    "file": "CODEX.md",
+                    "operator": "add",
+                    "normative_changes": "unknown",
+                    "section": "Testing",
+                },
+                {
+                    "changed_lines": 1.9,
+                    "file": "CODEX.md",
+                    "operator": "replace",
+                    "normative_changes": 0.7,
+                    "section": "Review",
+                },
+            ],
+        },
+    )
+
+    assert fields == {
+        "changed_lines": "1",
+        "governance_passed": "false",
+        "held_out_delta": "0.25",
+        "instruction_token_delta": "-2",
+        "normative_changes": "0",
+        "operator": "replace",
+        "target": "CODEX.md#Review",
+    }
+
+
+@pytest.mark.parametrize(
+    "optimization_payload",
+    (
+        {},
+        {"accepted_bounded_edit_metadata": "not-a-list"},
+        {"accepted_bounded_edit_metadata": []},
+        {"accepted_bounded_edit_metadata": ["not-an-object"]},
+    ),
+)
+def test_highest_impact_summary_fields_returns_none_without_bounded_edit_metadata(
+    optimization_payload: dict[str, object],
+):
+    assert highest_impact_summary_fields({"metrics": {}}, optimization_payload) is None
 
 
 def test_write_candidate_writes_deterministic_repo_local_artifacts(tmp_path: Path):
@@ -363,7 +455,7 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
                     "rollback_rate": 0.25,
                     "user_correction_recurrence": 2,
                 },
-                "metrics": {"provider_smoke_cases": 1},
+                "metrics": {"instruction_token_delta": 6, "provider_smoke_cases": 1},
                 "passed": True,
                 "recommendation": "accept",
                 "suite_id": "provider-smoke",
@@ -458,6 +550,7 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- longitudinal_duplicate_rule_count: 1",
             "- longitudinal_governance_regression_count: 0",
             "- longitudinal_user_correction_recurrence: 2",
+            "- highest_impact_summary: CODEX.md#Testing add changed_lines=1 held_out_delta=0.08 instruction_token_delta=6 governance_passed=true",
             "- optimization_summary: .sidecar/runs/run-1/optimization-summary.json",
             "- optimization_decision: needs_review",
             "- optimization_suite_id: provider-smoke",
@@ -535,6 +628,21 @@ def test_write_report_rejects_malformed_eval_report(tmp_path: Path):
     )
 
     with pytest.raises(ArtifactValidationError, match="schema_version"):
+        write_report(
+            tmp_path,
+            "run-1",
+            candidate=_candidate(),
+            decision=PolicyDecision(True, ()),
+            eval_report_path=eval_report_path,
+        )
+
+
+def test_write_report_rejects_non_object_eval_report(tmp_path: Path):
+    eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    eval_report_path.parent.mkdir(parents=True)
+    eval_report_path.write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="eval report must be a JSON object"):
         write_report(
             tmp_path,
             "run-1",
