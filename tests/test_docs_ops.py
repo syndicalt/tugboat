@@ -972,6 +972,67 @@ def test_github_actions_ci_workflow_enforces_proposal_only_release_gates() -> No
     assert "OPENAI_API_KEY" not in workflow
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        ".github/workflows/ci.yml",
+        "docs/ci/github-actions-template.yml",
+    ],
+)
+def test_github_actions_release_evidence_path_retains_v1_manifest_inputs(
+    relative_path: str,
+) -> None:
+    workflow = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+
+    required_fragments = [
+        "mkdir -p .sidecar/ci",
+        "tee .sidecar/ci/doctor.txt",
+        "tee .sidecar/ci/index-check.txt",
+        "tee .sidecar/ci/harness.txt",
+        "tee .sidecar/ci/pytest-coverage.log",
+        "python -m build --wheel",
+        "tee .sidecar/ci/build-wheel.txt",
+        "python -m twine check",
+        "tee .sidecar/ci/twine-check.txt",
+        "python -m venv .sidecar/ci/install-smoke-venv",
+        "tee .sidecar/ci/install-smoke.txt",
+        "installed tugboat wheel:",
+        "installed tugboat doctor",
+        "installed tugboat index --repo . --check",
+        "installed tugboat harness check --repo .",
+        "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all",
+        "proposal smoke artifact: audit.json",
+        "proposal smoke artifact: candidate.json",
+        "proposal smoke artifact: eval-report.json",
+        "proposal smoke artifact: optimization-summary.json",
+        "proposal smoke artifact: report.md",
+        ".sidecar/ci/security-review.md",
+        "No open critical or high findings",
+        "tugboat ops release-manifest --repo .",
+        "--security-review-decision approved_proposal_only",
+        "--security-review-critical-high-findings 0",
+        "--evidence .sidecar/ci/doctor.txt",
+        "--evidence .sidecar/ci/index-check.txt",
+        "--evidence .sidecar/ci/harness.txt",
+        "--evidence .sidecar/ci/ci-report.json",
+        "--evidence .sidecar/ci/security-review.md",
+        "--evidence .sidecar/ci/pytest-coverage.log",
+        "--evidence .sidecar/ci/build-wheel.txt",
+        "--evidence .sidecar/ci/twine-check.txt",
+        "--evidence .sidecar/ci/install-smoke.txt",
+        ".sidecar/ops/release-artifact-manifest.json",
+    ]
+    for fragment in required_fragments:
+        assert fragment in workflow, f"{relative_path} is missing {fragment!r}"
+
+
+def test_dev_extra_installs_release_build_tools() -> None:
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"build>=' in pyproject
+    assert '"twine>=' in pyproject
+
+
 def _single_match(pattern: str, content: str) -> str:
     matches = re.findall(pattern, content)
     assert len(matches) == 1

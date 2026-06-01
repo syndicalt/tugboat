@@ -17,12 +17,17 @@ Run these checks on every pull request:
 
 ```bash
 python -m pip install -e ".[dev]"
+mkdir -p .sidecar/ci
 tugboat doctor
 tugboat ci --repo .
 tugboat index --repo . --check
 tugboat harness check --repo .
 python -m pytest --cov=src --cov-report=term-missing -q
+python -m build --wheel --outdir dist
+python -m twine check dist/<wheel>.whl
 ```
+
+The protected-branch workflow also retains release-readiness evidence for `ops release-manifest`: `doctor.txt`, `index-check.txt`, `harness.txt`, `ci-report.json`, `security-review.md`, `pytest-coverage.log`, `build-wheel.txt`, `twine-check.txt`, `install-smoke.txt`, and `.sidecar/ops/release-artifact-manifest.json`. The installed-wheel smoke creates `.sidecar/ci/proposal-smoke-repo`, runs `tugboat init`, `index`, `harness check`, and the fixture-backed `optimize` loop, then verifies `audit.json`, `candidate.json`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
 
 For scheduled governance checks, also run:
 
@@ -50,11 +55,16 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install -e ".[dev]"
-      - run: tugboat doctor
+      - run: mkdir -p .sidecar/ci
+      - run: tugboat doctor --repo . 2>&1 | tee .sidecar/ci/doctor.txt
       - run: tugboat ci --repo .
-      - run: tugboat index --repo . --check
-      - run: tugboat harness check --repo .
-      - run: python -m pytest --cov=src --cov-report=term-missing -q
+      - run: tugboat index --repo . --check 2>&1 | tee .sidecar/ci/index-check.txt
+      - run: tugboat harness check --repo . 2>&1 | tee .sidecar/ci/harness.txt
+      - run: python -m pytest --cov=src --cov-report=term-missing -q 2>&1 | tee .sidecar/ci/pytest-coverage.log
+      - run: python -m build --wheel --outdir dist 2>&1 | tee .sidecar/ci/build-wheel.txt
+      - run: python -m twine check dist/<wheel>.whl 2>&1 | tee .sidecar/ci/twine-check.txt
+      - run: python -m venv .sidecar/ci/install-smoke-venv
+      - run: tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -63,6 +73,7 @@ jobs:
           path: |
             .sidecar/ci/ci-report.json
             .sidecar/ci/**
+            .sidecar/ops/release-artifact-manifest.json
             .sidecar/runs/**
             .pytest_cache/**
 ```
@@ -73,6 +84,7 @@ Retain CI artifacts only when they help review or reproduce a failure:
 
 - Keep sanitized `.sidecar/runs/**` artifacts for failed jobs.
 - Keep `.sidecar/ci/ci-report.json` and `.sidecar/ci/**` so reviewers can inspect the Tugboat CI decision bundle.
+- Keep `.sidecar/ops/release-artifact-manifest.json` so release candidates can be traced back to the exact wheel, commit, CI URL, smoke evidence, and security review decision.
 - Do not upload raw provider credentials, raw private traces, or local `.env` files.
 - Prefer short retention windows, such as 14 days for pull requests and 30 days for protected-branch failures.
 - Redact before upload when artifacts include traces, prompts, diffs, or command output from private repositories.
