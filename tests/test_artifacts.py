@@ -529,6 +529,27 @@ def test_validate_drift_raw_artifact_accepts_current_schema():
     )
 
 
+def test_validate_drift_raw_artifact_rejects_non_reviewable_cluster():
+    with pytest.raises(ArtifactValidationError, match="clusters\\[0\\].evidence_refs"):
+        validate_json_artifact(
+            "drift.raw.json",
+            {"clusters": [{"cluster_id": "drift-1", "evidence_refs": []}]},
+        )
+
+
+def test_validate_drift_raw_artifact_rejects_duplicate_cluster_ids():
+    with pytest.raises(ArtifactValidationError, match="duplicate cluster_id: drift-1"):
+        validate_json_artifact(
+            "drift.raw.json",
+            {
+                "clusters": [
+                    {"cluster_id": "drift-1", "evidence_refs": ["ev_a"]},
+                    {"cluster_id": "drift-1", "evidence_refs": ["ev_b"]},
+                ],
+            },
+        )
+
+
 def test_validate_candidate_raw_artifact_accepts_current_schema():
     validate_json_artifact(
         "candidate.raw.json",

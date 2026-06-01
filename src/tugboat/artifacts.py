@@ -646,13 +646,18 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "properties": {
             "clusters": {
                 "type": "array",
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": ["cluster_id", "evidence_refs"],
                     "properties": {
-                        "cluster_id": {"type": "string"},
-                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                        "cluster_id": {"type": "string", "minLength": 1},
+                        "evidence_refs": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string", "minLength": 1},
+                        },
                     },
                 },
             },
@@ -2887,6 +2892,8 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
         if field_schema is None:
             continue
         _validate_schema_value(name, field, field_schema, value)
+    if name == "drift.raw.json":
+        _validate_drift_raw_artifact(payload)
     if name == "optimization-summary.json" and payload.get("decision") == "needs_review":
         for field in (
             "acceptance_decision_recommendation",
@@ -2914,6 +2921,19 @@ def validate_json_artifact(name: str, payload: dict[str, Any]) -> None:
                     raise ArtifactValidationError(
                         f"{name} source_artifacts.{artifact_name}.sha256 must be a SHA-256 digest"
                     )
+
+
+def _validate_drift_raw_artifact(payload: dict[str, Any]) -> None:
+    seen_cluster_ids: set[str] = set()
+    for cluster in payload.get("clusters", []):
+        if not isinstance(cluster, dict):
+            continue
+        cluster_id = cluster.get("cluster_id")
+        if not isinstance(cluster_id, str):
+            continue
+        if cluster_id in seen_cluster_ids:
+            raise ArtifactValidationError(f"drift.raw.json duplicate cluster_id: {cluster_id}")
+        seen_cluster_ids.add(cluster_id)
 
 
 def validate_report_markdown(text: str) -> None:
