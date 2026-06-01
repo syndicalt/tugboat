@@ -537,6 +537,32 @@ def _auto_apply_decision_payloads(repo: Path) -> list[dict[str, object]]:
     return [json.loads(row[0]) for row in rows]
 
 
+def _run_auto_apply_shadow(
+    repo: Path,
+    *,
+    actor: str = "operator@example.com",
+    policy_version: int = 9,
+) -> None:
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                actor,
+                "--shadow",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                str(policy_version),
+            ]
+        )
+        == 0
+    )
+
+
 def test_apply_proposal_mode_writes_plan_without_mutating_instruction_file(tmp_path: Path):
     repo = _init_repo(tmp_path)
     original = (repo / "CODEX.md").read_text(encoding="utf-8")
@@ -1904,6 +1930,7 @@ def test_auto_apply_preflight_reports_eligible_confirmed_candidate(tmp_path: Pat
     run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
 
     assert (
         main(
@@ -2082,6 +2109,7 @@ def test_auto_apply_preflight_reports_eval_rejection_without_mutation(tmp_path: 
     original = (repo / "CODEX.md").read_text(encoding="utf-8")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
 
     assert (
         main(
@@ -2384,6 +2412,183 @@ def test_auto_apply_thresholds_are_policy_owned_not_runtime_cli_knobs(
     assert error.value.code == 2
 
 
+def test_auto_apply_commit_requires_prior_shadow_without_mutation(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    base_branch = _git(repo, "branch", "--show-current")
+    generated_branch = VcsAdapter(repo).branch_name(
+        run_id=run_dir.name,
+        candidate_id=7,
+        base_file="CODEX.md",
+    )
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert "apply blocked: auto-apply shadow evidence required" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "branch", "--show-current") == base_branch
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decisions = _auto_apply_decision_payloads(repo)
+    assert len(decisions) == 1
+    assert decisions[0]["phase"] == "precheck"
+    assert decisions[0]["eligible"] is False
+    assert decisions[0]["reasons"] == ["shadow_evidence_required"]
+
+
+def test_auto_apply_commit_rejects_stale_shadow_source_artifacts_without_mutation(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["metrics"]["instruction_token_delta"] = 1
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert "apply blocked: auto-apply shadow evidence stale" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+    decisions = _auto_apply_decision_payloads(repo)
+    assert len(decisions) == 1
+    assert decisions[0]["eligible"] is False
+    assert decisions[0]["reasons"] == ["shadow_evidence_stale"]
+
+
+@pytest.mark.parametrize(
+    ("mutator", "candidate_id", "lane"),
+    [
+        (lambda payload: payload.update({"run_id": "other-run"}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"candidate_id": 8}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"lane": "other_lane"}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"shadow_mode": False}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"eligible": False}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"would_apply": False}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"reasons": ["policy_gate_rejected"]}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"approval_bundle": None}), 7, "docs_hygiene"),
+        (lambda payload: payload.update({"checks": None}), 7, "docs_hygiene"),
+        (
+            lambda payload: payload["checks"]["policy_gate"].update({"allowed": False}),
+            7,
+            "docs_hygiene",
+        ),
+        (lambda payload: payload.update({"source_artifacts": None}), 7, "docs_hygiene"),
+        (lambda payload: payload.pop("source_artifacts"), 7, "docs_hygiene"),
+        (
+            lambda payload: payload["source_artifacts"]["candidate_diff"].update(
+                {"path": ".sidecar/runs/other/candidate.diff"}
+            ),
+            7,
+            "docs_hygiene",
+        ),
+    ],
+)
+def test_auto_apply_shadow_block_reason_rejects_stale_shadow_variants(
+    tmp_path: Path,
+    mutator,
+    candidate_id: int,
+    lane: str,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    shadow_path = run_dir / "auto-apply-shadow.json"
+    shadow = json.loads(shadow_path.read_text(encoding="utf-8"))
+    mutator(shadow)
+    shadow_path.write_text(json.dumps(shadow, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    assert (
+        cli_module._auto_apply_shadow_block_reason(
+            repo,
+            run_dir,
+            candidate_id=candidate_id,
+            lane=lane,
+        )
+        == "shadow_evidence_stale"
+    )
+
+
+def test_auto_apply_shadow_block_reason_accepts_current_shadow(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+
+    assert (
+        cli_module._auto_apply_shadow_block_reason(
+            repo,
+            run_dir,
+            candidate_id=7,
+            lane="docs_hygiene",
+        )
+        == ""
+    )
+
+
 def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_audit(
     tmp_path: Path,
 ):
@@ -2391,6 +2596,7 @@ def test_auto_apply_commit_requires_policy_confirmation_and_records_reversible_a
     run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
 
     assert (
         main(
@@ -2501,6 +2707,7 @@ def test_auto_apply_commit_executes_recorded_rollback_and_restores_file(tmp_path
     original = (repo / "CODEX.md").read_text(encoding="utf-8")
     _write_auto_apply_policy(repo, version=9)
     _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
 
     assert (
         main(
@@ -2573,6 +2780,7 @@ def test_auto_apply_final_gate_failure_cleans_committed_branch_without_silent_ap
         candidate_id=7,
         base_file="CODEX.md",
     )
+    _run_auto_apply_shadow(repo)
 
     def fail_final_gate(*args: object, **kwargs: object) -> dict[str, object]:
         raise ValueError("simulated final gate failure")
@@ -3045,6 +3253,7 @@ def test_auto_apply_command_delegates_to_confirmed_commit_lane(tmp_path: Path):
     run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
     _write_auto_apply_policy(repo, version=3)
     _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo, policy_version=3)
 
     assert (
         main(

@@ -95,6 +95,8 @@ tugboat auto-apply --repo . --candidate latest --actor <name> \
 
 Shadow mode evaluates the same auto-apply gates, writes `.sidecar/runs/<run-id>/auto-apply-shadow.json`, and appends a small `auto_apply.shadowed` audit event with candidate id, run id, actor, lane, eligibility, reasons, and report path. It does not apply patches, create branches, commit, write `apply-plan.json`, write `auto-apply-approval.json`, or append `auto_apply.decided`. Operations observability counts shadowed candidates separately from eligible, staged, applied, and rolled-back candidates. The read-only kill switch blocks shadow mode because it writes an artifact and audit event.
 
+Confirmed auto-apply mutation requires a current passing shadow report for the same run and candidate. If `auto-apply-shadow.json` is missing, ineligible, stale, or no longer matches the candidate, eval report, or policy gate artifact hashes, final commit-mode auto-apply blocks before branch creation or patch application.
+
 ## Confirmed Execution
 
 Only after review:
@@ -105,7 +107,7 @@ tugboat auto-apply --repo . --candidate latest --actor <name> \
   --auto-apply-policy-version 1
 ```
 
-The command writes an audited commit-mode apply plan and records rollback metadata. Burn-in, rejection rate, and rollback rate are computed from the ledger and checked against policy.
+The command writes an audited commit-mode apply plan and records rollback metadata after confirming current shadow evidence. Burn-in, rejection rate, and rollback rate are computed from the ledger and checked against policy.
 
 ## Rollback
 

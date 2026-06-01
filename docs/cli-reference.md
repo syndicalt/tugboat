@@ -131,11 +131,11 @@ tugboat auto-apply --repo . --candidate latest --actor <name> \
   --auto-apply-policy-version 1
 ```
 
-The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, lane match, ledger-derived burn-in and reliability metrics, eval, governance, token-growth, VCS, and rollback evidence all pass. Runtime arguments confirm intent; policy owns thresholds such as `docs_hygiene.minimum_burn_in_days: 3`, `docs_hygiene.maximum_rejection_rate: 0.20`, `docs_hygiene.max_instruction_token_delta: 50`, and `skill_improvement.maximum_rollback_rate: 0.03`.
+The command delegates to commit-mode apply with auto-apply gates enabled. It remains blocked unless policy, confirmation, lane match, ledger-derived burn-in and reliability metrics, eval, governance, token-growth, VCS, rollback evidence, and current passing shadow evidence all pass. Runtime arguments confirm intent; policy owns thresholds such as `docs_hygiene.minimum_burn_in_days: 3`, `docs_hygiene.maximum_rejection_rate: 0.20`, `docs_hygiene.max_instruction_token_delta: 50`, and `skill_improvement.maximum_rollback_rate: 0.03`.
 
 `--preflight` writes `.sidecar/runs/<run-id>/auto-apply-preflight.json` with eligibility, reasons, gate snapshots, eval status, VCS checks, readiness metrics, and any pending approval bundle. It exits `0` when the report is produced and does not apply, branch, commit, write an apply plan, or record auto-apply decision events.
 
-`--shadow` writes `.sidecar/runs/<run-id>/auto-apply-shadow.json` and appends an `auto_apply.shadowed` audit event for lane telemetry. It exits `0` when shadow evidence is recorded and does not apply, branch, commit, write an apply plan, write an approval artifact, or record `auto_apply.decided`.
+`--shadow` writes `.sidecar/runs/<run-id>/auto-apply-shadow.json` and appends an `auto_apply.shadowed` audit event for lane telemetry. It exits `0` when shadow evidence is recorded and does not apply, branch, commit, write an apply plan, write an approval artifact, or record `auto_apply.decided`. Final commit-mode auto-apply requires this shadow artifact to remain eligible and to match the current candidate, eval, and policy-gate artifact hashes.
 
 ## Harness And CI
 

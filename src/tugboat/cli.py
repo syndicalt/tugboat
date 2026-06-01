@@ -3258,6 +3258,7 @@ def _write_auto_apply_preflight(
         "lane": auto_apply_decision.lane,
         "reasons": reasons,
         "approval_bundle": approval_bundle,
+        "source_artifacts": _auto_apply_source_artifacts(repo, run_dir),
         "checks": {
             "policy_gate": {
                 "allowed": decision.allowed,
@@ -3466,11 +3467,21 @@ def _assert_auto_apply_precheck(
         candidate=auto_apply_candidate,
         readiness=readiness,
     )
+    reasons = list(decision.reasons)
+    if decision.eligible and mode == "commit":
+        shadow_reason = _auto_apply_shadow_block_reason(
+            repo,
+            run_dir,
+            candidate_id=candidate_id,
+            lane=decision.lane,
+        )
+        if shadow_reason:
+            reasons.append(shadow_reason)
     _record_auto_apply_decision(
         repo,
         candidate_id,
         run_dir.name,
-        decision.reasons,
+        tuple(reasons),
         review_actor,
         lane=decision.lane,
         snapshot=_auto_apply_decision_snapshot(
@@ -3480,8 +3491,12 @@ def _assert_auto_apply_precheck(
             metrics=metrics,
         ),
     )
-    if not decision.eligible:
-        raise ValueError(f"auto-apply rejected candidate: {', '.join(decision.reasons)}")
+    if reasons:
+        if reasons == ["shadow_evidence_required"]:
+            raise ValueError("auto-apply shadow evidence required")
+        if reasons == ["shadow_evidence_stale"]:
+            raise ValueError("auto-apply shadow evidence stale")
+        raise ValueError(f"auto-apply rejected candidate: {', '.join(reasons)}")
 
 
 def _assert_user_worktree_clean(adapter: VcsAdapter) -> None:
@@ -3490,6 +3505,105 @@ def _assert_user_worktree_clean(adapter: VcsAdapter) -> None:
     )
     if dirty_paths:
         raise VcsStateError(f"worktree is dirty: {', '.join(dirty_paths)}")
+
+
+def _auto_apply_shadow_block_reason(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    lane: str | None,
+) -> str:
+    path = run_dir / "auto-apply-shadow.json"
+    if not path.exists():
+        return "shadow_evidence_required"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        validate_json_artifact("auto-apply-shadow.json", payload)
+    except (OSError, json.JSONDecodeError, ArtifactValidationError, ValueError):
+        return "shadow_evidence_stale"
+    if payload.get("run_id") != run_dir.name:
+        return "shadow_evidence_stale"
+    if int(payload.get("candidate_id", -1)) != candidate_id:
+        return "shadow_evidence_stale"
+    if payload.get("lane") != lane:
+        return "shadow_evidence_stale"
+    if payload.get("shadow_mode") is not True:
+        return "shadow_evidence_stale"
+    if payload.get("eligible") is not True or payload.get("would_apply") is not True:
+        return "shadow_evidence_stale"
+    if payload.get("reasons") != []:
+        return "shadow_evidence_stale"
+    if not isinstance(payload.get("approval_bundle"), dict):
+        return "shadow_evidence_stale"
+    checks = payload.get("checks")
+    if not isinstance(checks, dict):
+        return "shadow_evidence_stale"
+    if not _auto_apply_shadow_checks_pass(checks):
+        return "shadow_evidence_stale"
+    if not _auto_apply_shadow_sources_match(repo, run_dir, payload.get("source_artifacts")):
+        return "shadow_evidence_stale"
+    return ""
+
+
+def _auto_apply_shadow_checks_pass(checks: dict[str, object]) -> bool:
+    policy_gate = checks.get("policy_gate")
+    stored_policy_gate = checks.get("stored_policy_gate")
+    eval_report = checks.get("eval_report")
+    vcs = checks.get("vcs")
+    return (
+        isinstance(policy_gate, dict)
+        and policy_gate.get("allowed") is True
+        and policy_gate.get("reasons") == []
+        and isinstance(stored_policy_gate, dict)
+        and stored_policy_gate.get("allowed") is True
+        and stored_policy_gate.get("reasons") == []
+        and isinstance(eval_report, dict)
+        and eval_report.get("candidate_id_matches") is True
+        and eval_report.get("passed") is True
+        and eval_report.get("recommendation") == "accept"
+        and isinstance(vcs, dict)
+        and vcs.get("preflight_passed") is True
+        and vcs.get("worktree_clean") is True
+        and vcs.get("target_files_clean") is True
+        and vcs.get("base_hashes_match") is True
+        and vcs.get("reasons") == []
+    )
+
+
+def _auto_apply_shadow_sources_match(
+    repo: Path,
+    run_dir: Path,
+    raw_sources: object,
+) -> bool:
+    if not isinstance(raw_sources, dict):
+        return False
+    expected = _auto_apply_source_artifacts(repo, run_dir)
+    for key, expected_ref in expected.items():
+        actual_ref = raw_sources.get(key)
+        if not isinstance(actual_ref, dict):
+            return False
+        if actual_ref.get("path") != expected_ref["path"]:
+            return False
+        if actual_ref.get("sha256") != expected_ref["sha256"]:
+            return False
+    return True
+
+
+def _auto_apply_source_artifacts(repo: Path, run_dir: Path) -> dict[str, dict[str, str]]:
+    return {
+        "candidate_diff": _auto_apply_artifact_ref(repo, run_dir / "candidate.diff"),
+        "candidate_metadata": _auto_apply_artifact_ref(repo, run_dir / "candidate.json"),
+        "eval_report": _auto_apply_artifact_ref(repo, run_dir / "eval-report.json"),
+        "policy_gate": _auto_apply_artifact_ref(repo, run_dir / "policy-gate.json"),
+    }
+
+
+def _auto_apply_artifact_ref(repo: Path, path: Path) -> dict[str, str]:
+    return {
+        "path": _relative_repo_path(repo, path),
+        "sha256": CandidatePatch.hash_file(path),
+    }
 
 
 def _assert_auto_apply_final(

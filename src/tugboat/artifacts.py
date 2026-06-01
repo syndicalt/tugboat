@@ -52,6 +52,18 @@ def _audited_array_schema(
     }
 
 
+def _artifact_ref_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["path", "sha256"],
+        "properties": {
+            "path": {"type": "string"},
+            "sha256": {"type": "string"},
+        },
+    }
+
+
 SKILL_REPORT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -2732,6 +2744,22 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "lane": {"type": ["string", "null"]},
             "reasons": {"type": "array", "items": {"type": "string"}},
             "approval_bundle": {"type": ["object", "null"]},
+            "source_artifacts": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "candidate_diff",
+                    "candidate_metadata",
+                    "eval_report",
+                    "policy_gate",
+                ],
+                "properties": {
+                    "candidate_diff": _artifact_ref_schema(),
+                    "candidate_metadata": _artifact_ref_schema(),
+                    "eval_report": _artifact_ref_schema(),
+                    "policy_gate": _artifact_ref_schema(),
+                },
+            },
             "checks": {
                 "type": "object",
                 "additionalProperties": False,
