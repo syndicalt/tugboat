@@ -1907,7 +1907,7 @@ def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> No
             or "mode: proposal_only" not in lowered
             or "auto_apply: disabled" not in lowered
             or "installed tugboat index --repo . --check" not in lowered
-            or "index: ok" not in lowered
+            or not _contains_installed_index_success(lowered)
             or "installed tugboat harness check --repo ." not in lowered
             or "harness: ok" not in lowered
             or "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all"
@@ -1993,6 +1993,28 @@ def _release_coverage_percent(text: str) -> float:
         if match is not None:
             return float(match.group(1))
     return 0.0
+
+
+def _contains_installed_index_success(lowered_text: str) -> bool:
+    lines = lowered_text.splitlines()
+    command = "installed tugboat index --repo . --check"
+    for index, line in enumerate(lines[:-1]):
+        if line.strip() != command:
+            continue
+        return _installed_index_success_line(lines[index + 1].strip())
+    return False
+
+
+def _installed_index_success_line(line: str) -> bool:
+    if line == "index: ok":
+        return True
+    if not line.startswith("indexed documents:"):
+        return False
+    raw_count = line.split(":", 1)[1].strip()
+    try:
+        return int(raw_count) >= 0
+    except ValueError:
+        return False
 
 
 def _security_review_evidence_approved(lowered_text: str) -> bool:
