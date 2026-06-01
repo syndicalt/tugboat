@@ -116,6 +116,14 @@ def test_detect_trace_format_generated_minimal_shapes_are_stable(
     assert detect_trace_format(trace_with_leading_blank) == expected_format
 
 
+def test_detect_trace_format_rejects_unknown_json_object_trace_shape(tmp_path: Path):
+    trace = tmp_path / "unsupported.json"
+    trace.write_text(json.dumps({"foo": "bar"}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported JSON trace format"):
+        detect_trace_format(trace)
+
+
 def test_audit_cli_ingests_claude_trace_format_as_normalized_events(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -611,6 +619,38 @@ def test_audit_cli_auto_trace_format_reports_invalid_json_sample_line_without_tr
 
     output = capsys.readouterr().out
     assert "audit blocked: invalid trace: trace line 2 contains invalid JSON" in output
+    assert "Traceback" not in output
+
+
+def test_audit_cli_auto_trace_format_rejects_unknown_json_object_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "unsupported.json"
+    trace.write_text(json.dumps({"foo": "bar"}), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "auto",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "audit blocked: invalid trace: unsupported JSON trace format" in output
+    assert "next: validate the trace as JSONL or JSON and rerun with --trace-format auto" in output
     assert "Traceback" not in output
 
 

@@ -301,3 +301,45 @@ def test_ops_observability_cli_writes_local_metrics_export(tmp_path: Path, capsy
         "tugboat_auto_apply_lane_candidates_total{lane=\"docs_hygiene\",state=\"eligible\"} 1"
         in metrics
     )
+
+
+def test_ops_observability_cli_writes_structured_event_log(tmp_path: Path, capsys):
+    repo = tmp_path
+    sidecar = sidecar_dir(repo)
+    sidecar.mkdir(parents=True)
+    log_path = tmp_path / "ops-events.jsonl"
+    with Store.open(sidecar / "db.sqlite") as store:
+        store.append_audit_event(
+            "run_failed",
+            {
+                "run_id": "run-1",
+                "failure_kind": "provider_error",
+                "provider": "openai",
+                "backend": "responses",
+                "status": "failed",
+                "duration_seconds": 12,
+            },
+        )
+
+    assert (
+        main(
+            [
+                "ops",
+                "observability",
+                "--repo",
+                str(repo),
+                "--event-log-output",
+                str(log_path),
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert f"observability events: {log_path}" in output
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["event"] == "observability.summary"
+    assert records[0]["source"] == "ops.observability"
+    assert records[0]["repo"] == str(repo.resolve())
+    assert records[0]["run_count"] == 1
+    assert records[0]["failure_count"] == 1

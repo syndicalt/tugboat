@@ -43,6 +43,10 @@ Create or export the trace file first, then rerun with the same `--trace` path. 
 
 Validate that the trace is JSONL or JSON matching the selected `--trace-format`. Use `--trace-format auto` for generic JSONL, Codex JSONL, Claude transcript JSON/JSONL, MCP session JSONL, or CI failure JSON traces.
 
+`audit blocked: invalid trace: unsupported JSON trace format`
+
+The file is a JSON object that does not match a supported object-based trace shape, such as Claude transcript JSON or CI failure JSON. Export the session as JSONL, use a supported trace fixture shape, or pass an explicit non-auto `--trace-format` only when the file truly matches that adapter.
+
 `instruction index blocked: llmff inspect failed: binary not found`
 
 Check `.sidecar/policy.yaml` and verify `llmff.binary`. The default after `tugboat init --repo .` is `python -m tugboat.llmff.fixture_backend`.

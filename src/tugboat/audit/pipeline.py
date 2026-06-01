@@ -676,7 +676,7 @@ def detect_trace_format(trace: Path) -> str:
             return "claude"
         if _looks_like_ci_failure_json(sample):
             return "ci"
-        return "generic-jsonl"
+        raise ValueError("unsupported JSON trace format")
     for row in sample:
         if _looks_like_mcp_jsonl_row(row):
             return "mcp"

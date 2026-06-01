@@ -92,6 +92,108 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
     ) | {"daemon_queue": daemon_queue}
 
 
+def observability_event_log_text(
+    summary: dict[str, Any],
+    *,
+    source: str = "ops.observability",
+    repo: str | None = None,
+) -> str:
+    context = {"source": source}
+    if repo is not None:
+        context["repo"] = repo
+    events = [
+        {
+            **context,
+            "event": "observability.summary",
+            "run_count": _numeric_summary_value(summary, "run_duration", "count"),
+            "failure_count": sum(_numeric_mapping(summary.get("failure_kind_counts")).values()),
+            "provider_backend_failure_rate": _numeric_summary_value(
+                summary,
+                "provider_backend_failure_rate",
+                "rate",
+            ),
+            "accepted_edits": _numeric_summary_value(summary, "edits", "accepted"),
+            "rejected_edits": _numeric_summary_value(summary, "edits", "rejected"),
+            "rolled_back_edits": _numeric_summary_value(summary, "edits", "rolled_back"),
+            "governance_regression_count": _number_or_zero(
+                summary.get("governance_regression_count")
+            ),
+        }
+    ]
+    daemon_event = _daemon_queue_event(summary.get("daemon_queue"), context)
+    if daemon_event is not None:
+        events.append(daemon_event)
+    for lane_event in _auto_apply_lane_events(summary.get("auto_apply_lanes"), context):
+        events.append(lane_event)
+    return "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+
+
+def _daemon_queue_event(
+    daemon_queue: object,
+    context: dict[str, str],
+) -> dict[str, Any] | None:
+    if not isinstance(daemon_queue, dict):
+        return None
+    jobs_by_state = _numeric_mapping(daemon_queue.get("jobs_by_state"))
+    return {
+        **context,
+        "event": "observability.daemon_queue",
+        "jobs_by_state": jobs_by_state,
+        "kill_switch_enabled": bool(daemon_queue.get("kill_switch_enabled", False)),
+        "leased_job_count": _number_or_zero(daemon_queue.get("leased_job_count")),
+        "stuck_job_count": _number_or_zero(daemon_queue.get("stuck_job_count")),
+    }
+
+
+def _auto_apply_lane_events(
+    lanes: object,
+    context: dict[str, str],
+) -> list[dict[str, Any]]:
+    if not isinstance(lanes, dict):
+        return []
+    events: list[dict[str, Any]] = []
+    for lane_name, lane_counts in sorted(lanes.items()):
+        counts = _numeric_mapping(lane_counts)
+        events.append(
+            {
+                **context,
+                "event": "observability.auto_apply_lane",
+                "lane": str(lane_name),
+                "shadowed": counts.get("shadowed", 0),
+                "eligible": counts.get("eligible", 0),
+                "rejected": counts.get("rejected", 0),
+                "staged": counts.get("staged", 0),
+                "applied": counts.get("applied", 0),
+                "rolled_back": counts.get("rolled_back", 0),
+                "paused": counts.get("paused", 0),
+            }
+        )
+    return events
+
+
+def _numeric_summary_value(summary: dict[str, Any], section: str, key: str) -> int | float:
+    section_value = summary.get(section)
+    if not isinstance(section_value, dict):
+        return 0
+    return _number_or_zero(section_value.get(key))
+
+
+def _numeric_mapping(values: object) -> dict[str, int | float]:
+    if not isinstance(values, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in sorted(values.items())
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+
+def _number_or_zero(value: object) -> int | float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return 0
+
+
 def observability_metrics_text(summary: dict[str, Any]) -> str:
     lines: list[str] = []
     _append_prefixed_numeric_metrics(lines, "tugboat_run_duration_seconds", summary.get("run_duration"))

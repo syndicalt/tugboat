@@ -9,6 +9,7 @@ from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
 from tugboat.ops.observability import (
+    observability_event_log_text,
     observability_metrics_text,
     summarize_observability,
     summarize_sidecar_observability,
@@ -369,6 +370,84 @@ def test_observability_metrics_text_renders_bounded_local_metrics() -> None:
     )
     assert 'tugboat_daemon_queue_jobs_total{state="queued"} 2' in metrics
     assert "tugboat_daemon_kill_switch_enabled 1" in metrics
+
+
+def test_observability_event_log_text_renders_structured_summary_events() -> None:
+    summary = summarize_observability(
+        runs=[
+            {
+                "duration_seconds": 12,
+                "provider": "openai",
+                "backend": "responses",
+                "status": "failed",
+                "failure_kind": "provider_error",
+            }
+        ],
+        jobs=[{"state": "rolled_back", "changed_lines": 3}],
+        auto_apply_events=[
+            {
+                "event_type": "auto_apply.decided",
+                "candidate_id": 7,
+                "eligible": False,
+                "lane": "docs_hygiene",
+                "phase": "precheck",
+            }
+        ],
+        auto_apply_lane_names=["docs_hygiene"],
+    ) | {
+        "daemon_queue": {
+            "jobs_by_state": {"queued": 2},
+            "kill_switch_enabled": False,
+            "leased_job_count": 1,
+            "stuck_job_count": 0,
+        }
+    }
+
+    events = [
+        json.loads(line)
+        for line in observability_event_log_text(
+            summary,
+            source="ops.observability",
+            repo=str(Path("/repo")),
+        ).splitlines()
+    ]
+
+    assert events == [
+        {
+            "event": "observability.summary",
+            "source": "ops.observability",
+            "repo": "/repo",
+            "run_count": 1,
+            "failure_count": 1,
+            "provider_backend_failure_rate": 1,
+            "accepted_edits": 0,
+            "rejected_edits": 0,
+            "rolled_back_edits": 1,
+            "governance_regression_count": 0,
+        },
+        {
+            "event": "observability.daemon_queue",
+            "source": "ops.observability",
+            "repo": "/repo",
+            "jobs_by_state": {"queued": 2},
+            "kill_switch_enabled": False,
+            "leased_job_count": 1,
+            "stuck_job_count": 0,
+        },
+        {
+            "event": "observability.auto_apply_lane",
+            "source": "ops.observability",
+            "repo": "/repo",
+            "lane": "docs_hygiene",
+            "shadowed": 0,
+            "eligible": 0,
+            "rejected": 1,
+            "staged": 0,
+            "applied": 0,
+            "rolled_back": 0,
+            "paused": 0,
+        },
+    ]
 
 
 def test_sidecar_observability_reports_paused_auto_apply_lane_from_kill_switch(
