@@ -906,6 +906,10 @@ def _write_optimizer_memory_artifact(repo: Path, run_dir: Path) -> Path:
             _rejected_edit_artifact_payload(record)
             for _, record in sorted(memory.rejected_edits.items())
         ],
+        "rejected_clusters": [
+            _rejected_cluster_artifact_payload(record)
+            for _, record in sorted(memory.rejected_clusters.items())
+        ],
         "slow_update_notes": list(memory.slow_update_notes),
         "slow_update_records": [
             {
@@ -939,6 +943,25 @@ def _rejected_edit_artifact_payload(record: RejectedEditRecord) -> dict[str, obj
         "operator",
         "file",
         "section",
+        "category",
+        "failure_pattern",
+        "review_actor",
+        "review_template",
+    ):
+        value = getattr(record, field_name)
+        if value is not None:
+            payload[field_name] = value
+    return payload
+
+
+def _rejected_cluster_artifact_payload(record) -> dict[str, object]:
+    payload = {
+        "cluster_id": record.cluster_id,
+        "evidence_refs": list(record.evidence_refs),
+        "rejection_reason": record.rejection_reason,
+        "source_refs": list(record.source_refs),
+    }
+    for field_name in (
         "category",
         "failure_pattern",
         "review_actor",

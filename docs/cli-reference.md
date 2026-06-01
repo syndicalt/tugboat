@@ -101,7 +101,7 @@ tugboat rollback --repo . --decision latest --execute
 
 `proposal` mode writes an apply plan without mutating instruction files. `branch`, `commit`, and `pr` modes require clean/stale-base checks, policy gate proof, eval evidence, and VCS adapter execution.
 
-`review reject` records a human rejection, updates candidate state, and writes rejected-edit optimizer memory so future matching proposals can be suppressed. Prefer built-in rejection templates for consistent memory:
+`review reject` records a human rejection, updates candidate state, and writes rejected-edit plus rejected-cluster optimizer memory so future matching proposals and drift groups stay visible to the optimizer. Prefer built-in rejection templates for consistent memory:
 
 - `redundant-rule`
 - `too-broad`

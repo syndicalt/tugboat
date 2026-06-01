@@ -3832,6 +3832,20 @@ llmff:
                 "suite_id": "held-out",
             },
         )
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_cluster",
+            key="drift-1",
+            payload={
+                "category": "policy_regression",
+                "cluster_id": "drift-1",
+                "evidence_refs": ["ev_fake"],
+                "failure_pattern": "duplicates existing guidance",
+                "rejection_reason": "held_out_not_improved",
+                "review_actor": "reviewer",
+                "source_refs": ["candidate:7", "cluster:drift-1", "suite:human_review"],
+            },
+        )
 
     assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
 
@@ -3853,6 +3867,17 @@ llmff:
                 "section": "Rules",
                 "semantic_fingerprint": "fingerprint-1",
                 "source_refs": ["audit:1"],
+            }
+        ],
+        "rejected_clusters": [
+            {
+                "category": "policy_regression",
+                "cluster_id": "drift-1",
+                "evidence_refs": ["ev_fake"],
+                "failure_pattern": "duplicates existing guidance",
+                "rejection_reason": "held_out_not_improved",
+                "review_actor": "reviewer",
+                "source_refs": ["candidate:7", "cluster:drift-1", "suite:human_review"],
             }
         ],
         "slow_update_notes": [],
@@ -5711,7 +5736,9 @@ llmff:
     assert main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"]) == 0
 
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
-    candidate_id = int(json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))["candidate_id"])
+    candidate = json.loads((run_dir / "candidate.json").read_text(encoding="utf-8"))
+    candidate_id = int(candidate["candidate_id"])
+    expected_evidence_refs = [candidate["sources"][0]["source_id"]]
     capsys.readouterr()
     assert (
         main(
@@ -5770,9 +5797,20 @@ llmff:
             LIMIT 1
             """
         ).fetchone()
+        cluster_memory_row = store.connection.execute(
+            """
+            SELECT key, payload_json
+            FROM optimizer_memory
+            WHERE memory_type = 'rejected_cluster'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
     key = str(memory_row[0])
     payload = json.loads(memory_row[1])
+    cluster_key = str(cluster_memory_row[0])
+    cluster_payload = json.loads(cluster_memory_row[1])
     assert output == "review: rejected\n"
     assert state == "rejected"
     assert review_action == ("reviewer", "rejected", "redundant_rule")
@@ -5789,6 +5827,16 @@ llmff:
         "section": "Rules",
         "semantic_fingerprint": key,
         "source_refs": [f"candidate:{candidate_id}", "suite:human_review"],
+    }
+    assert cluster_key.startswith("rejected_cluster:")
+    assert cluster_payload == {
+        "category": "policy_regression",
+        "cluster_id": "drift-1",
+        "evidence_refs": expected_evidence_refs,
+        "failure_pattern": "duplicates existing guidance",
+        "rejection_reason": "redundant_rule",
+        "review_actor": "reviewer",
+        "source_refs": [f"candidate:{candidate_id}", "cluster:drift-1", "suite:human_review"],
     }
 
     assert (

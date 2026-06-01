@@ -1005,6 +1005,17 @@ def test_validate_optimizer_memory_artifact_accepts_current_schema():
                     "source_refs": ["audit:1"],
                 }
             ],
+            "rejected_clusters": [
+                {
+                    "cluster_id": "drift-1",
+                    "rejection_reason": "redundant_rule",
+                    "source_refs": ["candidate:7", "suite:human_review"],
+                    "evidence_refs": ["ev_fake"],
+                    "category": "policy_regression",
+                    "failure_pattern": "duplicates existing guidance",
+                    "review_actor": "reviewer",
+                }
+            ],
             "slow_update_notes": ["Prefer smaller edits."],
             "slow_update_records": [
                 {
@@ -1043,6 +1054,7 @@ def test_validate_optimizer_memory_artifact_accepts_structured_rejected_edit_con
                     "review_template": "redundant-rule",
                 }
             ],
+            "rejected_clusters": [],
             "slow_update_notes": [],
             "slow_update_records": [],
         },
@@ -1063,6 +1075,50 @@ def test_validate_optimizer_memory_artifact_rejects_unknown_suppression_signal()
                         "source_refs": ["audit:1"],
                     }
                 ],
+                "rejected_clusters": [],
+                "slow_update_notes": [],
+                "slow_update_records": [],
+            },
+        )
+
+
+def test_validate_optimizer_memory_artifact_rejects_empty_rejected_cluster_evidence():
+    with pytest.raises(ArtifactValidationError, match="rejected_clusters\\[0\\].evidence_refs"):
+        validate_json_artifact(
+            "optimizer-memory.json",
+            {
+                "schema_version": 1,
+                "rejected_edits": [],
+                "rejected_clusters": [
+                    {
+                        "cluster_id": "drift-1",
+                        "evidence_refs": [],
+                        "rejection_reason": "redundant_rule",
+                        "source_refs": ["candidate:7", "cluster:drift-1", "suite:human_review"],
+                    }
+                ],
+                "slow_update_notes": [],
+                "slow_update_records": [],
+            },
+        )
+
+
+def test_validate_optimizer_memory_artifact_rejects_raw_rejected_cluster_payload():
+    with pytest.raises(ArtifactValidationError, match="raw_trace_payload"):
+        validate_json_artifact(
+            "optimizer-memory.json",
+            {
+                "schema_version": 1,
+                "rejected_edits": [],
+                "rejected_clusters": [
+                    {
+                        "cluster_id": "drift-1",
+                        "evidence_refs": ["ev_fake"],
+                        "rejection_reason": "redundant_rule",
+                        "source_refs": ["candidate:7", "cluster:drift-1", "suite:human_review"],
+                        "raw_trace_payload": "user correction text",
+                    }
+                ],
                 "slow_update_notes": [],
                 "slow_update_records": [],
             },
@@ -1076,6 +1132,7 @@ def test_validate_optimizer_memory_artifact_requires_structured_slow_update_reco
             {
                 "schema_version": 1,
                 "rejected_edits": [],
+                "rejected_clusters": [],
                 "slow_update_notes": [],
             },
         )

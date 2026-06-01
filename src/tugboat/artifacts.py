@@ -981,7 +981,13 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "$schema": JSON_SCHEMA_URI,
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "rejected_edits", "slow_update_notes", "slow_update_records"],
+        "required": [
+            "schema_version",
+            "rejected_edits",
+            "rejected_clusters",
+            "slow_update_notes",
+            "slow_update_records",
+        ],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
             "rejected_edits": {
@@ -1010,6 +1016,37 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                         "failure_pattern": {"type": "string"},
                         "review_actor": {"type": "string"},
                         "review_template": {"type": "string"},
+                    },
+                },
+            },
+            "rejected_clusters": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "cluster_id",
+                        "rejection_reason",
+                        "source_refs",
+                        "evidence_refs",
+                    ],
+                    "properties": {
+                        "cluster_id": {"type": "string", "minLength": 1},
+                        "rejection_reason": {"type": "string", "minLength": 1},
+                        "source_refs": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "evidence_refs": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "category": {"type": "string", "minLength": 1},
+                        "failure_pattern": {"type": "string", "minLength": 1},
+                        "review_actor": {"type": "string", "minLength": 1},
+                        "review_template": {"type": "string", "minLength": 1},
                     },
                 },
             },

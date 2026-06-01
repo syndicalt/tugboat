@@ -127,6 +127,18 @@ class SlowUpdateRecord:
 
 
 @dataclass(frozen=True)
+class RejectedClusterRecord:
+    cluster_id: str
+    rejection_reason: str
+    source_refs: tuple[str, ...]
+    evidence_refs: tuple[str, ...]
+    category: str | None = None
+    failure_pattern: str | None = None
+    review_actor: str | None = None
+    review_template: str | None = None
+
+
+@dataclass(frozen=True)
 class ReflectionArtifact:
     recurring_failure_patterns: tuple[str, ...]
     preserved_success_patterns: tuple[str, ...]
@@ -137,6 +149,7 @@ class ReflectionArtifact:
 @dataclass
 class OptimizationMemory:
     rejected_edits: dict[str, RejectedEditRecord] = field(default_factory=dict)
+    rejected_clusters: dict[str, RejectedClusterRecord] = field(default_factory=dict)
     slow_update_notes: list[str] = field(default_factory=list)
     slow_update_records: list[SlowUpdateRecord] = field(default_factory=list)
     validation_baselines: dict[str, ValidationBaselineRecord] = field(default_factory=dict)
@@ -191,6 +204,28 @@ class OptimizationMemory:
                 repo_path=repo_path,
                 memory_type="rejected_edit",
                 key=fingerprint,
+                payload=payload,
+            )
+        for cluster_key, record in sorted(self.rejected_clusters.items()):
+            payload = {
+                "cluster_id": record.cluster_id,
+                "evidence_refs": list(record.evidence_refs),
+                "rejection_reason": record.rejection_reason,
+                "source_refs": list(record.source_refs),
+            }
+            for field_name in (
+                "category",
+                "failure_pattern",
+                "review_actor",
+                "review_template",
+            ):
+                value = getattr(record, field_name)
+                if value is not None:
+                    payload[field_name] = value
+            store.record_optimizer_memory(
+                repo_path=repo_path,
+                memory_type="rejected_cluster",
+                key=cluster_key,
                 payload=payload,
             )
         for index, record in enumerate(self.slow_update_records):
@@ -248,6 +283,23 @@ class OptimizationMemory:
                     operator=_optional_string(payload, "operator"),
                     file=_optional_string(payload, "file"),
                     section=_optional_string(payload, "section"),
+                    category=_optional_string(payload, "category"),
+                    failure_pattern=_optional_string(payload, "failure_pattern"),
+                    review_actor=_optional_string(payload, "review_actor"),
+                    review_template=_optional_string(payload, "review_template"),
+                )
+            elif memory_type == "rejected_cluster":
+                source_refs = payload.get("source_refs", [])
+                if not isinstance(source_refs, list):
+                    source_refs = []
+                evidence_refs = payload.get("evidence_refs", [])
+                if not isinstance(evidence_refs, list):
+                    evidence_refs = []
+                memory.rejected_clusters[str(key)] = RejectedClusterRecord(
+                    cluster_id=str(payload["cluster_id"]),
+                    rejection_reason=str(payload["rejection_reason"]),
+                    source_refs=tuple(str(ref) for ref in source_refs),
+                    evidence_refs=tuple(str(ref) for ref in evidence_refs),
                     category=_optional_string(payload, "category"),
                     failure_pattern=_optional_string(payload, "failure_pattern"),
                     review_actor=_optional_string(payload, "review_actor"),

@@ -10,6 +10,7 @@ from tugboat.optimization import (
     OptimizationCandidate,
     OptimizationMemory,
     OptimizationRun,
+    RejectedClusterRecord,
     ReflectionArtifact,
     ScoreSet,
     SuccessFailureMinibatch,
@@ -356,6 +357,42 @@ def test_structured_rejected_edit_memory_context_round_trips(tmp_path):
     assert record.failure_pattern == "duplicates existing guidance"
     assert record.review_actor == "reviewer"
     assert record.review_template == "redundant-rule"
+
+
+def test_structured_rejected_cluster_memory_context_round_trips(tmp_path):
+    repo = tmp_path
+
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_cluster",
+            key="drift-1",
+            payload={
+                "category": "policy_regression",
+                "cluster_id": "drift-1",
+                "evidence_refs": ["ev-1", "ev-2"],
+                "failure_pattern": "duplicates existing guidance",
+                "rejection_reason": "redundant_rule",
+                "review_actor": "reviewer",
+                "review_template": "redundant-rule",
+                "source_refs": ["candidate:7", "suite:human_review"],
+            },
+        )
+        loaded = OptimizationMemory.load(store, repo=repo)
+        loaded.persist(store, repo=repo)
+        reloaded = OptimizationMemory.load(store, repo=repo)
+
+    record = reloaded.rejected_clusters["drift-1"]
+    assert record == RejectedClusterRecord(
+        cluster_id="drift-1",
+        rejection_reason="redundant_rule",
+        source_refs=("candidate:7", "suite:human_review"),
+        evidence_refs=("ev-1", "ev-2"),
+        category="policy_regression",
+        failure_pattern="duplicates existing guidance",
+        review_actor="reviewer",
+        review_template="redundant-rule",
+    )
 
 
 def test_fixture_benchmark_accepts_one_improvement_and_rejects_one_harmful_edit():

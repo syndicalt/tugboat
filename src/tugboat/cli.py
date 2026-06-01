@@ -4363,6 +4363,16 @@ def _write_human_review_rejection(
         failure_pattern=resolved["failure_pattern"],
         template=template,
     )
+    rejected_cluster_memory = _human_rejected_cluster_memory_payloads(
+        run_dir,
+        candidate,
+        candidate_id=candidate_id,
+        actor=actor,
+        reason=resolved["reason"],
+        category=resolved["category"],
+        failure_pattern=resolved["failure_pattern"],
+        template=template,
+    )
     _scan_human_review_rejection(
         actor=actor,
         reason=resolved["reason"],
@@ -4370,6 +4380,7 @@ def _write_human_review_rejection(
         failure_pattern=resolved["failure_pattern"],
         template=template,
         rejected_memory=rejected_memory,
+        rejected_cluster_memory=rejected_cluster_memory,
     )
 
     with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
@@ -4400,6 +4411,13 @@ def _write_human_review_rejection(
                 repo_path=_repo_memory_path(repo),
                 memory_type="rejected_edit",
                 key=fingerprint,
+                payload=payload,
+            )
+        for cluster_key, payload in rejected_cluster_memory:
+            store.record_optimizer_memory(
+                repo_path=_repo_memory_path(repo),
+                memory_type="rejected_cluster",
+                key=cluster_key,
                 payload=payload,
             )
         store.append_audit_event(
@@ -4516,6 +4534,75 @@ def _human_rejected_edit_memory_payloads(
     return records
 
 
+def _human_rejected_cluster_memory_payloads(
+    run_dir: Path,
+    candidate: dict[str, object],
+    *,
+    candidate_id: int,
+    actor: str,
+    reason: str,
+    category: str,
+    failure_pattern: str,
+    template: str | None = None,
+) -> list[tuple[str, dict[str, object]]]:
+    drift_path = run_dir / "drift.raw.json"
+    if not drift_path.exists():
+        return []
+    drift = json.loads(drift_path.read_text(encoding="utf-8"))
+    validate_json_artifact("drift.raw.json", drift)
+    candidate_sources = {
+        str(source.get("source_id"))
+        for source in candidate.get("sources", [])
+        if isinstance(source, dict) and source.get("source_id")
+    }
+    if not candidate_sources:
+        return []
+
+    records: list[tuple[str, dict[str, object]]] = []
+    for cluster in drift.get("clusters", []):
+        if not isinstance(cluster, dict):
+            continue
+        evidence_refs = [
+            str(ref)
+            for ref in cluster.get("evidence_refs", [])
+            if isinstance(ref, str)
+        ]
+        if not candidate_sources.intersection(evidence_refs):
+            continue
+        cluster_id = str(cluster["cluster_id"])
+        payload = {
+            "category": category,
+            "cluster_id": cluster_id,
+            "evidence_refs": evidence_refs,
+            "failure_pattern": failure_pattern,
+            "rejection_reason": reason,
+            "review_actor": actor,
+            "source_refs": [
+                f"candidate:{candidate_id}",
+                f"cluster:{cluster_id}",
+                "suite:human_review",
+            ],
+        }
+        if template is not None:
+            payload["review_template"] = template
+        records.append((_rejected_cluster_memory_key(cluster_id, evidence_refs), payload))
+    return records
+
+
+def _rejected_cluster_memory_key(cluster_id: str, evidence_refs: list[str]) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "cluster_id": cluster_id,
+                "evidence_refs": sorted(evidence_refs),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"rejected_cluster:{digest}"
+
+
 def _scan_human_review_rejection(
     *,
     actor: str,
@@ -4524,12 +4611,14 @@ def _scan_human_review_rejection(
     failure_pattern: str,
     template: str | None,
     rejected_memory: list[tuple[str, dict[str, object]]],
+    rejected_cluster_memory: list[tuple[str, dict[str, object]]],
 ) -> None:
     payload = {
         "actor": actor,
         "category": category,
         "failure_pattern": failure_pattern,
         "reason": reason,
+        "rejected_cluster_memory": [memory for _, memory in rejected_cluster_memory],
         "rejected_memory": [memory for _, memory in rejected_memory],
     }
     if template is not None:
