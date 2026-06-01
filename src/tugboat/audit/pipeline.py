@@ -21,7 +21,13 @@ from tugboat.corpus.indexer import (
 )
 from tugboat.db import Store
 from tugboat.llmff.contracts import InspectPolicyError
-from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
+from tugboat.llmff.runner import (
+    FixtureLlmffRunner,
+    LifecycleArtifactError,
+    MissingOutputError,
+    inspect_manifest,
+    run_manifest,
+)
 from tugboat.manifests import (
     ManifestContractError,
     manifests_are_allowed_by_policy,
@@ -262,6 +268,21 @@ def run_audit_pipeline(
                 output_paths={"instruction_index": run_dir / "instruction-index.raw.json"},
                 validate_output_artifacts=False,
             )
+        except (LifecycleArtifactError, MissingOutputError) as error:
+            message = _bounded_failure_message(error)
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.insert_run(
+                    run_id=run_dir.name,
+                    stage="instruction_index",
+                    manifest_hash=index_inspect.manifest_hash,
+                    status="failed",
+                    run_dir=run_dir,
+                )
+            write_audit(
+                run_dir,
+                _llmff_run_exception_audit_payload(error, message=message),
+            )
+            return AuditPipelineResult(1, run_dir, f"instruction index blocked: {message}")
         except SecretScanError as error:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
                 store.insert_run(
@@ -394,6 +415,26 @@ def run_audit_pipeline(
                 },
                 validate_output_artifacts=False,
             )
+        except (LifecycleArtifactError, MissingOutputError) as error:
+            message = _bounded_failure_message(error)
+            with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+                store.insert_run(
+                    run_id=run_dir.name,
+                    stage="audit",
+                    manifest_hash=inspect.manifest_hash,
+                    status="failed",
+                    run_dir=run_dir,
+                    episode_id=episode_id,
+                )
+            write_audit(
+                run_dir,
+                _llmff_run_exception_audit_payload(
+                    error,
+                    message=message,
+                    evidence_refs=[str(ref) for ref in audit_payload.get("evidence_refs", [])],
+                ),
+            )
+            return AuditPipelineResult(1, run_dir, f"audit blocked: {message}")
         except SecretScanError as error:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
                 store.insert_run(
@@ -626,6 +667,27 @@ def _llmff_inspect_failure_audit_payload(
         "severity": "high",
         "confidence": 1.0,
         "llmff_failure_kind": "inspect_failed",
+        "llmff_failure_message": message,
+    }
+
+
+def _llmff_run_exception_audit_payload(
+    error: BaseException,
+    *,
+    message: str,
+    evidence_refs: list[str] | None = None,
+) -> dict[str, object]:
+    failure_kind = (
+        "missing_output" if isinstance(error, MissingOutputError) else "lifecycle_error"
+    )
+    return {
+        "audit_id": 0,
+        "edit_warranted": False,
+        "evidence_refs": list(evidence_refs or []),
+        "failure_class": "llmff_run_failed",
+        "severity": "high",
+        "confidence": 1.0,
+        "llmff_failure_kind": failure_kind,
         "llmff_failure_message": message,
     }
 

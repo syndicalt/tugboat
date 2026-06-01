@@ -97,6 +97,57 @@ llmff:
     assert audit["llmff_failure_kind"] == "inspect_failed"
 
 
+def test_audit_instruction_index_missing_declared_output_fails_closed(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    fake_llmff = _write_missing_instruction_index_llmff(
+        tmp_path / "missing-instruction-index-llmff"
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 1
+
+    output = capsys.readouterr().out
+    assert (
+        "instruction index blocked: "
+        "llmff run succeeded without declared output: instruction_index"
+    ) in output
+    assert "Traceback" not in output
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    audit = json.loads((run_dir / "audit.json").read_text(encoding="utf-8"))
+    assert audit["failure_class"] == "llmff_run_failed"
+    assert audit["llmff_failure_kind"] == "missing_output"
+    assert audit["llmff_failure_message"] == (
+        "llmff run succeeded without declared output: instruction_index"
+    )
+    assert not (run_dir / "candidate.json").exists()
+    with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
+        run_status = connection.execute(
+            "SELECT stage, status FROM runs WHERE id = ?",
+            (run_dir.name,),
+        ).fetchone()
+        llmff_jobs = connection.execute("SELECT COUNT(*) FROM llmff_jobs").fetchone()[0]
+    assert run_status == ("instruction_index", "failed")
+    assert llmff_jobs == 0
+
+
 def test_audit_missing_trace_returns_clear_error_without_traceback(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1376,6 +1427,44 @@ if args[:1] == ["run"]:
             ],
             "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
         }) + "\\n", encoding="utf-8")
+    raise SystemExit(0)
+
+raise SystemExit(64)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _write_missing_instruction_index_llmff(path: Path) -> Path:
+    path.write_text(
+        """#!/usr/bin/env python3
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if args[:3] == ["inspect", "--format", "json"]:
+    print(json.dumps({
+        "manifest": Path(args[3]).stem,
+        "network_required": False,
+        "providers": [],
+        "external_calls": [],
+    }))
+    raise SystemExit(0)
+
+if args[:1] == ["run"]:
+    trace = Path(args[args.index("--trace") + 1])
+    events = Path(args[args.index("--events") + 1])
+    checkpoint = Path(args[args.index("--checkpoint") + 1])
+    trace.write_text('{"event":"step"}\\n', encoding="utf-8")
+    events.write_text('{"event":"run_completed"}\\n', encoding="utf-8")
+    checkpoint.write_text(
+        json.dumps({"manifest_hash": hashlib.sha256(Path(args[1]).read_bytes()).hexdigest()}) + "\\n",
+        encoding="utf-8",
+    )
     raise SystemExit(0)
 
 raise SystemExit(64)
