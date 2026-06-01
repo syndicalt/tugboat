@@ -1695,6 +1695,17 @@ def test_validate_status_report_artifact_accepts_current_schema():
             "retention_candidates": 0,
             "retention_redaction_candidates": 0,
             "manifest_policy": "unrestricted",
+            "daemon_queue": {
+                "queue_path": ".sidecar/daemon.sqlite",
+                "kill_switch_enabled": False,
+                "jobs_by_state": {},
+                "oldest_queued_job_id": None,
+                "leased_job_count": 0,
+                "stuck_job_count": 0,
+                "oldest_stuck_job_id": None,
+                "oldest_stuck_lease_expires_at": None,
+                "recovery_hint": None,
+            },
         },
     )
 

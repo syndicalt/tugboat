@@ -782,6 +782,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if policy.allowed_manifest_hashes
             else "unrestricted"
         )
+        daemon_queue = daemon_status(repo, kill_switch=default_kill_switch(repo))
         status_payload = {
             "schema_version": SCHEMA_VERSION,
             "mode": policy.mode,
@@ -807,6 +808,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "retention_candidates": len(retention.candidates),
             "retention_redaction_candidates": len(retention.redaction_candidates),
             "manifest_policy": manifest_policy,
+            "daemon_queue": daemon_queue,
         }
         validate_json_artifact("status-report.json", status_payload)
         status_report_path = write_json_artifact(sidecar_dir(repo) / "status-report.json", status_payload)
@@ -825,6 +827,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"retention_candidates: {len(retention.candidates)}")
         print(f"retention_redaction_candidates: {len(retention.redaction_candidates)}")
         print(f"manifest_policy: {manifest_policy}")
+        queued_jobs = int(daemon_queue.get("jobs_by_state", {}).get("queued", 0))
+        kill_switch_state = "enabled" if daemon_queue.get("kill_switch_enabled") else "disabled"
+        print(
+            "daemon_queue: "
+            f"queued={queued_jobs} "
+            f"leased={daemon_queue['leased_job_count']} "
+            f"stuck={daemon_queue['stuck_job_count']} "
+            f"kill_switch={kill_switch_state}"
+        )
         print(f"status_report: {status_report_path}")
         return 0
 

@@ -1759,6 +1759,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "retention_candidates",
             "retention_redaction_candidates",
             "manifest_policy",
+            "daemon_queue",
         ],
         "properties": {
             "schema_version": {"type": "integer", "const": SCHEMA_VERSION},
@@ -1790,6 +1791,35 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "retention_candidates": {"type": "integer"},
             "retention_redaction_candidates": {"type": "integer"},
             "manifest_policy": {"type": "string"},
+            "daemon_queue": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "queue_path",
+                    "kill_switch_enabled",
+                    "jobs_by_state",
+                    "oldest_queued_job_id",
+                    "leased_job_count",
+                    "stuck_job_count",
+                    "oldest_stuck_job_id",
+                    "oldest_stuck_lease_expires_at",
+                    "recovery_hint",
+                ],
+                "properties": {
+                    "queue_path": {"type": "string"},
+                    "kill_switch_enabled": {"type": "boolean"},
+                    "jobs_by_state": {
+                        "type": "object",
+                        "additionalProperties": {"type": "integer"},
+                    },
+                    "oldest_queued_job_id": {"type": ["integer", "null"]},
+                    "leased_job_count": {"type": "integer"},
+                    "stuck_job_count": {"type": "integer"},
+                    "oldest_stuck_job_id": {"type": ["integer", "null"]},
+                    "oldest_stuck_lease_expires_at": {"type": ["string", "null"]},
+                    "recovery_hint": {"type": ["string", "null"]},
+                },
+            },
         },
     },
     "sidecar-migration-report.json": {

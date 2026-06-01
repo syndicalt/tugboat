@@ -4,11 +4,13 @@ import json
 import os
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from tugboat.cli import main
+from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
 from tugboat.paths import sidecar_dir
@@ -29,6 +31,7 @@ def test_status_reports_empty_sidecar_state(tmp_path: Path, capsys):
         "retention_candidates: 0",
         "retention_redaction_candidates: 0",
         "manifest_policy: unrestricted",
+        "daemon_queue: queued=0 leased=0 stuck=0 kill_switch=disabled",
         f"status_report: {tmp_path / '.sidecar' / 'status-report.json'}",
     ]
     assert json.loads((tmp_path / ".sidecar" / "status-report.json").read_text(encoding="utf-8")) == {
@@ -44,7 +47,71 @@ def test_status_reports_empty_sidecar_state(tmp_path: Path, capsys):
         "retention_candidates": 0,
         "retention_redaction_candidates": 0,
         "manifest_policy": "unrestricted",
+        "daemon_queue": {
+            "queue_path": ".sidecar/daemon.sqlite",
+            "kill_switch_enabled": False,
+            "jobs_by_state": {},
+            "oldest_queued_job_id": None,
+            "leased_job_count": 0,
+            "stuck_job_count": 0,
+            "oldest_stuck_job_id": None,
+            "oldest_stuck_lease_expires_at": None,
+            "recovery_hint": None,
+        },
     }
+
+
+def test_status_report_includes_daemon_queue_visibility(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "read-only.kill").write_text("enabled\n", encoding="utf-8")
+    now = datetime.now(timezone.utc)
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        leased = queue.enqueue(
+            kind="trace_audit",
+            payload={"trace_path": "traces/leased.jsonl"},
+            now=now - timedelta(minutes=8),
+        )
+        queue.acquire_next(
+            lease_owner="worker-a",
+            lease_duration=timedelta(minutes=10),
+            now=now - timedelta(minutes=5),
+        )
+        stale = queue.enqueue(
+            kind="trace_audit",
+            payload={"trace_path": "traces/stale.jsonl"},
+            now=now - timedelta(minutes=7),
+        )
+        queue.transition(leased.id, JobState.RUNNING, now=now - timedelta(minutes=4))
+        queue.acquire_next(
+            lease_owner="worker-b",
+            lease_duration=timedelta(minutes=1),
+            now=now - timedelta(minutes=3),
+        )
+        queue.transition(stale.id, JobState.RUNNING, now=now - timedelta(minutes=2))
+        queued = queue.enqueue(
+            kind="trace_audit",
+            payload={"trace_path": "traces/queued.jsonl"},
+            now=now - timedelta(minutes=10),
+        )
+
+    assert main(["status", "--repo", str(tmp_path)]) == 0
+
+    output = capsys.readouterr().out
+    assert "daemon_queue: queued=1 leased=2 stuck=1 kill_switch=enabled" in output
+    payload = json.loads((sidecar / "status-report.json").read_text(encoding="utf-8"))
+    assert payload["daemon_queue"]["jobs_by_state"] == {
+        "queued": 1,
+        "running": 2,
+    }
+    assert payload["daemon_queue"]["kill_switch_enabled"] is True
+    assert payload["daemon_queue"]["oldest_queued_job_id"] == queued.id
+    assert payload["daemon_queue"]["leased_job_count"] == 2
+    assert payload["daemon_queue"]["stuck_job_count"] == 1
+    assert payload["daemon_queue"]["oldest_stuck_job_id"] == stale.id
+    assert payload["daemon_queue"]["recovery_hint"] == (
+        "run tugboat daemon run-once --repo <repo> to recover stale leases"
+    )
 
 
 def test_status_reports_invalid_policy_without_traceback(tmp_path: Path, capsys):
