@@ -121,6 +121,10 @@ If the kill switch is enabled, queued jobs will not execute. If status reports `
 
 ## Operations
 
+`index blocked: instruction file budget exceeded`
+
+Review the configured `instruction_files` globs and raise `index.max_instruction_files` only after confirming the repository really needs the larger instruction corpus. Tugboat blocks before parsing files or writing `.sidecar/db.sqlite` when the index budget is exceeded.
+
 `migration blocked: sidecar schema version <n> is newer than supported version <m>`
 
 Stop and upgrade Tugboat before running more commands against that sidecar. A newer `.sidecar/version.json` means the sidecar may contain schema or artifact semantics this binary does not understand; older binaries must not migrate, apply, or reinterpret it.

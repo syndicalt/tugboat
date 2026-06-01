@@ -41,6 +41,7 @@ def test_load_policy_defaults_to_proposal_only(tmp_path: Path):
     assert policy.raw_traces_retention_days == 14
     assert policy.checkpoints_retention_days == 7
     assert policy.retention_scan_file_budget == 100_000
+    assert policy.index_max_instruction_files == 10_000
     assert [entry.path for entry in policy.instruction_files] == [
         "AGENTS.md",
         "CODEX.md",
@@ -635,6 +636,43 @@ retention:
     )
 
     with pytest.raises(ValueError, match="retention.max_scan_files"):
+        load_policy(tmp_path)
+
+
+def test_load_policy_yaml_reads_index_budget(tmp_path: Path):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        """
+version: 1
+index:
+  max_instruction_files: 25
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(tmp_path)
+
+    assert policy.index_max_instruction_files == 25
+
+
+@pytest.mark.parametrize("value", ["0", "-1", '"many"', "true"])
+def test_load_policy_yaml_rejects_invalid_index_budget(
+    tmp_path: Path,
+    value: str,
+):
+    policy_dir = tmp_path / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+index:
+  max_instruction_files: {value}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="index.max_instruction_files"):
         load_policy(tmp_path)
 
 

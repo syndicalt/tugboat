@@ -34,6 +34,8 @@ retention:
   raw_traces_days: 14
   checkpoints_days: 7
   max_scan_files: 100000
+index:
+  max_instruction_files: 10000
 llmff:
   binary: python -m tugboat.llmff.fixture_backend
   require_inspect: true
@@ -45,6 +47,8 @@ This fixture backend is local, credential-free, and intended for proposal-only a
 `roadmap.drift_cluster.max_evidence_refs` bounds each drift cluster before proposal generation. If `llmff` over-merges evidence, Tugboat rewrites `drift.raw.json` into deterministic review-sized cluster parts while preserving evidence IDs and order.
 
 `retention.max_scan_files` bounds local `.sidecar/runs` retention and redaction scans. When the budget is exceeded, Tugboat blocks cleanup before deletion or export so operators can review sidecar growth instead of running unbounded maintenance work.
+
+`index.max_instruction_files` bounds configured instruction discovery before parsing or index writes. When the budget is exceeded, `tugboat index` blocks without writing `.sidecar/db.sqlite`, which keeps large repository onboarding deterministic.
 
 ## Provider Backed
 

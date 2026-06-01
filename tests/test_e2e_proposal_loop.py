@@ -160,6 +160,86 @@ def test_optimize_trace_directory_returns_clear_error_without_traceback(
     assert not (repo / ".sidecar" / "runs").exists()
 
 
+def test_optimize_index_budget_failure_exits_cleanly_and_records_failed_run(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docs = repo / "docs"
+    sidecar = repo / ".sidecar"
+    docs.mkdir()
+    sidecar.mkdir()
+    (docs / "one.md").write_text("# One\n\nFirst.\n", encoding="utf-8")
+    (docs / "two.md").write_text("# Two\n\nSecond.\n", encoding="utf-8")
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+index:
+  max_instruction_files: 1
+instruction_files:
+  - path: docs/**/*.md
+    kind: repo_policy
+    precedence: 50
+    protected: true
+llmff:
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    exit_code = main(["optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "audit blocked: instruction file budget exceeded: 2 discovered, limit 1" in output
+    assert "Traceback" not in output
+    run_dirs = list((sidecar / "runs").iterdir())
+    assert len(run_dirs) == 1
+    with closing(sqlite3.connect(sidecar / "db.sqlite")) as connection:
+        rows = connection.execute("SELECT stage, status FROM runs ORDER BY rowid").fetchall()
+    assert rows[-1] == ("audit", "failed")
+
+
+def test_audit_index_budget_failure_exits_cleanly_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docs = repo / "docs"
+    sidecar = repo / ".sidecar"
+    docs.mkdir()
+    sidecar.mkdir()
+    (docs / "one.md").write_text("# One\n\nFirst.\n", encoding="utf-8")
+    (docs / "two.md").write_text("# Two\n\nSecond.\n", encoding="utf-8")
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+index:
+  max_instruction_files: 1
+instruction_files:
+  - path: docs/**/*.md
+    kind: repo_policy
+    precedence: 50
+    protected: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    trace = repo / "trace.jsonl"
+    trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+
+    exit_code = main(["audit", "--repo", str(repo), "--trace", str(trace)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "audit blocked: instruction file budget exceeded: 2 discovered, limit 1" in output
+    assert "Traceback" not in output
+
+
 def test_optimize_missing_trace_cli_exits_cleanly_without_python_traceback(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

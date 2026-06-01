@@ -40,7 +40,7 @@ from tugboat.auto_apply import (
 )
 from tugboat.config import DEFAULT_INSTRUCTION_FILES, load_policy
 from tugboat.models import DEFAULT_FIXTURE_LLMFF_BINARY, Policy
-from tugboat.corpus.indexer import index_repo
+from tugboat.corpus.indexer import InstructionIndexBudgetExceeded, index_repo
 from tugboat.daemon.runner import (
     DaemonLoopConfig,
     default_trace_dirs,
@@ -210,6 +210,9 @@ def _initialize_repo_policy(repo: Path) -> Path:
             "drift_cluster": {
                 "max_evidence_refs": Policy().roadmap_drift_cluster_max_evidence_refs,
             },
+        },
+        "index": {
+            "max_instruction_files": Policy().index_max_instruction_files,
         },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
@@ -896,7 +899,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 candidate=args.candidate,
                 suite=args.suite,
             )
-        except SecretScanError as error:
+        except (InstructionIndexBudgetExceeded, SecretScanError) as error:
             print(f"ci blocked: {error}")
             return 1
         harness = payload["checks"]["harness"]
@@ -932,7 +935,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if _policy_preflight_blocked("index", repo):
             return 1
-        result = index_repo(repo, load_policy(repo))
+        try:
+            result = index_repo(repo, load_policy(repo))
+        except InstructionIndexBudgetExceeded as error:
+            print(f"index blocked: {error}")
+            return 1
         if not args.check:
             with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
                 store.index_documents(repo, result)
@@ -1318,7 +1325,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "harness" and args.harness_command == "check":
-        result = check_harness_legibility(Path(args.repo), args.max_instruction_lines)
+        try:
+            result = check_harness_legibility(Path(args.repo), args.max_instruction_lines)
+        except InstructionIndexBudgetExceeded as error:
+            print(f"harness blocked: {error}")
+            return 1
         if result.passed:
             print("harness: ok")
             return 0
@@ -1328,7 +1339,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "harness" and args.harness_command == "report":
         repo = Path(args.repo)
-        report = generate_harness_report(repo)
+        try:
+            report = generate_harness_report(repo)
+        except InstructionIndexBudgetExceeded as error:
+            print(f"harness blocked: {error}")
+            return 1
         try:
             _persist_harness_report(repo, report)
         except (ArtifactValidationError, SecretScanError) as error:
@@ -1388,7 +1403,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if _write_blocked_by_read_only(repo, "cleanup"):
             return 1
-        report = generate_harness_report(repo)
+        try:
+            report = generate_harness_report(repo)
+        except InstructionIndexBudgetExceeded as error:
+            print(f"harness blocked: {error}")
+            return 1
         _persist_harness_report(repo, report)
         candidates = generate_cleanup_candidates(repo)
         structural_eval = run_cleanup_structural_eval(repo, candidates)

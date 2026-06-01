@@ -195,6 +195,7 @@ def load_policy(repo: Path) -> Policy:
     mcp = raw.get("mcp", {}) or {}
     provider_smoke = raw.get("provider_smoke", {}) or {}
     retention = raw.get("retention", {}) or {}
+    index = raw.get("index", {}) or {}
     roadmap = raw.get("roadmap", {}) or {}
     vcs = raw.get("vcs", {}) or {}
     pull_request = vcs.get("pull_request", {}) or {}
@@ -357,6 +358,10 @@ def load_policy(repo: Path) -> Policy:
         retention_scan_file_budget=_as_positive_int(
             retention.get("max_scan_files", Policy().retention_scan_file_budget),
             "retention.max_scan_files",
+        ),
+        index_max_instruction_files=_as_positive_int(
+            index.get("max_instruction_files", Policy().index_max_instruction_files),
+            "index.max_instruction_files",
         ),
         provider_smoke_enabled=bool(
             provider_smoke.get("enabled", Policy().provider_smoke_enabled)

@@ -20,7 +20,7 @@ tugboat status --repo .
 
 - `doctor` prints installed CLI health, repo policy posture, provider/network posture, manifest policy, and actionable recommendations.
 - `init` writes `.sidecar/policy.yaml` and `.sidecar/.gitignore` for the current directory by default; pass `--repo` for another repository. It refuses to overwrite an existing policy.
-- `index` parses configured instruction files and stores document/chunk metadata. Add `--check` for dry-run validation without writing index rows.
+- `index` parses configured instruction files and stores document/chunk metadata. Add `--check` for dry-run validation without writing index rows. Instruction discovery honors policy-owned `index.max_instruction_files` and blocks before parsing or DB writes when the budget is exceeded.
 - `status` writes `.sidecar/status-report.json` and prints mode, auto-apply state, latest run, latest `llmff` job, pending candidates, retention candidates, and manifest policy.
 
 ## Proposal Pipeline

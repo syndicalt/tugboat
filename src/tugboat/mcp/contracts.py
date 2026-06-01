@@ -12,7 +12,11 @@ from typing import Any, TypeVar
 from tugboat import __version__
 from tugboat.artifacts import ArtifactValidationError, validate_json_artifact
 from tugboat.config import load_policy
-from tugboat.corpus.indexer import index_repo
+from tugboat.corpus.indexer import (
+    InstructionIndexBudgetExceeded,
+    index_repo,
+    instruction_paths,
+)
 from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
@@ -838,6 +842,9 @@ def tugboat_record_episode(repo: str | Path, trace_jsonl: str) -> dict[str, Any]
                 if trace_format == "mcp"
                 else ingest_jsonl_trace(path),
             )
+        except InstructionIndexBudgetExceeded as error:
+            path.unlink(missing_ok=True)
+            raise ValueError(str(error)) from error
         except (json.JSONDecodeError, ValueError) as error:
             path.unlink(missing_ok=True)
             raise ValueError("invalid episode JSONL payload") from error
@@ -931,16 +938,13 @@ def _active_context_payloads(repo: Path) -> list[dict[str, object]]:
 def _active_instruction_paths(repo: Path) -> list[Path]:
     repo_root = repo.resolve()
     paths: list[Path] = []
-    for entry in load_policy(repo).instruction_files:
-        raw_path = entry.path
-        if any(char in raw_path for char in "*?[]"):
-            candidates = sorted(repo.glob(raw_path))
-        else:
-            candidates = [repo / raw_path]
-        for candidate in candidates:
-            path = candidate.resolve()
-            if path.is_file() and path.is_relative_to(repo_root):
-                paths.append(path)
+    for candidate, _entry in sorted(
+        instruction_paths(repo, load_policy(repo)),
+        key=lambda item: item[0].relative_to(repo).as_posix(),
+    ):
+        path = candidate.resolve()
+        if path.is_file() and path.is_relative_to(repo_root):
+            paths.append(path)
     return paths
 
 

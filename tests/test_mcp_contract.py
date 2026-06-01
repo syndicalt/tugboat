@@ -1847,6 +1847,48 @@ def test_record_episode_enriches_capture_with_active_instruction_and_policy_cont
     assert payloads[1]["sha256"] == CandidatePatch.hash_file(repo / ".sidecar" / "policy.yaml")
 
 
+def test_record_episode_blocks_instruction_file_budget_failure_without_persisting_episode(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    docs = repo / "docs"
+    sidecar.mkdir()
+    docs.mkdir()
+    (docs / "one.md").write_text("# One\n\nFirst.\n", encoding="utf-8")
+    (docs / "two.md").write_text("# Two\n\nSecond.\n", encoding="utf-8")
+    (sidecar / "policy.yaml").write_text(
+        f"""
+version: 1
+index:
+  max_instruction_files: 1
+instruction_files:
+  - path: docs/**/*.md
+    kind: repo_policy
+    precedence: 50
+    protected: true
+mcp:
+  allowed_repositories:
+    - {repo.resolve().as_posix()}
+  tool_policy:
+    tugboat_record_episode: allow
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="instruction file budget exceeded: 2 discovered, limit 1",
+    ):
+        tugboat_record_episode(repo, '{"type":"user_request","content":"Fix bug"}\n')
+
+    episode_dir = sidecar / "mcp" / "episodes"
+    assert not episode_dir.exists() or list(episode_dir.iterdir()) == []
+    events = _mcp_events(repo)
+    assert events[-1]["tool"] == "tugboat_record_episode"
+    assert events[-1]["status"] == "failed"
+
+
 def test_record_episode_writes_private_episode_artifacts(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)

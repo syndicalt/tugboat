@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from tugboat.corpus.markdown import parse_markdown
@@ -10,14 +11,14 @@ from tugboat.models import DocumentRecord, IndexResult, InstructionFilePolicy, P
 _GLOB_CHARS = set("*?[")
 
 
+class InstructionIndexBudgetExceeded(ValueError):
+    pass
+
+
 def index_repo(repo: Path, policy: Policy) -> IndexResult:
     documents = []
-    seen: set[Path] = set()
 
-    for path, entry in sorted(instruction_paths(repo, policy.instruction_files)):
-        if path in seen:
-            continue
-        seen.add(path)
+    for path, entry in sorted(instruction_paths(repo, policy)):
         documents.append(
             parse_markdown(
                 path,
@@ -48,14 +49,33 @@ def _instruction_chunk_ref(
 
 
 def instruction_paths(
-    repo: Path, entries: tuple[InstructionFilePolicy, ...]
+    repo: Path,
+    policy_or_entries: Policy | Sequence[InstructionFilePolicy],
+    *,
+    max_instruction_files: int | None = None,
 ) -> list[tuple[Path, InstructionFilePolicy]]:
+    if isinstance(policy_or_entries, Policy):
+        entries = policy_or_entries.instruction_files
+        max_instruction_files = policy_or_entries.index_max_instruction_files
+    else:
+        entries = tuple(policy_or_entries)
     paths: list[tuple[Path, InstructionFilePolicy]] = []
+    seen: set[Path] = set()
     for entry in entries:
         if any(char in entry.path for char in _GLOB_CHARS):
             matches = (path for path in repo.glob(entry.path) if path.is_file())
         else:
             path = repo / entry.path
             matches = (candidate for candidate in (path,) if candidate.is_file())
-        paths.extend((path, entry) for path in matches)
+        for path in matches:
+            if path in seen:
+                continue
+            seen.add(path)
+            discovered_count = len(seen)
+            if max_instruction_files is not None and discovered_count > max_instruction_files:
+                raise InstructionIndexBudgetExceeded(
+                    "instruction file budget exceeded: "
+                    f"{discovered_count} discovered, limit {max_instruction_files}"
+                )
+            paths.append((path, entry))
     return paths

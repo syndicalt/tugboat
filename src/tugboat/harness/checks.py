@@ -367,7 +367,7 @@ def _configured_instruction_paths(repo: Path) -> list[Path]:
     seen: set[Path] = set()
     paths: list[Path] = []
     for path, _entry in sorted(
-        instruction_paths(repo, policy.instruction_files),
+        instruction_paths(repo, policy),
         key=lambda item: item[0].relative_to(repo).as_posix(),
     ):
         if path in seen:

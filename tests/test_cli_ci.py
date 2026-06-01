@@ -110,6 +110,39 @@ def _write_candidate_json(run_dir: Path) -> int:
     return candidate_id
 
 
+def test_ci_blocks_instruction_file_budget_failure_without_traceback_or_report(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    docs = tmp_path / "docs"
+    sidecar.mkdir()
+    docs.mkdir()
+    (docs / "one.md").write_text("# One\n\nFirst.\n", encoding="utf-8")
+    (docs / "two.md").write_text("# Two\n\nSecond.\n", encoding="utf-8")
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+index:
+  max_instruction_files: 1
+instruction_files:
+  - path: docs/**/*.md
+    kind: repo_policy
+    precedence: 50
+    protected: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["ci", "--repo", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "ci blocked: instruction file budget exceeded: 2 discovered, limit 1" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "ci" / "ci-report.json").exists()
+
+
 def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_path: Path, capsys):
     repo = tmp_path
     docs = repo / "docs"

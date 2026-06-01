@@ -54,3 +54,36 @@ def test_index_write_reports_invalid_policy_without_traceback(tmp_path: Path, ca
     assert "index blocked: policy invalid:" in output
     assert "Traceback" not in output
     assert not (sidecar / "db.sqlite").exists()
+
+
+def test_index_blocks_when_instruction_file_budget_exceeded_without_db_write(
+    tmp_path: Path,
+    capsys,
+):
+    sidecar = tmp_path / ".sidecar"
+    docs = tmp_path / "docs"
+    sidecar.mkdir()
+    docs.mkdir()
+    (sidecar / "policy.yaml").write_text(
+        """
+version: 1
+index:
+  max_instruction_files: 1
+instruction_files:
+  - path: docs/**/*.md
+    kind: repo_policy
+    precedence: 50
+    protected: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (docs / "one.md").write_text("# One\n\nFirst.\n", encoding="utf-8")
+    (docs / "two.md").write_text("# Two\n\nSecond.\n", encoding="utf-8")
+
+    exit_code = main(["index", "--repo", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "index blocked: instruction file budget exceeded: 2 discovered, limit 1" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "db.sqlite").exists()

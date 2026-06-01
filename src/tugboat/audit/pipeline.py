@@ -14,7 +14,11 @@ from tugboat.artifacts import (
 )
 from tugboat.audit.service import write_audit
 from tugboat.config import load_policy
-from tugboat.corpus.indexer import index_repo, instruction_chunk_refs
+from tugboat.corpus.indexer import (
+    InstructionIndexBudgetExceeded,
+    index_repo,
+    instruction_chunk_refs,
+)
 from tugboat.db import Store
 from tugboat.llmff.contracts import InspectPolicyError
 from tugboat.llmff.runner import FixtureLlmffRunner, inspect_manifest, run_manifest
@@ -68,7 +72,31 @@ def run_audit_pipeline(
         )
     shutil.copyfile(trace, run_dir / "trace-input.jsonl")
     mark_private_file(run_dir / "trace-input.jsonl")
-    _write_instruction_snapshot(repo, run_dir)
+    try:
+        _write_instruction_snapshot(repo, run_dir)
+    except InstructionIndexBudgetExceeded as error:
+        with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+            store.insert_run(
+                run_id=run_dir.name,
+                stage="audit",
+                manifest_hash="preflight",
+                status="failed",
+                run_dir=run_dir,
+            )
+        write_audit(
+            run_dir,
+            {
+                "audit_id": 0,
+                "edit_warranted": False,
+                "evidence_refs": [],
+                "failure_class": "instruction_index_budget_exceeded",
+                "severity": "high",
+                "confidence": 1.0,
+                "llmff_failure_kind": "instruction_index_budget_exceeded",
+                "llmff_failure_message": str(error),
+            },
+        )
+        return AuditPipelineResult(1, run_dir, f"audit blocked: {error}")
     try:
         scan_path(run_dir / "trace-input.jsonl")
         scan_path(run_dir / "instruction-snapshot")
