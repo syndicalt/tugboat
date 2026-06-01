@@ -34,13 +34,13 @@ echo "installed tugboat wheel: dist/<wheel>.whl"
 .sidecar/ci/install-smoke-venv/bin/tugboat doctor
 .sidecar/ci/install-smoke-venv/bin/tugboat index --repo . --check
 .sidecar/ci/install-smoke-venv/bin/tugboat harness check --repo .
-tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
+tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
 Before tagging:
 
 - Confirm `tugboat doctor` reports `proposal_only` and `auto_apply: disabled`.
-- Confirm CI retained the pytest log, harness output, and release artifact manifest.
+- Confirm CI retained the pytest log with total coverage at or above 90%, `ci-report.json`, harness output, and release artifact manifest.
 - Confirm the built wheel installs in a clean virtual environment and the installed `tugboat doctor`, `tugboat index --repo . --check`, and `tugboat harness check --repo .` commands run.
 - Confirm `.sidecar/ops/release-artifact-manifest.json` records the wheel hash, retained evidence, commit, CI URL, approver, and security review decision.
 - Confirm the security review for the release has no open critical or high findings.

@@ -240,7 +240,14 @@ tugboat ops release-manifest --repo . \
   --approver <name> \
   --security-review-decision approved_proposal_only \
   --security-review-critical-high-findings 0 \
-  --evidence .sidecar/ci/pytest-coverage.log
+  --evidence .sidecar/ci/doctor.txt \
+  --evidence .sidecar/ci/index-check.txt \
+  --evidence .sidecar/ci/harness.txt \
+  --evidence .sidecar/ci/ci-report.json \
+  --evidence .sidecar/ci/pytest-coverage.log \
+  --evidence .sidecar/ci/build-wheel.txt \
+  --evidence .sidecar/ci/twine-check.txt \
+  --evidence .sidecar/ci/install-smoke.txt
 ```
 
 The release gate requires full-suite coverage at or above 90%, harness health, docs contracts, retained CI evidence, and exact-HEAD release manifest generation.

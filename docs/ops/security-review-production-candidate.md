@@ -18,7 +18,7 @@ PYTHONPATH=src python -m tugboat ci --repo .
 pytest tests/test_docs_ops.py tests/test_harness_legibility.py tests/test_cli_ci.py -q
 pytest tests/test_docs_ops.py tests/test_cli_ops_release_manifest.py tests/test_cli_ops_observability.py tests/test_cli_ops_backup.py tests/test_cli_ops_migrations.py tests/test_ops_retention.py -q
 python -m pytest --cov=src --cov-report=term-missing -q
-PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit "$(git rev-parse HEAD)" --ci-url "local://production-candidate/2026-05-27-$(git rev-parse --short HEAD)" --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
+PYTHONPATH=src python -m tugboat ops release-manifest --repo . --wheel dist/tugboat-0.1.0-py3-none-any.whl --commit "$(git rev-parse HEAD)" --ci-url "local://production-candidate/2026-05-27-$(git rev-parse --short HEAD)" --approver cheapseatsecon --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
 Latest retained coverage evidence: 1099 tests and 90.02% coverage.

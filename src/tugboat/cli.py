@@ -1392,6 +1392,7 @@ def _write_release_artifact_manifest(
             "tugboat doctor",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
+            "tugboat ci --repo .",
             "python -m pytest --cov=src --cov-report=term-missing -q",
             "python -m build --wheel",
             "python -m twine check dist/<wheel>.whl",
@@ -1431,6 +1432,7 @@ def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) ->
         ("doctor", "doctor output"),
         ("index-check", "index check"),
         ("harness", "harness check"),
+        ("ci-report", "CI"),
         ("build-wheel", "wheel build"),
         ("twine-check", "twine check"),
         ("install-smoke", "install smoke"),
@@ -1447,7 +1449,11 @@ def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> No
     text = path.read_text(encoding="utf-8", errors="replace")
     lowered = text.lower()
     if "pytest-coverage" in name:
-        if " passed" not in lowered or _contains_failed_release_signal(lowered):
+        if (
+            " passed" not in lowered
+            or _contains_failed_release_signal(lowered)
+            or _release_coverage_percent(text) < 90.0
+        ):
             raise ValueError("pytest coverage evidence did not pass")
         return
     if "install-smoke" in name:
@@ -1485,6 +1491,12 @@ def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> No
         if "harness: ok" not in lowered or _contains_failed_release_signal(lowered):
             raise ValueError("harness check evidence did not pass")
         return
+    if "ci-report" in name:
+        payload = load_json_object_artifact(path, "ci-report.json")
+        validate_json_artifact("ci-report.json", payload)
+        if bool(payload.get("auto_apply", True)) or not _ci_payload_passed(payload):
+            raise ValueError("CI evidence did not pass")
+        return
     if "build-wheel" in name:
         if (
             "python -m build --wheel" not in lowered
@@ -1510,6 +1522,19 @@ def _contains_failed_release_signal(lowered_text: str) -> bool:
             lowered_text,
         )
     )
+
+
+def _release_coverage_percent(text: str) -> float:
+    patterns = (
+        r"(?im)^TOTAL\s+.*?(\d+(?:\.\d+)?)%",
+        r"(?im)^Required test coverage of \d+(?:\.\d+)?% reached\. Total coverage: (\d+(?:\.\d+)?)%",
+        r"(?im)^Total coverage: (\d+(?:\.\d+)?)%",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match is not None:
+            return float(match.group(1))
+    return 0.0
 
 
 def _provider_backed_release_evidence(

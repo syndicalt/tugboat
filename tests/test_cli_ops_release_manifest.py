@@ -41,6 +41,7 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
         "doctor": evidence_dir / "doctor.txt",
         "index": evidence_dir / "index-check.txt",
         "harness": evidence_dir / "harness.txt",
+        "ci": evidence_dir / "ci-report.json",
         "coverage": evidence_dir / "pytest-coverage.log",
         "build": evidence_dir / "build-wheel.txt",
         "twine": evidence_dir / "twine-check.txt",
@@ -49,7 +50,15 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
     evidence["doctor"].write_text("tugboat: ok\nmode: proposal_only\nauto_apply: disabled\n", encoding="utf-8")
     evidence["index"].write_text("index: ok\n", encoding="utf-8")
     evidence["harness"].write_text("harness: ok\n", encoding="utf-8")
-    evidence["coverage"].write_text("633 passed\n", encoding="utf-8")
+    evidence["ci"].write_text(
+        json.dumps(_passing_ci_report(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    evidence["coverage"].write_text(
+        "1226 passed in 75.84s\n"
+        "TOTAL 11164 803 4048 627 90.09%\n",
+        encoding="utf-8",
+    )
     evidence["build"].write_text(
         "python -m build --wheel\n"
         "built dist/tugboat-0.1.0-py3-none-any.whl\n",
@@ -73,6 +82,34 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
         encoding="utf-8",
     )
     return evidence
+
+
+def _passing_ci_report() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "mode": "ci_check",
+        "auto_apply": False,
+        "checks": {
+            "index": {"passed": True, "indexed_documents": 1},
+            "harness": {
+                "passed": True,
+                "findings": [],
+                "report_path": ".sidecar/harness-report.json",
+                "report_sha256": "a" * 64,
+                "doc_gardening_task_count": 0,
+            },
+            "harness_report": {
+                "passed": True,
+                "missing_docs": [],
+                "stale_docs": [],
+                "orphaned_runbooks": [],
+                "recurring_failures_without_docs": [],
+                "doc_gardening_tasks": [],
+            },
+            "manifest_contracts": {"passed": True, "findings": []},
+            "semantic_policy_lint": {"passed": True, "findings": []},
+        },
+    }
 
 
 def _write_provider_policy(
@@ -217,6 +254,10 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         b"python -m twine check dist/tugboat-0.1.0-py3-none-any.whl\n"
         b"PASSED dist/tugboat-0.1.0-py3-none-any.whl\n"
     )
+    pytest_coverage = (
+        b"1226 passed in 75.84s\n"
+        b"TOTAL 11164 803 4048 627 90.09%\n"
+    )
     assert payload == {
         "schema_version": 1,
         "artifact_kind": "release_artifact_manifest",
@@ -237,6 +278,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             "tugboat doctor",
             "tugboat index --repo . --check",
             "tugboat harness check --repo .",
+            "tugboat ci --repo .",
             "python -m pytest --cov=src --cov-report=term-missing -q",
             "python -m build --wheel",
             "python -m twine check dist/<wheel>.whl",
@@ -264,9 +306,14 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
                 "size_bytes": len(b"harness: ok\n"),
             },
             {
+                "path": str(evidence["ci"].resolve()),
+                "sha256": hashlib.sha256(evidence["ci"].read_bytes()).hexdigest(),
+                "size_bytes": len(evidence["ci"].read_bytes()),
+            },
+            {
                 "path": str(evidence["coverage"].resolve()),
-                "sha256": hashlib.sha256(b"633 passed\n").hexdigest(),
-                "size_bytes": len(b"633 passed\n"),
+                "sha256": hashlib.sha256(pytest_coverage).hexdigest(),
+                "size_bytes": len(pytest_coverage),
             },
             {
                 "path": str(evidence["build"].resolve()),
@@ -336,6 +383,113 @@ def test_ops_release_manifest_blocks_failed_pytest_coverage_evidence(
         in capsys.readouterr().out
     )
     assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_pytest_coverage_without_total_percentage(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["coverage"].write_text("1226 passed in 75.84s\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: pytest coverage evidence did not pass"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_pytest_coverage_below_release_threshold(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["coverage"].write_text(
+        "1226 passed in 75.84s\nTOTAL 11164 900 4048 700 89.99%\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: pytest coverage evidence did not pass"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_accepts_pytest_coverage_at_release_threshold(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["coverage"].write_text(
+        "1226 passed in 75.84s\nTOTAL 11164 803 4048 627 90%\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 0
+    )
+
+    assert f"release manifest: {sidecar_dir(repo) / 'ops' / 'release-artifact-manifest.json'}" in capsys.readouterr().out
 
 
 def test_ops_release_manifest_blocks_build_evidence_without_build_command(
@@ -966,6 +1120,76 @@ def test_ops_release_manifest_requires_full_checklist_evidence_without_writing(
     )
 
     assert "release manifest blocked: twine check evidence is required" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_requires_ci_evidence_without_writing(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    current_head = _init_release_repo(repo)
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=[path for key, path in evidence.items() if key != "ci"],
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: CI evidence is required" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_failed_ci_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    current_head = _init_release_repo(repo)
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    ci_report = _passing_ci_report()
+    checks = ci_report["checks"]
+    assert isinstance(checks, dict)
+    harness = checks["harness"]
+    assert isinstance(harness, dict)
+    harness["passed"] = False
+    harness["findings"] = ["AGENTS.md references missing repo-local markdown file docs/missing.md."]
+    evidence["ci"].write_text(json.dumps(ci_report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: CI evidence did not pass" in capsys.readouterr().out
     assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 

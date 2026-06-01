@@ -139,16 +139,20 @@ Do not upload raw `.sidecar/runs/**` artifacts until redaction is reviewed.
 Commit tracked docs/tests first, then regenerate the manifest with:
 
 ```bash
-tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit "$(git rev-parse HEAD)" --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
+tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit "$(git rev-parse HEAD)" --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
 `release manifest blocked: pytest coverage evidence did not pass`
 
-Regenerate retained evidence with:
+Regenerate retained evidence with the full coverage report; the release gate requires a parseable total coverage percentage at or above 90%:
 
 ```bash
 python -m pytest --cov=src --cov-report=term-missing -q 2>&1 | tee .sidecar/ci/pytest-coverage.log
 ```
+
+`release manifest blocked: CI evidence is required`
+
+Run `tugboat ci --repo .` and retain `.sidecar/ci/ci-report.json` with the other release evidence.
 
 `release manifest blocked: install smoke evidence did not pass`
 
