@@ -21,6 +21,7 @@ from tugboat.daemon.queue import (
 from tugboat.daemon.service import process_daemon_job, record_recovered_job_states
 from tugboat.db import Store
 from tugboat.llmff.runner import run_manifest as run_llmff_manifest
+from tugboat.ops.migrations import assert_supported_sidecar_marker
 from tugboat.paths import ensure_private_dir, mark_private_file, sidecar_dir
 from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 
@@ -54,6 +55,7 @@ def discover_trace_jobs(
     *,
     now: datetime | None = None,
 ) -> dict[str, int]:
+    assert_supported_sidecar_marker(repo)
     policy = load_policy(repo)
     registry = _load_discovered_traces(repo)
     eligible_traces: list[tuple[Path, str, str]] = []

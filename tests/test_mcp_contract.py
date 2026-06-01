@@ -354,6 +354,42 @@ mcp:
     assert events[-1]["status"] == "denied"
 
 
+def test_mcp_write_intent_blocks_future_sidecar_schema_before_artifacts(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    _allow_mcp_repo(repo)
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="sidecar schema version 999 is newer than supported"):
+        tugboat_record_episode(repo, '{"type":"user_request","content":"Fix bug"}\n')
+
+    assert not (sidecar / "mcp" / "episodes").exists()
+    assert not (sidecar / "mcp" / "requests").exists()
+    assert not (sidecar / "db.sqlite").exists()
+
+
+def test_mcp_audited_read_blocks_future_sidecar_schema_before_call_event(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    sidecar = repo / ".sidecar"
+    _allow_mcp_repo(repo)
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="sidecar schema version 999 is newer than supported"):
+        tugboat_status(repo)
+
+    assert not (sidecar / "db.sqlite").exists()
+
+
 def test_status_returns_read_only_summary_and_audits_call(tmp_path: Path):
     repo = tmp_path
     _allow_mcp_repo(repo)
@@ -3169,6 +3205,40 @@ def test_mcp_jsonrpc_denies_write_intent_when_read_only_kill_switch_enabled(
     assert "read-only kill switch" in response["error"]["message"]
     assert not (sidecar / "mcp" / "requests").exists()
     assert not (sidecar / "daemon.sqlite").exists()
+
+
+def test_read_only_mcp_denial_blocks_future_sidecar_schema_before_audit(
+    tmp_path: Path,
+):
+    _allow_mcp_repo(tmp_path)
+    sidecar = tmp_path / ".sidecar"
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": {
+                    "name": "tugboat_record_episode",
+                    "arguments": {
+                        "repo": str(tmp_path),
+                        "trace_jsonl": '{"type":"user_request","content":"Fix bug"}\n',
+                    },
+                },
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    assert "sidecar schema version 999 is newer than supported" in responses[0]["error"]["message"]
+    assert not (sidecar / "mcp").exists()
+    assert not (sidecar / "db.sqlite").exists()
 
 
 def test_mcp_jsonrpc_denies_write_intent_without_explicit_tool_allow(tmp_path: Path):

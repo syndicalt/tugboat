@@ -143,6 +143,27 @@ instruction_files:
     assert not (sidecar / "ci" / "ci-report.json").exists()
 
 
+def test_ci_blocks_future_sidecar_schema_before_writing_report(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["ci", "--repo", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "ci blocked: sidecar schema version 999 is newer than supported" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "ci" / "ci-report.json").exists()
+    assert not (sidecar / "harness-report.json").exists()
+
+
 def test_ci_check_writes_repo_local_artifact_and_audits_without_mutating(tmp_path: Path, capsys):
     repo = tmp_path
     docs = repo / "docs"

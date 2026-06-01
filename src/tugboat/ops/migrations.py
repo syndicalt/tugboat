@@ -68,6 +68,24 @@ def supported_sidecar_version(
     return max(migration.to_version for migration in migrations)
 
 
+def assert_supported_sidecar_marker(
+    repo: Path,
+    migrations: tuple[SidecarMigration, ...] = DEFAULT_MIGRATIONS,
+) -> None:
+    sidecar = repo / ".sidecar"
+    if not sidecar.exists():
+        return
+    if not (sidecar / "version.json").exists() and not (sidecar / "VERSION").exists():
+        return
+    current_version = current_sidecar_version(repo)
+    supported_version = supported_sidecar_version(migrations)
+    if current_version > supported_version:
+        raise ValueError(
+            f"sidecar schema version {current_version} is newer than supported "
+            f"version {supported_version}; upgrade Tugboat before using this sidecar"
+        )
+
+
 def current_sidecar_version(repo: Path) -> int:
     sidecar = repo / ".sidecar"
     if not sidecar.exists():

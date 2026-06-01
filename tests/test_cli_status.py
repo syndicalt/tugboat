@@ -6,6 +6,8 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import pytest
+
 from tugboat.cli import main
 from tugboat.db import Store
 from tugboat.llmff.contracts import RunResult
@@ -56,6 +58,176 @@ def test_status_reports_invalid_policy_without_traceback(tmp_path: Path, capsys)
     assert "status blocked: policy invalid:" in output
     assert "Traceback" not in output
     assert not (sidecar / "status-report.json").exists()
+
+
+def test_status_blocks_future_sidecar_schema_without_traceback(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    with Store.open(sidecar / "db.sqlite"):
+        pass
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["status", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "status blocked: sidecar schema version 999 is newer than supported" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "status-report.json").exists()
+
+
+def test_propose_blocks_future_sidecar_schema_before_artifact_lookup(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["propose", "--repo", str(tmp_path), "--audit", "missing"]) == 1
+
+    output = capsys.readouterr().out
+    assert "propose blocked: sidecar schema version 999 is newer than supported" in output
+    assert "missing" not in output
+
+
+def test_eval_blocks_future_sidecar_schema_before_artifact_lookup(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["eval", "--repo", str(tmp_path), "--candidate", "missing", "--suite", "all"]) == 1
+
+    output = capsys.readouterr().out
+    assert "eval blocked: sidecar schema version 999 is newer than supported" in output
+    assert "missing" not in output
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["report", "--run", "missing"], "report blocked: sidecar schema version 999"),
+        (
+            ["inspect-decision", "--decision", "missing"],
+            "inspect decision blocked: sidecar schema version 999",
+        ),
+        (["harness", "report"], "harness report blocked: sidecar schema version 999"),
+        (["harness", "cleanup"], "cleanup blocked: sidecar schema version 999"),
+        (
+            ["ops", "observability"],
+            "observability blocked: sidecar schema version 999",
+        ),
+        (
+            [
+                "ops",
+                "release-manifest",
+                "--wheel",
+                "missing.whl",
+                "--commit",
+                "abc123",
+                "--ci-url",
+                "https://ci.example.invalid/run/1",
+                "--approver",
+                "operator",
+                "--security-review-decision",
+                "approved",
+                "--security-review-critical-high-findings",
+                "0",
+            ],
+            "release manifest blocked: sidecar schema version 999",
+        ),
+        (
+            ["ops", "backup", "--archive", "backup.tgz"],
+            "backup plan blocked: sidecar schema version 999",
+        ),
+        (
+            [
+                "ops",
+                "restore",
+                "--archive",
+                "backup.tgz",
+                "--staging",
+                "restore-staging",
+                "--pre-restore",
+                ".sidecar.pre-restore",
+            ],
+            "restore plan blocked: sidecar schema version 999",
+        ),
+        (
+            ["daemon", "profile", "--app-boot-json", "{}"],
+            "daemon profile blocked: sidecar schema version 999",
+        ),
+        (
+            ["daemon", "status"],
+            "daemon status blocked: sidecar schema version 999",
+        ),
+        (
+            ["mcp", "stdio"],
+            "mcp blocked: sidecar schema version 999",
+        ),
+    ],
+)
+def test_sidecar_writing_commands_block_future_sidecar_schema_before_artifacts(
+    tmp_path: Path,
+    capsys,
+    args: list[str],
+    message: str,
+):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main([*args, "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert message in output
+    assert "Traceback" not in output
+    assert not (sidecar / "harness-report.json").exists()
+    assert not (sidecar / "harness-cleanup-candidates.json").exists()
+    assert not (sidecar / "ops").exists()
+
+
+def test_init_blocks_future_sidecar_schema_before_policy_write(tmp_path: Path, capsys):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["init", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "init blocked: sidecar schema version 999 is newer than supported" in output
+    assert not (sidecar / "policy.yaml").exists()
+
+
+def test_daemon_read_only_disable_blocks_future_sidecar_schema_without_removing_kill_switch(
+    tmp_path: Path,
+    capsys,
+):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    kill_switch = sidecar / "read-only.kill"
+    kill_switch.write_text("enabled\n", encoding="utf-8")
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["daemon", "read-only", "--repo", str(tmp_path), "--disable"]) == 1
+
+    output = capsys.readouterr().out
+    assert "daemon read-only blocked: sidecar schema version 999 is newer than supported" in output
+    assert kill_switch.read_text(encoding="utf-8") == "enabled\n"
 
 
 def test_status_blocks_when_retention_scan_file_budget_exceeded(

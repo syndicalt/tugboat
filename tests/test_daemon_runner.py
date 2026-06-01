@@ -482,6 +482,37 @@ def test_run_daemon_cycle_read_only_kill_switch_blocks_trace_discovery_writes(
         assert queue.connection.execute("SELECT COUNT(*) FROM daemon_jobs").fetchone()[0] == 0
 
 
+def test_run_daemon_cycle_blocks_future_sidecar_schema_before_queue_writes(
+    tmp_path: Path,
+):
+    trace_dir = tmp_path / "configured-traces"
+    trace_dir.mkdir()
+    (trace_dir / "episode.jsonl").write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="sidecar schema version 999 is newer than supported"):
+        run_daemon_cycle(
+            tmp_path,
+            DaemonLoopConfig(
+                worker_id="worker-a",
+                max_jobs_per_cycle=1,
+                concurrency_limit=1,
+                lease_duration=timedelta(seconds=30),
+                trace_dirs=(trace_dir,),
+                now=_at(0),
+            ),
+        )
+
+    assert not (sidecar / "discovered-traces.json").exists()
+    assert not (sidecar / "daemon.sqlite").exists()
+    assert not (sidecar / "db.sqlite").exists()
+
+
 def test_run_daemon_cycle_recovers_corrupt_discovered_trace_registry(
     tmp_path: Path,
 ):

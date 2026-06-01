@@ -593,6 +593,24 @@ def test_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
     assert not (run_dir / "apply-plan.json").exists()
 
 
+def test_apply_blocks_future_sidecar_schema_before_writing_plan(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo)
+    (repo / ".sidecar" / "version.json").write_text(
+        json.dumps({"schema_version": 999}),
+        encoding="utf-8",
+    )
+
+    assert main(["apply", "--repo", str(repo), "--candidate", "latest"]) == 1
+
+    assert "apply blocked: sidecar schema version 999 is newer than supported" in capsys.readouterr().out
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "provenance-bundle.json").exists()
+
+
 def test_auto_apply_is_blocked_by_read_only_kill_switch_before_writing_plan(
     tmp_path: Path,
     capsys,

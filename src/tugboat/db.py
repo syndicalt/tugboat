@@ -14,6 +14,9 @@ from tugboat.policy.gate import CandidatePatch
 from tugboat.traces.schema import TraceBundle
 
 
+DB_SCHEMA_VERSION = 1
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
   id INTEGER PRIMARY KEY,
@@ -338,6 +341,7 @@ class Store:
         connection = sqlite3.connect(path)
         connection.execute("PRAGMA foreign_keys = ON")
         try:
+            _validate_database_schema_version(connection)
             if _is_daemon_queue_database(connection):
                 return cls(connection)
             connection.executescript(SCHEMA)
@@ -360,6 +364,7 @@ class Store:
             _backfill_instruction_index_audit_event_sequence(connection)
             _backfill_episodes_audit_event_sequence(connection)
             _backfill_runs_audit_event_sequence(connection)
+            _mark_database_schema_version(connection)
             connection.commit()
             _repair_audit_event_constraints(connection)
             connection.commit()
@@ -1428,6 +1433,23 @@ def _ensure_column(
     }
     if column not in columns:
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _current_database_schema_version(connection: sqlite3.Connection) -> int:
+    return int(connection.execute("PRAGMA user_version").fetchone()[0])
+
+
+def _validate_database_schema_version(connection: sqlite3.Connection) -> None:
+    current_version = _current_database_schema_version(connection)
+    if current_version > DB_SCHEMA_VERSION:
+        raise ValueError(
+            f"database schema version {current_version} is newer than supported "
+            f"version {DB_SCHEMA_VERSION}; upgrade Tugboat before using this database"
+        )
+
+
+def _mark_database_schema_version(connection: sqlite3.Connection) -> None:
+    connection.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION}")
 
 
 def _is_daemon_queue_database(connection: sqlite3.Connection) -> bool:

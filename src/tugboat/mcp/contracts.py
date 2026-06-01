@@ -22,6 +22,7 @@ from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
 from tugboat.harness.checks import check_harness_legibility, generate_harness_report
 from tugboat.ops.observability import summarize_sidecar_observability
+from tugboat.ops.migrations import assert_supported_sidecar_marker
 from tugboat.ops.retention import RetentionScanBudgetExceeded, apply_retention_policy
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir, sidecar_dir
 from tugboat.report.decision_trace import write_decision_trace
@@ -1294,6 +1295,7 @@ def _audit_bound_mcp_denial(
     arguments: dict[str, Any],
     reason: str,
 ) -> None:
+    assert_supported_sidecar_marker(repo)
     payload = {
         "tool": tool_name,
         "repo": repo.as_posix(),
@@ -1470,6 +1472,7 @@ def _audit_call(
     arguments: dict[str, Any],
     read: Callable[[], T],
 ) -> T:
+    assert_supported_sidecar_marker(repo)
     status = "completed"
     result: T | None = None
     event_extra: dict[str, Any] = {}

@@ -78,7 +78,11 @@ from tugboat.ops.backup import (
     execute_sidecar_backup,
     execute_sidecar_restore,
 )
-from tugboat.ops.migrations import dry_run_migration_plan, execute_migration_plan
+from tugboat.ops.migrations import (
+    assert_supported_sidecar_marker,
+    dry_run_migration_plan,
+    execute_migration_plan,
+)
 from tugboat.ops.observability import (
     observability_event_log_text,
     observability_metrics_text,
@@ -374,6 +378,15 @@ def _policy_preflight_blocked(command: str, repo: Path) -> bool:
         load_policy(repo)
     except (OSError, ValueError, YAMLError) as error:
         print(f"{command} blocked: policy invalid: {error}")
+        return True
+    return _sidecar_schema_preflight_blocked(command, repo)
+
+
+def _sidecar_schema_preflight_blocked(command: str, repo: Path) -> bool:
+    try:
+        assert_supported_sidecar_marker(repo)
+    except (OSError, ValueError, YAMLError) as error:
+        print(f"{command} blocked: {error}")
         return True
     return False
 
@@ -711,6 +724,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "init":
         repo = Path(args.repo).resolve()
+        if _sidecar_schema_preflight_blocked("init", repo):
+            return 1
         try:
             policy_path = _initialize_repo_policy(repo)
         except FileExistsError as error:
@@ -896,6 +911,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ci":
         repo = Path(args.repo).resolve()
+        if _sidecar_schema_preflight_blocked("ci", repo):
+            return 1
         try:
             report_path, payload = _write_ci_report(
                 repo,
@@ -967,6 +984,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "propose":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("propose", repo):
+            return 1
         try:
             result = run_propose_pipeline(repo, args.audit)
         except (
@@ -982,6 +1001,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "eval":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("eval", repo):
+            return 1
         try:
             result = run_eval_pipeline(repo, args.candidate, args.suite)
         except (
@@ -1023,6 +1044,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if _write_blocked_by_read_only(repo, "apply"):
             return 1
+        if _sidecar_schema_preflight_blocked("apply", repo):
+            return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
         try:
             apply_path = _write_apply_plan(
@@ -1045,6 +1068,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "auto-apply":
         repo = Path(args.repo)
         if _write_blocked_by_read_only(repo, "auto-apply"):
+            return 1
+        if _sidecar_schema_preflight_blocked("auto-apply", repo):
             return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
         if args.preflight and args.shadow:
@@ -1099,6 +1124,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if _write_blocked_by_read_only(repo, "review rejection"):
             return 1
+        if _sidecar_schema_preflight_blocked("review", repo):
+            return 1
         run_dir = latest_run_dir(repo) if args.candidate == "latest" else runs_dir(repo) / args.candidate
         try:
             _write_human_review_rejection(
@@ -1120,6 +1147,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if args.execute and _write_blocked_by_read_only(repo, "rollback"):
             return 1
+        if _sidecar_schema_preflight_blocked("rollback", repo):
+            return 1
         run_dir = latest_run_dir(repo) if args.decision == "latest" else runs_dir(repo) / args.decision
         try:
             rollback_path = _write_rollback_plan(repo, run_dir, execute=args.execute)
@@ -1130,15 +1159,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "mcp" and args.mcp_command == "stdio":
+        repo = Path(args.repo) if args.repo else None
+        if repo is not None and not args.read_only and _sidecar_schema_preflight_blocked("mcp", repo):
+            return 1
         return run_stdio_server(
             sys.stdin,
             sys.stdout,
-            repo=Path(args.repo) if args.repo else None,
+            repo=repo,
             read_only=args.read_only,
         )
 
     if args.command == "daemon" and args.daemon_command == "status":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("daemon status", repo):
+            return 1
         status = daemon_status(repo, kill_switch=default_kill_switch(repo))
         print(f"queue_path: {status['queue_path']}")
         print(f"kill_switch_enabled: {str(status['kill_switch_enabled']).lower()}")
@@ -1155,6 +1189,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "daemon" and args.daemon_command == "run-once":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("daemon run-once", repo):
+            return 1
         result = run_daemon_once(
             repo,
             DaemonRunConfig(
@@ -1168,6 +1204,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "daemon" and args.daemon_command == "profile":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("daemon profile", repo):
+            return 1
         try:
             app_boot = _parse_profile_app_boot(args.app_boot_json)
             observability_refs = _validate_observability_refs(args.observability_ref)
@@ -1184,6 +1222,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "daemon" and args.daemon_command == "cycle":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("daemon cycle", repo):
+            return 1
         trace_dirs = (
             tuple(Path(trace_dir) for trace_dir in args.trace_dir)
             if args.trace_dir
@@ -1225,6 +1265,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "daemon" and args.daemon_command == "serve":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("daemon serve", repo):
+            return 1
         socket_path = Path(args.socket) if args.socket else sidecar_dir(repo) / "daemon.sock"
         try:
             result = serve_daemon_socket(
@@ -1246,6 +1288,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "daemon" and args.daemon_command == "read-only":
         repo = Path(args.repo)
         kill_switch = default_kill_switch(repo)
+        if args.disable and _sidecar_schema_preflight_blocked("daemon read-only", repo):
+            return 1
         if args.enable:
             kill_switch.path.parent.mkdir(parents=True, exist_ok=True)
             kill_switch.path.write_text("enabled\n", encoding="utf-8")
@@ -1257,6 +1301,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "report":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("report", repo):
+            return 1
         try:
             run_dir = latest_run_dir(repo) if args.run == "latest" else runs_dir(repo) / args.run
             candidate = _candidate_from_artifacts(run_dir)
@@ -1307,6 +1353,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "inspect-decision":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("inspect decision", repo):
+            return 1
         try:
             trace_path = write_decision_trace(repo, args.decision)
         except (FileNotFoundError, KeyError, ValueError, SecretScanError) as error:
@@ -1343,6 +1391,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "harness" and args.harness_command == "report":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("harness report", repo):
+            return 1
         try:
             report = generate_harness_report(repo)
         except InstructionIndexBudgetExceeded as error:
@@ -1407,6 +1457,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = Path(args.repo)
         if _write_blocked_by_read_only(repo, "cleanup"):
             return 1
+        if _sidecar_schema_preflight_blocked("cleanup", repo):
+            return 1
         try:
             report = generate_harness_report(repo)
         except InstructionIndexBudgetExceeded as error:
@@ -1453,6 +1505,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ops" and args.ops_command == "observability":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("observability", repo):
+            return 1
         output_path = (
             Path(args.output)
             if args.output
@@ -1493,6 +1547,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ops" and args.ops_command == "release-manifest":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("release manifest", repo):
+            return 1
         try:
             output_path = _write_release_artifact_manifest(
                 repo=repo,
@@ -1532,6 +1588,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ops" and args.ops_command == "backup":
         repo = Path(args.repo)
+        if _sidecar_schema_preflight_blocked("backup plan", repo):
+            return 1
         try:
             bundle = build_sidecar_backup_bundle(repo=repo, archive_path=Path(args.archive))
             archive_path = (
@@ -1553,6 +1611,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "ops" and args.ops_command == "restore":
         repo = Path(args.repo)
         if args.execute and _write_blocked_by_read_only(repo, "restore"):
+            return 1
+        if _sidecar_schema_preflight_blocked("restore plan", repo):
             return 1
         try:
             bundle = build_sidecar_restore_bundle(

@@ -20,6 +20,7 @@ from tugboat.daemon.queue import (
 )
 from tugboat.db import Store
 from tugboat.eval.pipeline import EvalPipelineResult, run_eval_pipeline
+from tugboat.ops.migrations import assert_supported_sidecar_marker
 from tugboat.paths import ensure_private_dir, mark_private_file, sidecar_dir
 from tugboat.propose.pipeline import ProposePipelineResult, run_propose_pipeline
 from tugboat.security.secrets import scan_text
@@ -137,6 +138,7 @@ def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:
             "final_state": None,
             "recovered_jobs": [],
         }
+    assert_supported_sidecar_marker(repo)
     queue = DaemonQueue.open_sidecar(repo)
     try:
         recovered = queue.mark_stale_leases(

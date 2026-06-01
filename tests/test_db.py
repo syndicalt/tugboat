@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tugboat.db import Store
+from tugboat.db import DB_SCHEMA_VERSION, Store
 from tugboat.llmff.contracts import RunResult
 from tugboat.models import ChunkRecord, DocumentRecord, IndexResult
 from tugboat.policy.gate import CandidatePatch, SourceRef
@@ -77,6 +77,35 @@ def test_store_initializes_core_tables(tmp_path: Path):
             "rollbacks",
             "audit_events",
         }.issubset(tables)
+
+
+def test_store_marks_current_database_schema_version(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+
+    with Store.open(db_path) as store:
+        user_version = store.connection.execute("PRAGMA user_version").fetchone()[0]
+
+    assert user_version == DB_SCHEMA_VERSION
+
+
+def test_store_blocks_future_database_schema_without_mutating(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION + 1}")
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="database schema version"):
+        Store.open(db_path)
+
+    connection = sqlite3.connect(db_path)
+    try:
+        user_version = connection.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        connection.close()
+    assert user_version == DB_SCHEMA_VERSION + 1
 
 
 def test_core_decision_tables_require_audit_event_sequence(tmp_path: Path):
