@@ -50,10 +50,26 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
     evidence["index"].write_text("index: ok\n", encoding="utf-8")
     evidence["harness"].write_text("harness: ok\n", encoding="utf-8")
     evidence["coverage"].write_text("633 passed\n", encoding="utf-8")
-    evidence["build"].write_text("built dist/tugboat-0.1.0-py3-none-any.whl\n", encoding="utf-8")
-    evidence["twine"].write_text("PASSED dist/tugboat-0.1.0-py3-none-any.whl\n", encoding="utf-8")
+    evidence["build"].write_text(
+        "python -m build --wheel\n"
+        "built dist/tugboat-0.1.0-py3-none-any.whl\n",
+        encoding="utf-8",
+    )
+    evidence["twine"].write_text(
+        "python -m twine check dist/tugboat-0.1.0-py3-none-any.whl\n"
+        "PASSED dist/tugboat-0.1.0-py3-none-any.whl\n",
+        encoding="utf-8",
+    )
     evidence["install"].write_text(
-        "tugboat: ok\nmode: proposal_only\nauto_apply: disabled\n",
+        "installed tugboat wheel: dist/tugboat-0.1.0-py3-none-any.whl\n"
+        "installed tugboat doctor\n"
+        "tugboat: ok\n"
+        "mode: proposal_only\n"
+        "auto_apply: disabled\n"
+        "installed tugboat index --repo . --check\n"
+        "index: ok\n"
+        "installed tugboat harness check --repo .\n"
+        "harness: ok\n",
         encoding="utf-8",
     )
     return evidence
@@ -182,6 +198,25 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     assert f"release manifest: {output_path}" in capsys.readouterr().out
     assert output_path.stat().st_mode & 0o777 == 0o600
     payload = json.loads(output_path.read_text(encoding="utf-8"))
+    install_smoke = (
+        b"installed tugboat wheel: dist/tugboat-0.1.0-py3-none-any.whl\n"
+        b"installed tugboat doctor\n"
+        b"tugboat: ok\n"
+        b"mode: proposal_only\n"
+        b"auto_apply: disabled\n"
+        b"installed tugboat index --repo . --check\n"
+        b"index: ok\n"
+        b"installed tugboat harness check --repo .\n"
+        b"harness: ok\n"
+    )
+    build_wheel = (
+        b"python -m build --wheel\n"
+        b"built dist/tugboat-0.1.0-py3-none-any.whl\n"
+    )
+    twine_check = (
+        b"python -m twine check dist/tugboat-0.1.0-py3-none-any.whl\n"
+        b"PASSED dist/tugboat-0.1.0-py3-none-any.whl\n"
+    )
     assert payload == {
         "schema_version": 1,
         "artifact_kind": "release_artifact_manifest",
@@ -207,6 +242,8 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             "python -m twine check dist/<wheel>.whl",
             "clean venv install from built wheel",
             "installed tugboat doctor",
+            "installed tugboat index --repo . --check",
+            "installed tugboat harness check --repo .",
         ],
         "retained_evidence": [
             {
@@ -233,24 +270,18 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             },
             {
                 "path": str(evidence["build"].resolve()),
-                "sha256": hashlib.sha256(
-                    b"built dist/tugboat-0.1.0-py3-none-any.whl\n"
-                ).hexdigest(),
-                "size_bytes": len(b"built dist/tugboat-0.1.0-py3-none-any.whl\n"),
+                "sha256": hashlib.sha256(build_wheel).hexdigest(),
+                "size_bytes": len(build_wheel),
             },
             {
                 "path": str(evidence["twine"].resolve()),
-                "sha256": hashlib.sha256(
-                    b"PASSED dist/tugboat-0.1.0-py3-none-any.whl\n"
-                ).hexdigest(),
-                "size_bytes": len(b"PASSED dist/tugboat-0.1.0-py3-none-any.whl\n"),
+                "sha256": hashlib.sha256(twine_check).hexdigest(),
+                "size_bytes": len(twine_check),
             },
             {
                 "path": str(evidence["install"].resolve()),
-                "sha256": hashlib.sha256(
-                    b"tugboat: ok\nmode: proposal_only\nauto_apply: disabled\n"
-                ).hexdigest(),
-                "size_bytes": len(b"tugboat: ok\nmode: proposal_only\nauto_apply: disabled\n"),
+                "sha256": hashlib.sha256(install_smoke).hexdigest(),
+                "size_bytes": len(install_smoke),
             },
         ],
     }
@@ -307,6 +338,77 @@ def test_ops_release_manifest_blocks_failed_pytest_coverage_evidence(
     assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 
+def test_ops_release_manifest_blocks_build_evidence_without_build_command(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["build"].write_text(
+        "built dist/tugboat-0.1.0-py3-none-any.whl\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: wheel build evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_twine_evidence_for_different_wheel(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["twine"].write_text(
+        "python -m twine check dist/tugboat-0.2.0-py3-none-any.whl\n"
+        "PASSED dist/tugboat-0.2.0-py3-none-any.whl\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: twine check evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
 def test_ops_release_manifest_blocks_failed_twine_check_evidence(
     tmp_path: Path,
     capsys,
@@ -336,6 +438,82 @@ def test_ops_release_manifest_blocks_failed_twine_check_evidence(
     )
 
     assert "release manifest blocked: twine check evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_incomplete_installed_wheel_smoke_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["install"].write_text(
+        "tugboat: ok\nmode: proposal_only\nauto_apply: disabled\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: install smoke evidence did not pass" in capsys.readouterr().out
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_installed_smoke_missing_harness(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["install"].write_text(
+        "installed tugboat wheel: dist/tugboat-0.1.0-py3-none-any.whl\n"
+        "installed tugboat doctor\n"
+        "tugboat: ok\n"
+        "mode: proposal_only\n"
+        "auto_apply: disabled\n"
+        "installed tugboat index --repo . --check\n"
+        "index: ok\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert "release manifest blocked: install smoke evidence did not pass" in capsys.readouterr().out
     assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 

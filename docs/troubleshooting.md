@@ -139,7 +139,7 @@ Do not upload raw `.sidecar/runs/**` artifacts until redaction is reviewed.
 Commit tracked docs/tests first, then regenerate the manifest with:
 
 ```bash
-tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit "$(git rev-parse HEAD)" --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/pytest-coverage.log
+tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit "$(git rev-parse HEAD)" --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
 `release manifest blocked: pytest coverage evidence did not pass`
@@ -148,4 +148,22 @@ Regenerate retained evidence with:
 
 ```bash
 python -m pytest --cov=src --cov-report=term-missing -q 2>&1 | tee .sidecar/ci/pytest-coverage.log
+```
+
+`release manifest blocked: install smoke evidence did not pass`
+
+Regenerate installed-wheel smoke from a clean virtual environment and retain the installed CLI command output:
+
+```bash
+python -m venv .sidecar/ci/install-smoke-venv
+.sidecar/ci/install-smoke-venv/bin/python -m pip install dist/<wheel>.whl
+{
+  echo "installed tugboat wheel: dist/<wheel>.whl"
+  echo "installed tugboat doctor"
+  .sidecar/ci/install-smoke-venv/bin/tugboat doctor
+  echo "installed tugboat index --repo . --check"
+  .sidecar/ci/install-smoke-venv/bin/tugboat index --repo . --check
+  echo "installed tugboat harness check --repo ."
+  .sidecar/ci/install-smoke-venv/bin/tugboat harness check --repo .
+} 2>&1 | tee .sidecar/ci/install-smoke.txt
 ```

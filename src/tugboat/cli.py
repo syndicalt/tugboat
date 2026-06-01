@@ -1329,7 +1329,7 @@ def _write_release_artifact_manifest(
                 for finding in error.findings
             )
             raise ValueError(f"retained evidence contains secret: {findings}") from error
-        _validate_release_evidence_content(resolved_evidence)
+        _validate_release_evidence_content(resolved_evidence, wheel_filename=resolved_wheel.name)
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
     missing_release_evidence = _missing_release_evidence(retained_evidence)
     if missing_release_evidence is not None:
@@ -1397,6 +1397,8 @@ def _write_release_artifact_manifest(
             "python -m twine check dist/<wheel>.whl",
             "clean venv install from built wheel",
             "installed tugboat doctor",
+            "installed tugboat index --repo . --check",
+            "installed tugboat harness check --repo .",
         ],
         "retained_evidence": retained_evidence,
     }
@@ -1440,7 +1442,7 @@ def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) ->
     return None
 
 
-def _validate_release_evidence_content(path: Path) -> None:
+def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> None:
     name = path.name
     text = path.read_text(encoding="utf-8", errors="replace")
     lowered = text.lower()
@@ -1448,7 +1450,24 @@ def _validate_release_evidence_content(path: Path) -> None:
         if " passed" not in lowered or _contains_failed_release_signal(lowered):
             raise ValueError("pytest coverage evidence did not pass")
         return
-    if "doctor" in name or "install-smoke" in name:
+    if "install-smoke" in name:
+        if (
+            "installed tugboat wheel" not in lowered
+            or wheel_filename.lower() not in lowered
+            or "installed tugboat doctor" not in lowered
+            or "tugboat: ok" not in lowered
+            or "mode: proposal_only" not in lowered
+            or "auto_apply: disabled" not in lowered
+            or "installed tugboat index --repo . --check" not in lowered
+            or "index: ok" not in lowered
+            or "installed tugboat harness check --repo ." not in lowered
+            or "harness: ok" not in lowered
+            or "auto_apply: enabled" in lowered
+            or _contains_failed_release_signal(lowered)
+        ):
+            raise ValueError("install smoke evidence did not pass")
+        return
+    if "doctor" in name:
         if (
             "tugboat: ok" not in lowered
             or "mode: proposal_only" not in lowered
@@ -1456,8 +1475,7 @@ def _validate_release_evidence_content(path: Path) -> None:
             or "auto_apply: enabled" in lowered
             or _contains_failed_release_signal(lowered)
         ):
-            label = "install smoke" if "install-smoke" in name else "doctor output"
-            raise ValueError(f"{label} evidence did not pass")
+            raise ValueError("doctor output evidence did not pass")
         return
     if "index-check" in name:
         if "index: ok" not in lowered or _contains_failed_release_signal(lowered):
@@ -1468,11 +1486,20 @@ def _validate_release_evidence_content(path: Path) -> None:
             raise ValueError("harness check evidence did not pass")
         return
     if "build-wheel" in name:
-        if ".whl" not in lowered or _contains_failed_release_signal(lowered):
+        if (
+            "python -m build --wheel" not in lowered
+            or wheel_filename.lower() not in lowered
+            or _contains_failed_release_signal(lowered)
+        ):
             raise ValueError("wheel build evidence did not pass")
         return
     if "twine-check" in name:
-        if "passed" not in lowered or _contains_failed_release_signal(lowered):
+        if (
+            "python -m twine check" not in lowered
+            or wheel_filename.lower() not in lowered
+            or "passed" not in lowered
+            or _contains_failed_release_signal(lowered)
+        ):
             raise ValueError("twine check evidence did not pass")
 
 
