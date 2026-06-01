@@ -1,0 +1,82 @@
+name: v1 Roadmap Item
+description: Track a scoped Tugboat v1.0 roadmap item with evidence and safety criteria.
+title: "[v1]: "
+labels:
+  - v1.0
+  - p0-release-blocker
+  - p1-release-important
+body:
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Roadmap milestone
+      description: Select the roadmap milestone this item belongs to.
+      options:
+        - 0.2.0-stabilization-docs
+        - 0.3.0-review-intelligence
+        - 0.4.0-automation-ecosystem
+        - 0.5-0.8-reliability-hardening
+        - 0.9.0-release-candidate
+        - 1.0.0-stable
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User-visible outcome
+      description: Describe what a Tugboat user or operator can do after this ships.
+    validations:
+      required: true
+  - type: textarea
+    id: surface
+    attributes:
+      label: Affected commands or artifacts
+      description: Name CLI commands, MCP tools, daemon behavior, docs, or artifact schemas.
+      placeholder: tugboat auto-apply, eval-report.json, docs/auto-apply.md
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests required
+      description: List the failing tests to add first and the focused/full gates required before merge.
+      placeholder: python -m pytest tests/test_auto_apply_policy.py -q
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs required
+      description: List roadmap, user, ops, compatibility, or troubleshooting docs that must change.
+      placeholder: docs/roadmaps/v1.0.0-roadmap.md
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and rollback considerations
+      description: Explain fail-closed behavior, authority boundaries, rollback evidence, and non-mutation guarantees.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Define the current-state evidence required to close this roadmap item.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Explicit non-goals
+      description: State what remains out of scope, especially broad auto-apply, hosted services, or authority expansion.
+    validations:
+      required: true
+  - type: input
+    id: roadmap
+    attributes:
+      label: Roadmap reference
+      description: Link the relevant section of docs/roadmaps/v1.0.0-roadmap.md.
+      placeholder: docs/roadmaps/v1.0.0-roadmap.md#v1-acceptance-matrix
+    validations:
+      required: true

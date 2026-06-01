@@ -247,6 +247,8 @@ def test_validate_eval_report_artifact_accepts_skill_report():
             "safety_preservation_score": 0.0,
             "required_sections_passed": 0,
             "forbidden_sections_found": 1,
+            "non_goals_passed": 1,
+            "examples_or_fixtures_passed": 1,
             "skill_tokens_before": 120,
             "skill_tokens_after": 142,
             "skill_token_delta": 22,

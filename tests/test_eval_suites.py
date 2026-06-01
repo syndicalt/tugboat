@@ -365,6 +365,31 @@ def test_run_offline_eval_suite_all_reports_candidate_instruction_token_delta(
     assert report.metrics["instruction_token_growth_acceptable"] == 0
 
 
+def test_run_offline_eval_suite_all_rejects_duplicate_token_growth_without_held_out_improvement(
+    tmp_path: Path,
+):
+    policy = "# Policy\n\nMUST run tests before final answers.\n"
+    (tmp_path / "AGENTS.md").write_text(policy, encoding="utf-8")
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "AGENTS.md").write_text(
+        policy + "MUST run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.metrics["duplicate_rule_tokens_before"] == 0
+    assert report.metrics["duplicate_rule_tokens_after"] == 6
+    assert report.metrics["duplicate_rule_token_delta"] == 6
+    assert report.metrics["instruction_token_growth_reason"] == (
+        "duplicate_token_growth_without_held_out_improvement"
+    )
+    assert report.metrics["instruction_token_growth_acceptable"] == 0
+
+
 def test_run_offline_eval_suite_all_rejects_noop_preview_without_held_out_improvement(
     tmp_path: Path,
 ):
@@ -600,6 +625,99 @@ def test_run_offline_eval_suite_all_reports_skill_rewrite_checks(
     assert "skill-rewrite:candidate-preview:SKILL.md" in [
         case.case_id for case in report.eval_cases
     ]
+
+
+def test_run_offline_eval_suite_all_rejects_skill_rewrite_without_explicit_non_goals(
+    tmp_path: Path,
+):
+    (tmp_path / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "Run tests and cite verification evidence.\n\n"
+        "## Non-Goals\n\n"
+        "Do not broaden authority or skip required verification.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "Run tests and cite verification evidence.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.recommendation == "reject"
+    assert report.skill_report is not None
+    assert report.skill_report["passed"] is False
+    assert "skill.non_goals.missing" in [
+        finding["code"] for finding in report.skill_report["findings"]
+    ]
+    assert report.skill_report["metrics"]["non_goals_passed"] == 0
+    assert report.metrics["skill_rewrite_failures"] == 1
+    assert report.metrics["skill_non_goals_failures"] == 1
+
+
+def test_run_offline_eval_suite_all_rejects_skill_rewrite_that_removes_examples_or_fixtures(
+    tmp_path: Path,
+):
+    (tmp_path / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "Run tests and cite verification evidence.\n\n"
+        "## Examples\n\n"
+        "- Review a Python diff and cite pytest output.\n\n"
+        "## Fixtures\n\n"
+        "- tests/fixtures/python-review.md\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "Run tests and cite verification evidence.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.passed is False
+    assert report.skill_report is not None
+    assert "skill.examples_or_fixtures.removed" in [
+        finding["code"] for finding in report.skill_report["findings"]
+    ]
+    assert report.skill_report["metrics"]["examples_or_fixtures_passed"] == 0
+    assert report.metrics["skill_examples_or_fixtures_failures"] == 1
 
 
 def test_run_offline_eval_suite_all_rejects_unsafe_skill_rewrite(

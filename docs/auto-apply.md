@@ -44,6 +44,8 @@ The lane burn-in threshold is not the same as production observation. Final auto
 Repos can tighten these values in `.sidecar/policy.yaml`; runtime auto-apply commands cannot override them.
 The global `auto_apply.max_instruction_token_delta` is an absolute cap, and each lane can set an equal or stricter `max_instruction_token_delta`. Auto-apply fails closed with `instruction_token_delta_missing` if the eval artifact does not include `metrics.instruction_token_delta`, and with `max_instruction_token_delta_exceeded` if the evaluated candidate grows the instruction corpus beyond policy.
 
+For `skill_improvement`, `eval-report.json.skill_report.passed` must be true. Skill rewrites that remove explicit non-goals or examples or fixtures from an existing `SKILL.md` fail the skill report and remain review-only.
+
 Allowed examples include typo fixes, broken internal links, formatting normalization, duplicate sentence removal, and verified stale command references.
 
 ## Pause Controls

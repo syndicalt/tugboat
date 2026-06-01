@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 import hashlib
@@ -217,6 +218,7 @@ def run_offline_eval_suite(
         "structural_findings": sum(len(report.findings) for report in structural_reports),
         **skill_rewrite_metrics,
         **_instruction_token_delta_metrics(policy_pairs),
+        **_duplicate_rule_token_delta_metrics(policy_pairs),
     }
     structural_score = 1.0 if all(report.passed for report in structural_reports) and governance_regressions == 0 else 0.0
     trigger_score = structural_score
@@ -250,6 +252,7 @@ def run_offline_eval_suite(
     metrics.update(
         _instruction_token_growth_metrics(
             instruction_token_delta=int(metrics["instruction_token_delta"]),
+            duplicate_rule_token_delta=int(metrics["duplicate_rule_token_delta"]),
             held_out_score=held_out_score,
             trigger_score=trigger_score,
             governance_passed=governance_regressions == 0,
@@ -343,6 +346,8 @@ def _skill_rewrite_eval(
         "skill_required_section_failures": 0,
         "skill_forbidden_section_failures": 0,
         "skill_safety_weakening_failures": 0,
+        "skill_non_goals_failures": 0,
+        "skill_examples_or_fixtures_failures": 0,
     }
     if preview_root is None:
         return metrics, (), None
@@ -377,6 +382,10 @@ def _skill_rewrite_eval(
                 metrics["skill_forbidden_section_failures"] += 1
             if report_metrics.get("safety_preservation_score") == 0.0:
                 metrics["skill_safety_weakening_failures"] += 1
+            if report_metrics.get("non_goals_passed") == 0:
+                metrics["skill_non_goals_failures"] += 1
+            if report_metrics.get("examples_or_fixtures_passed") == 0:
+                metrics["skill_examples_or_fixtures_failures"] += 1
         cases.append(
             EvalCaseRecord(
                 case_id=f"skill-rewrite:candidate-preview:{relative_path}",
@@ -454,6 +463,33 @@ def evaluate_skill_rewrite_pair(
             )
         )
 
+    before_anchors = set(_anchors(before))
+    after_anchors = set(_anchors(after))
+    non_goals_missing = "non-goals" in before_anchors and "non-goals" not in after_anchors
+    if non_goals_missing:
+        findings.append(
+            _skill_finding(
+                "skill.non_goals.missing",
+                "Skill rewrite removed explicit non-goals from the existing skill.",
+                "non-goals",
+            )
+        )
+
+    examples_or_fixtures_required = sorted(
+        before_anchors.intersection({"examples", "fixtures"})
+    )
+    missing_examples_or_fixtures = [
+        section for section in examples_or_fixtures_required if section not in after_anchors
+    ]
+    if missing_examples_or_fixtures:
+        findings.append(
+            _skill_finding(
+                "skill.examples_or_fixtures.removed",
+                "Skill rewrite removed examples or fixtures from the existing skill.",
+                ", ".join(missing_examples_or_fixtures),
+            )
+        )
+
     forbidden_sections = _forbidden_skill_sections(after)
     if forbidden_sections:
         findings.append(
@@ -509,6 +545,8 @@ def evaluate_skill_rewrite_pair(
             "safety_preservation_score": 0.0 if safety_weakening else 1.0,
             "required_sections_passed": 0 if missing_required_sections else 1,
             "forbidden_sections_found": len(forbidden_sections),
+            "non_goals_passed": 0 if non_goals_missing else 1,
+            "examples_or_fixtures_passed": 0 if missing_examples_or_fixtures else 1,
             "skill_tokens_before": before_tokens,
             "skill_tokens_after": after_tokens,
             "skill_token_delta": after_tokens - before_tokens,
@@ -560,6 +598,15 @@ def _combined_skill_report(reports: list[dict[str, object]]) -> dict[str, object
             "forbidden_sections_found": sum(
                 1 for finding in findings if finding.get("code") == "skill.forbidden_section.present"
             ),
+            "non_goals_passed": 0
+            if any(finding.get("code") == "skill.non_goals.missing" for finding in findings)
+            else 1,
+            "examples_or_fixtures_passed": 0
+            if any(
+                finding.get("code") == "skill.examples_or_fixtures.removed"
+                for finding in findings
+            )
+            else 1,
             "skill_tokens_before": sum(
                 int(report.get("metrics", {}).get("skill_tokens_before", 0))
                 for report in reports
@@ -1512,13 +1559,58 @@ def _instruction_token_delta_metrics(
     }
 
 
+def _duplicate_rule_token_delta_metrics(
+    policy_pairs: tuple[tuple[str, str], ...],
+) -> dict[str, int]:
+    before_tokens = _duplicate_rule_tokens(before for before, _ in policy_pairs)
+    after_tokens = _duplicate_rule_tokens(after for _, after in policy_pairs)
+    return {
+        "duplicate_rule_tokens_before": before_tokens,
+        "duplicate_rule_tokens_after": after_tokens,
+        "duplicate_rule_token_delta": after_tokens - before_tokens,
+    }
+
+
+def _duplicate_rule_tokens(markdowns: Iterable[str]) -> int:
+    rule_counts: dict[str, int] = {}
+    for markdown in markdowns:
+        for line in markdown.splitlines():
+            normalized = line.strip().lstrip("-*0123456789. ").strip()
+            match = re.match(r"^(MUST|NEVER)\s+(.+)$", normalized, flags=re.IGNORECASE)
+            if not match:
+                continue
+            modal = match.group(1).upper()
+            rule = match.group(2).rstrip(".").strip().lower()
+            if not rule:
+                continue
+            counted_rule = f"{modal} {rule}"
+            rule_counts[counted_rule] = rule_counts.get(counted_rule, 0) + 1
+    return sum(
+        (count - 1) * _estimated_tokens(normalized_rule)
+        for normalized_rule, count in rule_counts.items()
+        if count > 1
+    )
+
+
 def _instruction_token_growth_metrics(
     *,
     instruction_token_delta: int,
+    duplicate_rule_token_delta: int,
     held_out_score: float,
     trigger_score: float,
     governance_passed: bool,
 ) -> dict[str, object]:
+    held_out_improved = held_out_score > trigger_score
+    if not governance_passed and (instruction_token_delta > 0 or duplicate_rule_token_delta > 0):
+        return {
+            "instruction_token_growth_reason": "instruction_token_growth_governance_failed",
+            "instruction_token_growth_acceptable": 0,
+        }
+    if duplicate_rule_token_delta > 0 and not held_out_improved:
+        return {
+            "instruction_token_growth_reason": "duplicate_token_growth_without_held_out_improvement",
+            "instruction_token_growth_acceptable": 0,
+        }
     if instruction_token_delta < 0:
         return {
             "instruction_token_growth_reason": "instruction_token_reduction",
@@ -1529,12 +1621,7 @@ def _instruction_token_growth_metrics(
             "instruction_token_growth_reason": "no_instruction_token_growth",
             "instruction_token_growth_acceptable": 1,
         }
-    if not governance_passed:
-        return {
-            "instruction_token_growth_reason": "instruction_token_growth_governance_failed",
-            "instruction_token_growth_acceptable": 0,
-        }
-    if held_out_score > trigger_score:
+    if held_out_improved:
         return {
             "instruction_token_growth_reason": "instruction_token_growth_with_eval_improvement",
             "instruction_token_growth_acceptable": 1,

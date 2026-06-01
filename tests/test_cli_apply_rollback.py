@@ -3372,6 +3372,8 @@ def test_auto_apply_blocks_skill_improvement_when_skill_report_fails(tmp_path: P
             "safety_preservation_score": 0.0,
             "required_sections_passed": 1,
             "forbidden_sections_found": 0,
+            "non_goals_passed": 1,
+            "examples_or_fixtures_passed": 1,
             "skill_tokens_before": 30,
             "skill_tokens_after": 38,
             "skill_token_delta": 8,
