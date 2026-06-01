@@ -140,7 +140,11 @@ def _passing_ci_report() -> dict[str, object]:
 
 
 def _write_provider_policy(
-    repo: Path, *, allow_network: bool = True, providers: list[str] | None = None
+    repo: Path,
+    *,
+    allow_network: bool = True,
+    providers: list[str] | None = None,
+    allowed_manifest_hashes: list[str] | None = None,
 ) -> None:
     policy = repo / ".sidecar" / "policy.yaml"
     policy.parent.mkdir(parents=True, exist_ok=True)
@@ -149,6 +153,12 @@ def _write_provider_policy(
     provider_lines = []
     if providers:
         provider_lines = ["  allowed_providers:", *[f"    - {provider}" for provider in providers]]
+    manifest_hash_lines = []
+    if allowed_manifest_hashes:
+        manifest_hash_lines = [
+            "  allowed_manifest_hashes:",
+            *[f"    - {manifest_hash}" for manifest_hash in allowed_manifest_hashes],
+        ]
     policy.write_text(
         "\n".join(
             [
@@ -156,6 +166,7 @@ def _write_provider_policy(
                 "llmff:",
                 f"  allow_network: {str(allow_network).lower()}",
                 *provider_lines,
+                *manifest_hash_lines,
                 "provider_smoke:",
                 "  enabled: true",
                 "  provider: openai",
@@ -167,30 +178,26 @@ def _write_provider_policy(
     )
 
 
-def _write_provider_inspect_evidence(repo: Path, *, provider: str = "openai") -> Path:
+def _write_provider_inspect_evidence(
+    repo: Path, *, provider: str = "openai", manifest_hash: str | None = "a" * 64
+) -> Path:
     evidence = repo / ".sidecar" / "ci" / "llmff-provider-inspect.json"
     evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "manifest_path": ".sidecar/manifests/episode-audit.yaml",
-                "manifest_hash": "a" * 64,
-                "network_required": True,
-                "providers": [provider],
-                "external_calls": [{"kind": "model_provider", "target": provider}],
-                "inspect": {
-                    "network_required": True,
-                    "providers": [provider],
-                    "external_calls": [{"kind": "model_provider", "target": provider}],
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    payload = {
+        "schema_version": 1,
+        "manifest_path": ".sidecar/manifests/episode-audit.yaml",
+        "network_required": True,
+        "providers": [provider],
+        "external_calls": [{"kind": "model_provider", "target": provider}],
+        "inspect": {
+            "network_required": True,
+            "providers": [provider],
+            "external_calls": [{"kind": "model_provider", "target": provider}],
+        },
+    }
+    if manifest_hash is not None:
+        payload["manifest_hash"] = manifest_hash
+    evidence.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return evidence
 
 
@@ -1115,7 +1122,7 @@ def test_ops_release_manifest_blocks_unallowed_provider_evidence(
     wheel.write_bytes(b"wheel-bytes")
     evidence = _write_release_evidence(repo)
     provider_evidence = _write_provider_inspect_evidence(repo, provider="anthropic")
-    _write_provider_policy(repo, providers=["openai"])
+    _write_provider_policy(repo, providers=["openai"], allowed_manifest_hashes=["a" * 64])
     (repo / "pyproject.toml").write_text(
         "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
         encoding="utf-8",
@@ -1142,7 +1149,7 @@ def test_ops_release_manifest_blocks_unallowed_provider_evidence(
     assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
 
 
-def test_ops_release_manifest_records_provider_backed_evidence(
+def test_ops_release_manifest_blocks_provider_backed_review_without_pinned_manifest_hashes(
     tmp_path: Path,
     capsys,
 ) -> None:
@@ -1153,6 +1160,117 @@ def test_ops_release_manifest_records_provider_backed_evidence(
     evidence = _write_release_evidence(repo)
     provider_evidence = _write_provider_inspect_evidence(repo)
     _write_provider_policy(repo)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=[*evidence.values(), provider_evidence],
+                security_review_decision="approved_provider_backed",
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: provider-backed release requires reviewed manifest hashes"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_provider_backed_review_without_evidence_manifest_hash(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    provider_evidence = _write_provider_inspect_evidence(repo, manifest_hash=None)
+    _write_provider_policy(repo, allowed_manifest_hashes=["a" * 64])
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=[*evidence.values(), provider_evidence],
+                security_review_decision="approved_provider_backed",
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: provider-backed release evidence missing manifest hash"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_provider_backed_review_with_unreviewed_manifest_hash(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    provider_evidence = _write_provider_inspect_evidence(repo, manifest_hash="b" * 64)
+    _write_provider_policy(repo, allowed_manifest_hashes=["a" * 64])
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=[*evidence.values(), provider_evidence],
+                security_review_decision="approved_provider_backed",
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: provider-backed release evidence uses unreviewed manifest hash"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_records_provider_backed_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    provider_evidence = _write_provider_inspect_evidence(repo)
+    _write_provider_policy(repo, allowed_manifest_hashes=["a" * 64])
     (repo / "pyproject.toml").write_text(
         "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
         encoding="utf-8",
@@ -1182,6 +1300,7 @@ def test_ops_release_manifest_records_provider_backed_evidence(
             "providers": ["openai"],
             "external_calls": [{"kind": "model_provider", "target": "openai"}],
             "network_required": True,
+            "manifest_hash": "a" * 64,
         }
     ]
 
@@ -1237,6 +1356,7 @@ def test_provider_backed_release_evidence_accepts_nested_inspect_payload(
     nested.write_text(
         json.dumps(
             {
+                "manifest_hash": "a" * 64,
                 "inspect": {
                     "network_required": True,
                     "providers": ["openai"],
@@ -1255,6 +1375,7 @@ def test_provider_backed_release_evidence_accepts_nested_inspect_payload(
             "providers": ["openai"],
             "external_calls": [{"kind": "model_provider", "target": "openai"}],
             "network_required": True,
+            "manifest_hash": "a" * 64,
         }
     ]
 

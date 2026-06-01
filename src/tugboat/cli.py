@@ -1790,6 +1790,9 @@ def _write_release_artifact_manifest(
             raise ValueError(
                 "provider-backed release requires llmff.allow_network and allowed_providers"
             )
+        allowed_manifest_hashes = set(policy.allowed_manifest_hashes)
+        if not allowed_manifest_hashes:
+            raise ValueError("provider-backed release requires reviewed manifest hashes")
         for evidence in provider_backed_evidence:
             evidence_providers = set(evidence["providers"])
             if not allowed_providers.issuperset(evidence_providers):
@@ -1798,6 +1801,13 @@ def _write_release_artifact_manifest(
                 )
                 raise ValueError(
                     f"provider-backed release evidence uses unallowed provider: {provider}"
+                )
+            manifest_hash = evidence.get("manifest_hash")
+            if not isinstance(manifest_hash, str) or not manifest_hash:
+                raise ValueError("provider-backed release evidence missing manifest hash")
+            if manifest_hash not in allowed_manifest_hashes:
+                raise ValueError(
+                    "provider-backed release evidence uses unreviewed manifest hash"
                 )
     preflight_findings = scan_text(
         "release-artifact-manifest.json",
@@ -2070,11 +2080,17 @@ def _provider_backed_evidence_from_payload(
         providers = _string_list(candidate.get("providers"))
         external_calls = _provider_external_calls(candidate.get("external_calls"), providers)
         if providers and external_calls:
+            manifest_hash = candidate.get("manifest_hash")
+            if not isinstance(manifest_hash, str):
+                manifest_hash = payload.get("manifest_hash")
+            if not isinstance(manifest_hash, str):
+                manifest_hash = ""
             return {
                 "path": str(path),
                 "providers": sorted(providers),
                 "external_calls": external_calls,
                 "network_required": True,
+                "manifest_hash": manifest_hash,
             }
     return None
 

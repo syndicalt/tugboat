@@ -24,6 +24,11 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "malicious_traces"
             ["poisoned_command_output", "forged_success_claim"],
             ["tool", "agent"],
         ),
+        (
+            "poisoned_diff_patch.jsonl",
+            ["prompt_injection_attempt"],
+            ["artifact"],
+        ),
     ],
 )
 def test_audit_records_malicious_trace_fixture_findings(
@@ -60,7 +65,7 @@ def test_audit_records_malicious_trace_fixture_findings(
     assert all(evidence_id.startswith("ev_") for evidence_id in finding_evidence)
     assert set(finding_evidence).issubset(set(audit["evidence_refs"]))
     assert all(
-        finding["source_trust"] in {"agent", "tool", "user"}
+        finding["source_trust"] in {"agent", "artifact", "tool", "user"}
         for finding in findings
     )
 

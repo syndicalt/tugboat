@@ -2876,6 +2876,7 @@ def test_validate_release_artifact_manifest_accepts_provider_backed_evidence():
                     "providers": ["openai"],
                     "external_calls": [{"kind": "model_provider", "target": "openai"}],
                     "network_required": True,
+                    "manifest_hash": "a" * 64,
                 }
             ],
         },

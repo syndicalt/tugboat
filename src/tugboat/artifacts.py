@@ -1443,7 +1443,13 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["path", "providers", "external_calls", "network_required"],
+                    "required": [
+                        "path",
+                        "providers",
+                        "external_calls",
+                        "network_required",
+                        "manifest_hash",
+                    ],
                     "properties": {
                         "path": {"type": "string"},
                         "providers": {
@@ -1465,6 +1471,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                             },
                         },
                         "network_required": {"type": "boolean", "const": True},
+                        "manifest_hash": {"type": "string"},
                     },
                 },
             },

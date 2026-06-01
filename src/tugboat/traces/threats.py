@@ -128,15 +128,18 @@ def _episode_events(episode: CanonicalEpisode) -> Iterable[TraceEvent]:
 
 
 def _event_text(event: TraceEvent) -> str:
-    payload = event.payload
-    values = [
-        payload.get("content"),
-        payload.get("text"),
-        payload.get("message"),
-        payload.get("summary"),
-        payload.get("output"),
-    ]
-    return "\n".join(str(value) for value in values if value is not None)
+    return "\n".join(_payload_strings(event.payload))
+
+
+def _payload_strings(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from _payload_strings(child)
+    elif isinstance(value, list | tuple):
+        for child in value:
+            yield from _payload_strings(child)
 
 
 def _has_failed_tool_result(episode: CanonicalEpisode) -> bool:
