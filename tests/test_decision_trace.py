@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tugboat.cli import main
 from tugboat.db import Store
 from tugboat.policy.gate import CandidatePatch, SourceRef
 from tugboat.report.decision_trace import write_decision_trace
@@ -206,3 +207,164 @@ def test_decision_trace_includes_audited_decision_inputs(tmp_path: Path):
     ):
         assert trace[section][0]["audit_event_sequence"]
         assert trace[section][0]["event_hash"]
+
+
+def test_inspect_decision_compares_candidate_metadata_without_payloads(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    agents = repo / "AGENTS.md"
+    codex.write_text("# Rules\n\nUse regression tests.\n", encoding="utf-8")
+    agents.write_text("# Agents\n\nPrefer small changes.\n", encoding="utf-8")
+    trace_path = repo / "trace.jsonl"
+    trace_path.write_text('{"type":"user_request","text":"Secret payload"}\n', encoding="utf-8")
+
+    run_1 = repo / ".sidecar" / "runs" / "run-1"
+    run_2 = repo / ".sidecar" / "runs" / "run-2"
+    run_1.mkdir(parents=True)
+    run_2.mkdir(parents=True)
+    diff_1 = run_1 / "candidate.diff"
+    diff_2 = run_2 / "candidate.diff"
+    eval_1 = run_1 / "eval-report.json"
+    eval_2 = run_2 / "eval-report.json"
+    diff_1.write_text("--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use held-out tests.\n", encoding="utf-8")
+    diff_2.write_text("--- a/AGENTS.md\n+++ b/AGENTS.md\n@@\n+Document rollback.\n", encoding="utf-8")
+    eval_1.write_text('{"passed":true}\n', encoding="utf-8")
+    eval_2.write_text('{"passed":false}\n', encoding="utf-8")
+
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(
+            repo=repo,
+            bundle=TraceBundle(
+                trace_path=trace_path,
+                events=(
+                    TraceEvent(
+                        evidence_id="ev-1",
+                        event_type="user_request",
+                        source_trust="user",
+                        line_number=1,
+                        payload={"text": "Sensitive customer request"},
+                    ),
+                ),
+            ),
+        )
+        store.insert_run(
+            run_id="run-1",
+            stage="proposal",
+            manifest_hash="manifest-hash-1",
+            status="completed",
+            run_dir=run_1,
+            episode_id=episode_id,
+        )
+        store.insert_run(
+            run_id="run-2",
+            stage="proposal",
+            manifest_hash="manifest-hash-2",
+            status="completed",
+            run_dir=run_2,
+            episode_id=episode_id,
+        )
+        audit_1 = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.7,
+            evidence_refs=["ev-1"],
+            instruction_refs=["CODEX.md#Rules"],
+        )
+        audit_2 = store.insert_audit(
+            run_id="run-2",
+            failure_class="rollback_missing",
+            severity="high",
+            confidence=0.8,
+            evidence_refs=["ev-1"],
+            instruction_refs=["AGENTS.md#Agents"],
+        )
+        candidate_1 = store.insert_candidate(
+            audit_id=audit_1,
+            candidate=CandidatePatch(
+                audit_id=audit_1,
+                base_file="CODEX.md",
+                base_hash=CandidatePatch.hash_file(codex),
+                diff=diff_1.read_text(encoding="utf-8"),
+                risk_class="instruction_clarification",
+                rationale="First rationale should not print.",
+                sources=(SourceRef("ev-1", trusted=True),),
+            ),
+            diff_path=diff_1,
+            state="needs_review",
+        )
+        candidate_2 = store.insert_candidate(
+            audit_id=audit_2,
+            candidate=CandidatePatch(
+                audit_id=audit_2,
+                base_file="AGENTS.md",
+                base_hash=CandidatePatch.hash_file(agents),
+                diff=diff_2.read_text(encoding="utf-8"),
+                risk_class="workflow_safety",
+                rationale="Second rationale should not print.",
+                sources=(SourceRef("ev-1", trusted=True),),
+            ),
+            diff_path=diff_2,
+            state="rejected",
+        )
+        store.insert_eval(
+            candidate_id=candidate_1,
+            suite_id="all",
+            report_path=eval_1,
+            passed=True,
+            metrics={"score": 1.0},
+        )
+        store.insert_eval(
+            candidate_id=candidate_2,
+            suite_id="all",
+            report_path=eval_2,
+            passed=False,
+            metrics={"score": 0.5},
+        )
+        decision_1 = store.insert_decision(
+            candidate_id=candidate_1,
+            actor="tugboat",
+            policy="optimization_acceptance_gate",
+            decision="needs_review",
+            reason="held_out_improved",
+        )
+        decision_2 = store.insert_decision(
+            candidate_id=candidate_2,
+            actor="operator",
+            policy="manual_review",
+            decision="rejected",
+            reason="too_broad",
+        )
+
+    assert (
+        main(
+            [
+                "inspect-decision",
+                "--repo",
+                str(repo),
+                "--decision",
+                str(decision_1),
+                "--compare",
+                str(decision_2),
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+
+    assert f"compare_decision_trace: {run_2 / 'decision-trace.json'}" in output
+    assert f"candidate_id: {candidate_1} -> {candidate_2}" in output
+    assert "candidate_file: CODEX.md -> AGENTS.md" in output
+    assert "candidate_state: needs_review -> rejected" in output
+    assert "risk_class: instruction_clarification -> workflow_safety" in output
+    assert "decision: needs_review -> rejected" in output
+    assert "evals: all=passed -> all=failed" in output
+    assert "rollback_ready: no -> no" in output
+    assert "changed_fields: candidate_id, candidate_file, candidate_state, risk_class, decision, evals" in output
+    assert "Sensitive customer request" not in output
+    assert "payload_snippet" not in output
+    assert "rationale should not print" not in output

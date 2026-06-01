@@ -38,6 +38,7 @@ tugboat propose --repo . --audit latest
 tugboat eval --repo . --candidate latest --suite all
 tugboat report --repo . --run latest
 tugboat inspect-decision --repo . --decision latest
+tugboat inspect-decision --repo . --decision latest --compare <decision-id>
 ```
 
 Supported `--trace-format` values are `auto`, `generic-jsonl`, `codex`, `claude`, `ci`, and `mcp`.
@@ -56,6 +57,8 @@ evals: all=passed
 rollback_ready: no
 review_next: inspect .sidecar/runs/<run-id>/candidate.diff
 ```
+
+Use `--compare` to compare the selected decision against another decision id or run ref. The comparison prints only bounded metadata fields: candidate id, target file, state, risk class, decision, eval summary, rollback readiness, and changed field names.
 
 Raw trace evidence, payload snippets, rationale text, optimizer memory, and rollback bodies stay in artifacts rather than stdout.
 

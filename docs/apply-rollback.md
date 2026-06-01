@@ -12,9 +12,10 @@ Before applying anything, inspect the run artifacts:
 ```bash
 tugboat report --repo . --run latest
 tugboat inspect-decision --repo . --decision latest
+tugboat inspect-decision --repo . --decision latest --compare <decision-id>
 ```
 
-`inspect-decision` prints the decision trace path plus a concise metadata summary: run id, decision, candidate id, candidate file, candidate state, risk class, eval pass/fail summary, rollback readiness, and the next artifact to inspect. It does not print raw trace payload snippets, rationale text, optimizer memory, or rollback bodies.
+`inspect-decision` prints the decision trace path plus a concise metadata summary: run id, decision, candidate id, candidate file, candidate state, risk class, eval pass/fail summary, rollback readiness, and the next artifact to inspect. With `--compare`, it adds a bounded comparison against another decision id or run ref. It does not print raw trace payload snippets, rationale text, optimizer memory, or rollback bodies.
 
 Review these files under `.sidecar/runs/<run-id>/`:
 

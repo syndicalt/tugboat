@@ -409,6 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_decision = subcommands.add_parser("inspect-decision")
     inspect_decision.add_argument("--repo", required=True)
     inspect_decision.add_argument("--decision", required=True)
+    inspect_decision.add_argument("--compare")
 
     harness = subcommands.add_parser("harness")
     harness_subcommands = harness.add_subparsers(dest="harness_command", required=True)
@@ -972,6 +973,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"decision_trace: {trace_path}")
         _print_decision_inspection_summary(trace_path)
+        if args.compare:
+            try:
+                compare_trace_path = write_decision_trace(repo, args.compare)
+            except (FileNotFoundError, KeyError, ValueError, SecretScanError) as error:
+                print(f"inspect decision blocked: {error}")
+                return 1
+            print(f"compare_decision_trace: {compare_trace_path}")
+            _print_decision_comparison_summary(trace_path, compare_trace_path)
         return 0
 
     if args.command == "harness" and args.harness_command == "check":
@@ -4589,6 +4598,40 @@ def _print_decision_inspection_summary(trace_path: Path) -> None:
     print(f"rollback_ready: {_decision_trace_rollback_ready(decision, artifacts)}")
     next_artifact = artifacts.get("report") or artifacts.get("candidate_diff") or trace_path.as_posix()
     print(f"review_next: inspect {next_artifact}")
+
+
+def _print_decision_comparison_summary(primary_trace_path: Path, compare_trace_path: Path) -> None:
+    primary = json.loads(primary_trace_path.read_text(encoding="utf-8"))
+    compare = json.loads(compare_trace_path.read_text(encoding="utf-8"))
+    primary_summary = _decision_comparison_fields(primary)
+    compare_summary = _decision_comparison_fields(compare)
+    changed_fields = [
+        field
+        for field in primary_summary
+        if primary_summary[field] != compare_summary[field]
+    ]
+    print("comparison:")
+    for field in primary_summary:
+        print(f"{field}: {primary_summary[field]} -> {compare_summary[field]}")
+    if changed_fields:
+        print(f"changed_fields: {', '.join(changed_fields)}")
+    else:
+        print("changed_fields: none")
+
+
+def _decision_comparison_fields(payload: dict[str, object]) -> dict[str, str]:
+    decision = _json_object_field(payload, "decision")
+    candidate = _json_object_field(payload, "candidate")
+    artifacts = _json_object_field(payload, "artifacts")
+    return {
+        "candidate_id": str(candidate.get("candidate_id", "")),
+        "candidate_file": str(candidate.get("base_file", "")),
+        "candidate_state": str(candidate.get("state", "")),
+        "risk_class": str(candidate.get("risk_class", "")),
+        "decision": str(decision.get("decision", "")),
+        "evals": _decision_trace_eval_summary(payload),
+        "rollback_ready": _decision_trace_rollback_ready(decision, artifacts),
+    }
 
 
 def _json_object_field(payload: dict[str, object], field: str) -> dict[str, object]:
