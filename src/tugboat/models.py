@@ -114,6 +114,7 @@ class Policy:
     roadmap_learning_rate_max_changed_lines: int = 20
     roadmap_learning_rate_max_normative_changes: int = 2
     roadmap_learning_rate_operator_risk_limits: dict[str, int] = field(default_factory=dict)
+    roadmap_drift_cluster_max_evidence_refs: int = 8
     risk_class_changed_line_budgets: dict[str, int] = field(default_factory=dict)
     editable_headings: tuple[str, ...] = field(default_factory=tuple)
     auto_apply_minimum_burn_in_days: int = 14

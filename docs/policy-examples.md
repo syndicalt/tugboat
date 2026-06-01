@@ -27,6 +27,9 @@ instruction_files:
     protected: true
 auto_apply:
   enabled: false
+roadmap:
+  drift_cluster:
+    max_evidence_refs: 8
 llmff:
   binary: python -m tugboat.llmff.fixture_backend
   require_inspect: true
@@ -34,6 +37,8 @@ llmff:
 ```
 
 This fixture backend is local, credential-free, and intended for proposal-only adoption. Replace `llmff.binary` with a reviewed production runner only when enabling provider-backed pipelines.
+
+`roadmap.drift_cluster.max_evidence_refs` bounds each drift cluster before proposal generation. If `llmff` over-merges evidence, Tugboat rewrites `drift.raw.json` into deterministic review-sized cluster parts while preserving evidence IDs and order.
 
 ## Provider Backed
 

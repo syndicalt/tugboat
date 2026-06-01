@@ -14,13 +14,16 @@ from tugboat.eval.pipeline import (
     run_eval_pipeline,
 )
 from tugboat.evals import EvalCaseRecord
+from tugboat.models import Policy
 from tugboat.paths import sidecar_dir
 from tugboat.propose.pipeline import (
     _audit_evidence_refs,
+    _normalize_drift_clusters,
     _validate_no_batch_training_evidence_refs,
     run_propose_pipeline,
 )
 from tugboat.security.secrets import SecretScanError
+from tugboat.traces.ingest import _evidence_id
 
 
 def _eval_cases_for_validation_splits(
@@ -61,6 +64,49 @@ def _with_eval_cases_from_validation_splits(report: object) -> object:
         **report,
         "eval_cases": _eval_cases_for_validation_splits(raw_splits),
     }
+
+
+def test_normalize_drift_clusters_splits_overlarge_clusters_deterministically():
+    payload = {
+        "clusters": [
+            {
+                "cluster_id": "drift-wide",
+                "evidence_refs": ["ev-3", "ev-1", "ev-2", "ev-1", "ev-4"],
+            },
+            {"cluster_id": "drift-small", "evidence_refs": ["ev-5"]},
+        ]
+    }
+    policy = Policy(roadmap_drift_cluster_max_evidence_refs=2)
+
+    assert _normalize_drift_clusters(payload, policy) == {
+        "clusters": [
+            {"cluster_id": "drift-wide-part-1", "evidence_refs": ["ev-3", "ev-1"]},
+            {"cluster_id": "drift-wide-part-2", "evidence_refs": ["ev-2", "ev-4"]},
+            {"cluster_id": "drift-small", "evidence_refs": ["ev-5"]},
+        ]
+    }
+
+
+def test_normalize_drift_clusters_resolves_generated_cluster_id_collisions():
+    payload = {
+        "clusters": [
+            {"cluster_id": "drift-wide", "evidence_refs": ["ev-1", "ev-2", "ev-3"]},
+            {"cluster_id": "drift-wide-part-1", "evidence_refs": ["ev-4"]},
+        ]
+    }
+    policy = Policy(roadmap_drift_cluster_max_evidence_refs=2)
+
+    normalized = _normalize_drift_clusters(payload, policy)
+    cluster_ids = [cluster["cluster_id"] for cluster in normalized["clusters"]]
+    evidence_refs = [
+        ref
+        for cluster in normalized["clusters"]
+        for ref in cluster["evidence_refs"]
+    ]
+
+    assert len(cluster_ids) == len(set(cluster_ids))
+    assert evidence_refs == ["ev-1", "ev-2", "ev-3", "ev-4"]
+    assert normalized["clusters"][0]["cluster_id"].startswith("drift-wide-part-1")
 
 
 def _write_fake_llmff(
@@ -2244,6 +2290,122 @@ llmff:
     assert (run_dir / "drift.raw.json").exists()
     assert (run_dir / "optimizer-notes.raw.json").exists()
     assert (run_dir / "proposal-rationale.raw.json").exists()
+
+
+def test_propose_rewrites_overlarge_drift_clusters_before_patch_propose(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace_events = [
+        {"type": "user_request", "text": "Fix bug"},
+        {"type": "user_correction", "text": "You skipped regression guidance."},
+        {"type": "user_correction", "text": "The runbook command is stale."},
+        {"type": "user_correction", "text": "The rules repeat themselves."},
+        {"type": "user_correction", "text": "This failure has no doc coverage."},
+    ]
+    trace.write_text(
+        "".join(json.dumps(event) + "\n" for event in trace_events),
+        encoding="utf-8",
+    )
+    evidence_refs = [
+        _evidence_id(line_number, event)
+        for line_number, event in enumerate(trace_events, start=1)
+    ]
+    fake_llmff = _write_fake_llmff(
+        tmp_path / "fake-llmff",
+        audit_report={
+            "edit_warranted": True,
+            "failure_class": "instruction_conflict",
+            "severity": "high",
+            "confidence": 0.91,
+            "evidence_refs": evidence_refs,
+            "instruction_refs": ["CODEX.md#rules"],
+        },
+        evidence_ids={"evidence_ids": evidence_refs},
+        drift_clusters={
+            "clusters": [
+                {
+                    "cluster_id": "drift-wide",
+                    "evidence_refs": [
+                        evidence_refs[0],
+                        evidence_refs[1],
+                        evidence_refs[2],
+                        evidence_refs[1],
+                        evidence_refs[3],
+                        evidence_refs[4],
+                    ],
+                }
+            ]
+        },
+        optimizer_notes={
+            "notes": [
+                {
+                    "summary": "Use bounded drift evidence.",
+                    "evidence_refs": evidence_refs,
+                }
+            ]
+        },
+        proposal_rationale={
+            "rationale": "Patch proposal is grounded in bounded drift clusters.",
+            "evidence_refs": [evidence_refs[0], evidence_refs[1]],
+            "style_constraints": ["Preserve existing instruction tone."],
+        },
+        sources=[{"source_id": evidence_refs[0], "trusted": True}],
+        reflections=[
+            {
+                "source_ref": evidence_refs[0],
+                "summary": "Tests were skipped because regression guidance was missing.",
+                "recurring_failure_patterns": ["Bug fixes closed without regression tests."],
+                "preserved_success_patterns": ["Keep concise repo-local test guidance."],
+                "affected_instruction_chunks": ["CODEX.md#rules"],
+                "proposed_root_cause": "Regression-test expectations were implicit.",
+            }
+        ],
+    )
+    policy_dir = repo / ".sidecar"
+    policy_dir.mkdir()
+    (policy_dir / "policy.yaml").write_text(
+        f"""
+version: 1
+roadmap:
+  drift_cluster:
+    max_evidence_refs: 2
+llmff:
+  binary: {fake_llmff}
+  require_inspect: true
+  allow_network: false
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace)]) == 0
+    assert main(["propose", "--repo", str(repo), "--audit", "latest"]) == 0
+
+    run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]
+    drift = json.loads((run_dir / "drift.raw.json").read_text(encoding="utf-8"))
+    inputs_by_manifest = [
+        json.loads(line)
+        for line in (run_dir / "llmff-inputs-by-manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    patch_inputs = next(
+        item["inputs"] for item in inputs_by_manifest if item["manifest"] == "patch-propose"
+    )
+
+    assert drift == {
+        "clusters": [
+            {
+                "cluster_id": "drift-wide-part-1",
+                "evidence_refs": [evidence_refs[0], evidence_refs[1]],
+            },
+            {
+                "cluster_id": "drift-wide-part-2",
+                "evidence_refs": [evidence_refs[2], evidence_refs[3]],
+            },
+            {"cluster_id": "drift-wide-part-3", "evidence_refs": [evidence_refs[4]]},
+        ]
+    }
+    assert Path(patch_inputs["drift_clusters"]) == run_dir / "drift.raw.json"
 
 
 def test_propose_passes_raw_instruction_index_to_drift_and_patch_manifests(tmp_path: Path):

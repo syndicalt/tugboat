@@ -183,6 +183,7 @@ def load_policy(repo: Path) -> Policy:
     vcs = raw.get("vcs", {}) or {}
     pull_request = vcs.get("pull_request", {}) or {}
     learning_rate_budget = roadmap.get("learning_rate_budget", {}) or {}
+    drift_cluster = roadmap.get("drift_cluster", {}) or {}
     entries = tuple(_as_instruction_file(item) for item in raw.get("instruction_files", []))
 
     allowed_manifest_hashes = llmff.get(
@@ -264,6 +265,13 @@ def load_policy(repo: Path) -> Policy:
         ),
         roadmap_learning_rate_operator_risk_limits=_as_operator_risk_limits(
             learning_rate_budget.get("operator_risk_limits", {})
+        ),
+        roadmap_drift_cluster_max_evidence_refs=_as_positive_int(
+            drift_cluster.get(
+                "max_evidence_refs",
+                Policy().roadmap_drift_cluster_max_evidence_refs,
+            ),
+            "roadmap.drift_cluster.max_evidence_refs",
         ),
         risk_class_changed_line_budgets=_as_risk_class_changed_line_budgets(
             raw.get("risk_class_changed_line_budgets", {})

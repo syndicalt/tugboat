@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -730,6 +731,8 @@ def _run_drift_detect(
         )
     payload = load_json_object_artifact(output_path, "drift.raw.json")
     validate_json_artifact("drift.raw.json", payload)
+    payload = _normalize_drift_clusters(payload, policy)
+    _write_private_json_artifact(output_path, "drift.raw.json", payload)
     optimizer_payload = load_json_object_artifact(
         run.output_paths["optimizer_notes"],
         "optimizer-notes.raw.json",
@@ -742,6 +745,67 @@ def _run_drift_detect(
         optimizer_payload,
     )
     return output_path, optimizer_notes_path
+
+
+def _normalize_drift_clusters(payload: dict[str, object], policy) -> dict[str, object]:
+    raw_clusters = payload.get("clusters", [])
+    if not isinstance(raw_clusters, list):
+        return payload
+    max_refs = int(policy.roadmap_drift_cluster_max_evidence_refs)
+    normalized_clusters: list[dict[str, object]] = []
+    used_cluster_ids: set[str] = set()
+    for raw_cluster in raw_clusters:
+        if not isinstance(raw_cluster, dict):
+            continue
+        cluster_id = str(raw_cluster.get("cluster_id", "drift"))
+        evidence_refs = _unique_json_strings(raw_cluster.get("evidence_refs", []))
+        if len(evidence_refs) <= max_refs:
+            normalized_id = _unique_drift_cluster_id(
+                cluster_id,
+                evidence_refs,
+                used_cluster_ids,
+            )
+            normalized_clusters.append(
+                {
+                    "cluster_id": normalized_id,
+                    "evidence_refs": evidence_refs,
+                }
+            )
+            continue
+        for index, start in enumerate(range(0, len(evidence_refs), max_refs), start=1):
+            refs = evidence_refs[start : start + max_refs]
+            normalized_id = _unique_drift_cluster_id(
+                f"{cluster_id}-part-{index}",
+                refs,
+                used_cluster_ids,
+            )
+            normalized_clusters.append(
+                {
+                    "cluster_id": normalized_id,
+                    "evidence_refs": refs,
+                }
+            )
+    normalized = {"clusters": normalized_clusters}
+    validate_json_artifact("drift.raw.json", normalized)
+    return normalized
+
+
+def _unique_drift_cluster_id(
+    base_id: str,
+    evidence_refs: list[str],
+    used_cluster_ids: set[str],
+) -> str:
+    if base_id not in used_cluster_ids:
+        used_cluster_ids.add(base_id)
+        return base_id
+    digest = hashlib.sha256("\n".join(evidence_refs).encode("utf-8")).hexdigest()[:8]
+    candidate = f"{base_id}-{digest}"
+    suffix = 2
+    while candidate in used_cluster_ids:
+        candidate = f"{base_id}-{digest}-{suffix}"
+        suffix += 1
+    used_cluster_ids.add(candidate)
+    return candidate
 
 
 def _validate_drift_evidence_refs_declared_by_audit(

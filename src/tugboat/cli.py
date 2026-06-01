@@ -198,6 +198,11 @@ def _initialize_repo_policy(repo: Path) -> Path:
                 for lane in Policy().auto_apply_lanes
             },
         },
+        "roadmap": {
+            "drift_cluster": {
+                "max_evidence_refs": Policy().roadmap_drift_cluster_max_evidence_refs,
+            },
+        },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,

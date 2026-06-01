@@ -74,6 +74,11 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
                 },
             },
         },
+        "roadmap": {
+            "drift_cluster": {
+                "max_evidence_refs": 8,
+            },
+        },
         "llmff": {
             "binary": DEFAULT_FIXTURE_LLMFF_BINARY,
             "require_inspect": True,

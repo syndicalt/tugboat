@@ -83,6 +83,8 @@ tugboat optimize --repo . \
 
 `audit` supports `--mock-llmff-inspect` for audit-only smoke tests. Do not use mock inspect output as proposal evidence.
 
+`propose` rewrites overlarge `drift.raw.json` clusters into deterministic review-sized parts before `patch-propose` consumes them. The bound is policy-owned at `roadmap.drift_cluster.max_evidence_refs` and defaults to `8`; evidence IDs remain ordered and no raw trace payloads are added.
+
 ## Review And Change Control
 
 Generated candidates are review artifacts until an apply command moves through the VCS adapter:
