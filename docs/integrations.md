@@ -94,10 +94,10 @@ Use CI failure traces to feed the proposal loop after review. The shared safe fi
 
 Safe shared fixtures:
 
-- `tests/fixtures/traces/codex-local-session-export.jsonl`
-- `tests/fixtures/traces/claude-transcript.json`
-- `tests/fixtures/traces/mcp-session.jsonl`
-- `tests/fixtures/traces/ci-failure.json`
+- `tests/fixtures/traces/codex-local-session-export.jsonl`: Codex fixture proves session metadata, base instruction snapshots, tool calls, and final response events ingest as a canonical episode.
+- `tests/fixtures/traces/claude-transcript.json`: Claude fixture proves transcript JSON/JSONL exports preserve user corrections and assistant responses for drift evidence.
+- `tests/fixtures/traces/mcp-session.jsonl`: MCP fixture proves tool-call lifecycle events from read-only MCP clients become auditable trace evidence.
+- `tests/fixtures/traces/ci-failure.json`: CI fixture proves failing command output can feed proposal-only remediation without granting mutation authority.
 
 Each fixture should be credential-free, redacted, and ingestible by the real trace adapters. Add new fixtures only with tests that prove format detection and ingestion.
 
