@@ -60,6 +60,8 @@ auto_apply:
 
 Paused repositories, lanes, categories, and incident pause state block otherwise eligible candidates with explicit reasons in preflight reports and auto-apply decision events. The operations observability report treats explicitly paused lanes like disabled lanes when reporting staged-but-unapplied candidates.
 
+`pause_for_incident: true` is an evidence-driven watch, not a permanent pause by itself. It blocks auto-apply when Tugboat finds active incident evidence such as a `rollback.failed` audit event for an unresolved failed rollback. Preflight, shadow, and final auto-apply reports include `incident_active` and `active_incidents` under `checks.auto_apply`; missing or invalid referenced incident artifacts remain visible and fail closed until a later `rollback.applied` event for the same candidate supersedes the failed rollback.
+
 ## Dry Check
 
 Run without confirmation first:

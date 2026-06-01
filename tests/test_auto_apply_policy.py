@@ -3,6 +3,7 @@ from __future__ import annotations
 from tugboat.auto_apply import (
     AutoApplyCandidate,
     AutoApplyConfirmation,
+    AutoApplyIncidentState,
     AutoApplyLanePolicy,
     AutoApplyPolicy,
     AutoApplyReadiness,
@@ -59,6 +60,7 @@ def _ready(**overrides: object) -> AutoApplyReadiness:
         "burn_in_days": 14,
         "policy": _enabled_policy(),
         "confirmation": _confirmed(),
+        "active_incidents": (),
     }
     values.update(overrides)
     return AutoApplyReadiness(**values)
@@ -275,7 +277,7 @@ def test_auto_apply_blocks_when_token_growth_metrics_are_missing():
     assert decision.reasons == ("instruction_token_delta_missing",)
 
 
-def test_auto_apply_policy_pause_controls_block_by_repo_lane_category_and_incident():
+def test_auto_apply_policy_pause_controls_block_by_repo_lane_and_category():
     policy = _enabled_policy(
         paused_repositories=("allowed/repo",),
         paused_lanes=("docs_hygiene",),
@@ -294,8 +296,42 @@ def test_auto_apply_policy_pause_controls_block_by_repo_lane_category_and_incide
         "auto_apply_repository_paused",
         "auto_apply_lane_paused",
         "auto_apply_category_paused",
-        "auto_apply_incident_pause_active",
     )
+
+
+def test_auto_apply_incident_pause_requires_active_incident():
+    policy = _enabled_policy(pause_for_incident=True)
+    incident = AutoApplyIncidentState(
+        artifact_status="valid",
+        artifact_valid=True,
+        candidate_id=7,
+        event_type="rollback.failed",
+        failure_kind="git_revert_failed",
+        incident=".sidecar/runs/run-1/rollback-incident.json",
+    )
+
+    without_incident = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(policy=policy, active_incidents=()),
+    )
+    with_incident = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(policy=policy, active_incidents=(incident,)),
+    )
+    without_policy_opt_in = evaluate_auto_apply(
+        candidate=_passing_candidate(),
+        readiness=_ready(
+            policy=_enabled_policy(pause_for_incident=False),
+            active_incidents=(incident,),
+        ),
+    )
+
+    assert without_incident.eligible is True
+    assert without_incident.reasons == ()
+    assert without_policy_opt_in.eligible is True
+    assert without_policy_opt_in.reasons == ()
+    assert with_incident.eligible is False
+    assert with_incident.reasons == ("auto_apply_incident_pause_active",)
 
 
 def test_auto_apply_lane_can_set_stricter_token_growth_limit():

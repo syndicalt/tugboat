@@ -193,6 +193,30 @@ class AutoApplyReadiness:
     burn_in_days: int
     policy: AutoApplyPolicy | None
     confirmation: AutoApplyConfirmation | None
+    active_incidents: tuple["AutoApplyIncidentState", ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "active_incidents", tuple(self.active_incidents))
+
+
+@dataclass(frozen=True)
+class AutoApplyIncidentState:
+    candidate_id: int
+    event_type: str
+    failure_kind: str
+    incident: str
+    artifact_valid: bool
+    artifact_status: str
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "artifact_status": self.artifact_status,
+            "artifact_valid": self.artifact_valid,
+            "candidate_id": self.candidate_id,
+            "event_type": self.event_type,
+            "failure_kind": self.failure_kind,
+            "incident": self.incident,
+        }
 
 
 @dataclass(frozen=True)
@@ -256,7 +280,7 @@ def evaluate_auto_apply(
         candidate_category_keys = {_category_key(category) for category in candidate.categories}
         if candidate_category_keys.intersection(policy.paused_categories):
             found_reasons.add("auto_apply_category_paused")
-        if policy.pause_for_incident:
+        if policy.pause_for_incident and readiness.active_incidents:
             found_reasons.add("auto_apply_incident_pause_active")
         threshold_policy = lane if lane is not None else policy
         if readiness.burn_in_days < threshold_policy.minimum_burn_in_days:
@@ -349,6 +373,7 @@ __all__ = [
     "AutoApplyApprovalBundle",
     "AutoApplyCandidate",
     "AutoApplyConfirmation",
+    "AutoApplyIncidentState",
     "AutoApplyLanePolicy",
     "AutoApplyDecision",
     "AutoApplyPolicy",

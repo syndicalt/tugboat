@@ -291,6 +291,8 @@ DOC_CONTRACTS = {
             "skill_improvement",
             "7 burn-in days",
             "3% maximum rollback rate",
+            "evidence-driven watch",
+            "active_incidents",
             "tugboat rollback --repo . --decision latest --execute",
             "tugboat daemon read-only --repo . --enable",
         ],

@@ -411,6 +411,55 @@ def _seed_auto_apply_history(
         connection.commit()
 
 
+def _seed_rollback_failed_incident(
+    repo: Path,
+    *,
+    candidate_id: int = 7,
+    write_artifact: bool = True,
+) -> None:
+    incident = ".sidecar/runs/20260525T000000000000Z/rollback-incident.json"
+    if write_artifact:
+        incident_path = repo / incident
+        incident_path.parent.mkdir(parents=True, exist_ok=True)
+        incident_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "decision_id": "20260525T000000000000Z",
+                    "candidate_id": candidate_id,
+                    "failure_kind": "git_revert_failed",
+                    "failure_message": "git revert failed",
+                    "commit_sha": "abc123",
+                    "target_files": ["CODEX.md"],
+                    "rollback_plan_written": False,
+                    "rollback_applied": False,
+                    "source_artifacts": {
+                        "apply_plan": {
+                            "path": ".sidecar/runs/20260525T000000000000Z/apply-plan.json",
+                            "sha256": "a" * 64,
+                        }
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.append_audit_event(
+            "rollback.failed",
+            {
+                "candidate_id": candidate_id,
+                "decision_id": "20260525T000000000000Z",
+                "failure_kind": "git_revert_failed",
+                "incident": incident,
+                "rollback_applied": False,
+                "rollback_plan_written": False,
+            },
+        )
+
+
 def _auto_apply_decision_payloads(repo: Path) -> list[dict[str, object]]:
     with closing(sqlite3.connect(repo / ".sidecar" / "db.sqlite")) as connection:
         rows = connection.execute(
@@ -2046,13 +2095,124 @@ def test_auto_apply_preflight_reports_policy_pause_controls(tmp_path: Path):
         "auto_apply_repository_paused",
         "auto_apply_lane_paused",
         "auto_apply_category_paused",
-        "auto_apply_incident_pause_active",
     ]
     policy_snapshot = report["checks"]["auto_apply"]["policy"]
     assert policy_snapshot["paused_repositories"] == [str(repo.resolve())]
     assert policy_snapshot["paused_lanes"] == ["docs_hygiene"]
     assert policy_snapshot["paused_categories"] == ["typo_fix"]
     assert policy_snapshot["pause_for_incident"] is True
+    assert report["checks"]["auto_apply"]["incident_active"] is False
+    assert report["checks"]["auto_apply"]["active_incidents"] == []
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+def test_auto_apply_preflight_blocks_when_incident_pause_detects_failed_rollback(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.write_text(
+        policy_path.read_text(encoding="utf-8")
+        + """
+  pause_for_incident: true
+""",
+        encoding="utf-8",
+    )
+    _seed_auto_apply_history(repo)
+    _seed_rollback_failed_incident(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["eligible"] is False
+    assert report["would_apply"] is False
+    assert report["reasons"] == ["auto_apply_incident_pause_active"]
+    assert report["checks"]["auto_apply"]["policy"]["pause_for_incident"] is True
+    assert report["checks"]["auto_apply"]["incident_active"] is True
+    assert report["checks"]["auto_apply"]["active_incidents"] == [
+        {
+            "candidate_id": 7,
+            "event_type": "rollback.failed",
+            "artifact_status": "valid",
+            "artifact_valid": True,
+            "failure_kind": "git_revert_failed",
+            "incident": ".sidecar/runs/20260525T000000000000Z/rollback-incident.json",
+        }
+    ]
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+def test_auto_apply_preflight_blocks_and_reports_invalid_incident_artifact(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    _write_auto_apply_policy(repo, version=9)
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.write_text(
+        policy_path.read_text(encoding="utf-8")
+        + """
+  pause_for_incident: true
+""",
+        encoding="utf-8",
+    )
+    _seed_auto_apply_history(repo)
+    _seed_rollback_failed_incident(repo, write_artifact=False)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--actor",
+                "operator@example.com",
+                "--preflight",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads((run_dir / "auto-apply-preflight.json").read_text(encoding="utf-8"))
+    assert report["eligible"] is False
+    assert report["reasons"] == ["auto_apply_incident_pause_active"]
+    assert report["checks"]["auto_apply"]["incident_active"] is True
+    assert report["checks"]["auto_apply"]["active_incidents"] == [
+        {
+            "candidate_id": 7,
+            "event_type": "rollback.failed",
+            "artifact_status": "missing",
+            "artifact_valid": False,
+            "failure_kind": "git_revert_failed",
+            "incident": ".sidecar/runs/20260525T000000000000Z/rollback-incident.json",
+        }
+    ]
     assert not (run_dir / "apply-plan.json").exists()
     assert not (run_dir / "auto-apply-approval.json").exists()
 
