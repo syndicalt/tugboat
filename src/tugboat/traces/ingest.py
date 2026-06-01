@@ -44,7 +44,10 @@ def ingest_jsonl_trace(path: Path) -> TraceBundle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
-            payload = json.loads(line)
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"trace line {line_number} contains invalid JSON") from error
             if not isinstance(payload, dict):
                 raise ValueError(f"trace line {line_number} must be a JSON object")
             event_type = str(payload.get("type", "unknown"))

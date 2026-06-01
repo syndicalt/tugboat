@@ -6,6 +6,8 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import pytest
+
 from tugboat.audit.pipeline import detect_trace_format
 from tugboat.cli import main
 
@@ -40,6 +42,78 @@ def test_detect_trace_format_classifies_supported_real_trace_shapes(tmp_path: Pa
     assert detect_trace_format(claude_json) == "claude"
     assert detect_trace_format(mcp_jsonl) == "mcp"
     assert detect_trace_format(generic_jsonl) == "generic-jsonl"
+
+
+@pytest.mark.parametrize(
+    "filename, payload, expected_format",
+    [
+        (
+            "codex-session-meta.jsonl",
+            json.dumps({"type": "session_meta", "payload": {"id": "session-1"}}) + "\n",
+            "codex",
+        ),
+        (
+            "codex-response-item.jsonl",
+            json.dumps(
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Fix bug"}],
+                    },
+                }
+            )
+            + "\n",
+            "codex",
+        ),
+        (
+            "claude.json",
+            json.dumps({"messages": [{"role": "user", "content": "Fix bug"}]}),
+            "claude",
+        ),
+        (
+            "claude.jsonl",
+            json.dumps({"message": {"role": "user", "content": "Fix bug"}}) + "\n",
+            "claude",
+        ),
+        (
+            "mcp.jsonl",
+            json.dumps({"event": "request", "text": "Fix bug"}) + "\n",
+            "mcp",
+        ),
+        (
+            "ci-failure.json",
+            json.dumps(
+                {
+                    "suite": "unit",
+                    "command": "pytest -q",
+                    "exit_code": 1,
+                    "output": "1 failed",
+                }
+            ),
+            "ci",
+        ),
+        (
+            "generic.jsonl",
+            json.dumps({"type": "user_request", "content": "Fix bug"}) + "\n",
+            "generic-jsonl",
+        ),
+    ],
+)
+def test_detect_trace_format_generated_minimal_shapes_are_stable(
+    tmp_path: Path,
+    filename: str,
+    payload: str,
+    expected_format: str,
+):
+    trace = tmp_path / filename
+    trace.write_text(payload, encoding="utf-8")
+    trace_with_leading_blank = tmp_path / f"blank-{filename}"
+    trace_with_leading_blank.write_text("\n\n" + payload, encoding="utf-8")
+
+    assert detect_trace_format(trace) == expected_format
+    assert detect_trace_format(trace_with_leading_blank) == expected_format
 
 
 def test_audit_cli_ingests_claude_trace_format_as_normalized_events(tmp_path: Path):

@@ -3,10 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tugboat.audit.pipeline import _write_canonical_episode
 from tugboat.db import Store
 from tugboat.paths import sidecar_dir
-from tugboat.traces.ingest import ingest_jsonl_trace, ingest_jsonl_trace_as_episode
+from tugboat.traces.ingest import (
+    TRUST_BY_EVENT_TYPE,
+    ingest_jsonl_trace,
+    ingest_jsonl_trace_as_episode,
+    source_trust_for_event_type,
+)
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -56,6 +63,63 @@ def test_ingest_jsonl_trace_assigns_stable_evidence_ids_and_trust(tmp_path: Path
         "untrusted",
     ]
     assert all(event.evidence_id.startswith("ev_") for event in first.events)
+
+
+@pytest.mark.parametrize("event_type, expected_trust", sorted(TRUST_BY_EVENT_TYPE.items()))
+def test_source_trust_mapping_covers_every_known_event_type(
+    event_type: str,
+    expected_trust: str,
+):
+    assert source_trust_for_event_type(event_type) == expected_trust
+
+
+@pytest.mark.parametrize("event_type", ["outcome_label", "verifier_score"])
+def test_generic_jsonl_outcome_assertions_fail_closed_as_untrusted(event_type: str):
+    assert source_trust_for_event_type(event_type, trusted_assertions=False) == "untrusted"
+
+
+def test_ingest_jsonl_trace_evidence_ids_are_stable_for_payload_key_order(
+    tmp_path: Path,
+):
+    first_trace = tmp_path / "first.jsonl"
+    second_trace = tmp_path / "second.jsonl"
+    line_shifted_trace = tmp_path / "line-shifted.jsonl"
+    first_trace.write_text(
+        json.dumps({"type": "tool_result", "tool": "pytest", "exit_code": 0}) + "\n",
+        encoding="utf-8",
+    )
+    second_trace.write_text(
+        json.dumps({"exit_code": 0, "tool": "pytest", "type": "tool_result"}) + "\n",
+        encoding="utf-8",
+    )
+    line_shifted_trace.write_text(
+        "\n" + json.dumps({"type": "tool_result", "tool": "pytest", "exit_code": 0}) + "\n",
+        encoding="utf-8",
+    )
+
+    first = ingest_jsonl_trace(first_trace)
+    second = ingest_jsonl_trace(second_trace)
+    line_shifted = ingest_jsonl_trace(line_shifted_trace)
+
+    assert first.events[0].evidence_id == second.events[0].evidence_id
+    assert line_shifted.events[0].line_number == 2
+    assert line_shifted.events[0].evidence_id != first.events[0].evidence_id
+    assert first.events[0].payload == {
+        "type": "tool_result",
+        "tool": "pytest",
+        "exit_code": 0,
+    }
+
+
+def test_ingest_jsonl_trace_rejects_invalid_json_with_line_number(tmp_path: Path):
+    trace_path = tmp_path / "episode.jsonl"
+    trace_path.write_text(
+        json.dumps({"type": "user_request", "content": "Fix bug"}) + "\n{not-json\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trace line 2 contains invalid JSON"):
+        ingest_jsonl_trace(trace_path)
 
 
 def test_ingest_jsonl_trace_preserves_raw_payload_and_line_number(tmp_path: Path):

@@ -9,11 +9,12 @@ from tugboat.audit.pipeline import detect_trace_format
 from tugboat.traces.adapters import (
     ingest_ci_failure,
     ingest_claude_transcript,
-    ingest_codex_session_bundle,
     ingest_codex_session,
-    ingest_mcp_session_bundle,
+    ingest_codex_session_bundle,
     ingest_mcp_session,
+    ingest_mcp_session_bundle,
 )
+from tugboat.traces.ingest import ingest_jsonl_trace
 
 FIXTURE_TRACE_DIR = Path(__file__).parent / "fixtures" / "traces"
 
@@ -142,6 +143,38 @@ def test_ingest_codex_session_rejects_non_object_jsonl_line_with_line_number(
 
     with pytest.raises(ValueError, match="trace line 2 must be a JSON object"):
         ingest_codex_session(session)
+
+
+@pytest.mark.parametrize(
+    "ingest_bundle",
+    [ingest_codex_session_bundle, ingest_mcp_session_bundle, ingest_jsonl_trace],
+)
+@pytest.mark.parametrize(
+    "bad_line, expected_error",
+    [
+        (json.dumps(["not", "an", "object"]), "trace line 2 must be a JSON object"),
+        ("{not-json", "trace line 2 contains invalid JSON"),
+    ],
+)
+def test_jsonl_trace_ingestors_report_malformed_line_numbers(
+    tmp_path: Path,
+    ingest_bundle,
+    bad_line: str,
+    expected_error: str,
+):
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        (
+            json.dumps({"type": "user_request", "content": "Fix bug"})
+            + "\n"
+            + bad_line
+            + "\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=expected_error):
+        ingest_bundle(trace)
 
 
 def test_ingest_codex_large_response_item_trace_preserves_order_and_evidence_ids(
