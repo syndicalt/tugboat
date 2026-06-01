@@ -1564,6 +1564,24 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "duplicate_rule_estimated_tokens": {"type": "integer"},
                     "retrieval_pack_estimated_tokens": {"type": "integer"},
                     "retrieval_pack_file_count": {"type": "integer"},
+                    "token_budget": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "instruction_file_estimated_tokens",
+                            "active_context_estimated_tokens",
+                            "retrieval_pack_estimated_tokens",
+                        ],
+                        "properties": {
+                            "instruction_file_estimated_tokens": {"type": "integer"},
+                            "active_context_estimated_tokens": {"type": "integer"},
+                            "retrieval_pack_estimated_tokens": {"type": "integer"},
+                        },
+                    },
+                    "token_budget_violations": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
                     "instruction_files": {
                         "type": "array",
                         "items": {

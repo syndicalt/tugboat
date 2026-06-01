@@ -558,7 +558,34 @@ def test_generate_harness_report_includes_token_efficiency_metrics(tmp_path: Pat
         ],
         "retrieval_pack_estimated_tokens": 49,
         "retrieval_pack_file_count": 2,
+        "token_budget": {
+            "active_context_estimated_tokens": 12000,
+            "instruction_file_estimated_tokens": 4000,
+            "retrieval_pack_estimated_tokens": 12000,
+        },
+        "token_budget_violations": [],
     }
+
+
+def test_generate_harness_report_flags_large_instruction_token_budget(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\n" + "token " * 4001,
+        encoding="utf-8",
+    )
+
+    report = generate_harness_report(repo)
+
+    assert report.token_metrics["token_budget"] == {
+        "active_context_estimated_tokens": 12000,
+        "instruction_file_estimated_tokens": 4000,
+        "retrieval_pack_estimated_tokens": 12000,
+    }
+    assert report.token_metrics["token_budget_violations"] == [
+        "AGENTS.md estimated at 4004 tokens exceeds instruction file budget 4000."
+    ]
 
 
 def test_generate_harness_report_flags_recurring_failures_without_docs(tmp_path: Path):

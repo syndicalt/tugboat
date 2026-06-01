@@ -696,12 +696,15 @@ def _trace_sample(trace: Path) -> dict | list[dict]:
 
     rows: list[dict] = []
     with trace.open(encoding="utf-8") as handle:
-        for line in handle:
+        for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
-            payload = json.loads(line)
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"trace line {line_number} contains invalid JSON") from error
             if not isinstance(payload, dict):
-                raise ValueError("trace line must be a JSON object")
+                raise ValueError(f"trace line {line_number} must be a JSON object")
             rows.append(payload)
             if len(rows) >= 20:
                 break

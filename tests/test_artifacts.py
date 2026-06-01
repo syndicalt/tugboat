@@ -1371,6 +1371,12 @@ def test_validate_harness_report_artifact_accepts_current_schema():
                 "duplicate_rule_estimated_tokens": 4,
                 "retrieval_pack_estimated_tokens": 20,
                 "retrieval_pack_file_count": 2,
+                "token_budget": {
+                    "instruction_file_estimated_tokens": 4000,
+                    "active_context_estimated_tokens": 12000,
+                    "retrieval_pack_estimated_tokens": 12000,
+                },
+                "token_budget_violations": [],
                 "instruction_files": [
                     {"path": "AGENTS.md", "estimated_tokens": 12, "line_count": 3}
                 ],

@@ -242,6 +242,9 @@ def _repo_local_markdown_refs(text: str) -> list[MarkdownRef]:
 
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]")
+INSTRUCTION_FILE_TOKEN_BUDGET = 4000
+ACTIVE_CONTEXT_TOKEN_BUDGET = 12000
+RETRIEVAL_PACK_TOKEN_BUDGET = 12000
 
 
 def _token_metrics(repo: Path, knowledge_map: dict[str, list[str]]) -> dict[str, object]:
@@ -283,15 +286,60 @@ def _token_metrics(repo: Path, knowledge_map: dict[str, list[str]]) -> dict[str,
         {"path": path, "estimated_tokens": active_files[path]}
         for path in sorted(active_files)
     ]
+    retrieval_pack_tokens = sum(active_files.values())
+    budget = {
+        "instruction_file_estimated_tokens": INSTRUCTION_FILE_TOKEN_BUDGET,
+        "active_context_estimated_tokens": ACTIVE_CONTEXT_TOKEN_BUDGET,
+        "retrieval_pack_estimated_tokens": RETRIEVAL_PACK_TOKEN_BUDGET,
+    }
+    budget_violations = _token_budget_violations(
+        instruction_files=instruction_files,
+        active_context_tokens=retrieval_pack_tokens,
+        retrieval_pack_tokens=retrieval_pack_tokens,
+        budget=budget,
+    )
     return {
         "instruction_corpus_estimated_tokens": instruction_total,
-        "active_context_estimated_tokens": sum(active_files.values()),
+        "active_context_estimated_tokens": retrieval_pack_tokens,
         "duplicate_rule_estimated_tokens": duplicate_rule_tokens,
         "instruction_files": sorted(instruction_files, key=lambda item: str(item["path"])),
         "active_context_files": active_context_files,
-        "retrieval_pack_estimated_tokens": sum(active_files.values()),
+        "retrieval_pack_estimated_tokens": retrieval_pack_tokens,
         "retrieval_pack_file_count": len(active_context_files),
+        "token_budget": budget,
+        "token_budget_violations": budget_violations,
     }
+
+
+def _token_budget_violations(
+    *,
+    instruction_files: list[dict[str, object]],
+    active_context_tokens: int,
+    retrieval_pack_tokens: int,
+    budget: dict[str, int],
+) -> list[str]:
+    violations: list[str] = []
+    instruction_file_budget = budget["instruction_file_estimated_tokens"]
+    for item in sorted(instruction_files, key=lambda value: str(value["path"])):
+        estimated_tokens = int(item["estimated_tokens"])
+        if estimated_tokens > instruction_file_budget:
+            violations.append(
+                f"{item['path']} estimated at {estimated_tokens} tokens exceeds "
+                f"instruction file budget {instruction_file_budget}."
+            )
+    active_context_budget = budget["active_context_estimated_tokens"]
+    if active_context_tokens > active_context_budget:
+        violations.append(
+            f"active context estimated at {active_context_tokens} tokens exceeds "
+            f"active context budget {active_context_budget}."
+        )
+    retrieval_pack_budget = budget["retrieval_pack_estimated_tokens"]
+    if retrieval_pack_tokens > retrieval_pack_budget:
+        violations.append(
+            f"retrieval pack estimated at {retrieval_pack_tokens} tokens exceeds "
+            f"retrieval pack budget {retrieval_pack_budget}."
+        )
+    return violations
 
 
 def _estimated_tokens(text: str) -> int:

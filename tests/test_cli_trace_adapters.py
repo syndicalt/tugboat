@@ -498,6 +498,42 @@ def test_audit_cli_reports_adapter_jsonl_non_object_line_without_traceback(
     assert "Traceback" not in output
 
 
+def test_audit_cli_auto_trace_format_reports_non_object_sample_line_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        json.dumps({"type": "user_request", "content": "Fix bug"}) + "\n"
+        + json.dumps(["not", "an", "object"])
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "auto",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "audit blocked: invalid trace: trace line 2 must be a JSON object" in output
+    assert "Traceback" not in output
+
+
 def test_audit_cli_reports_adapter_jsonl_invalid_json_line_without_traceback(
     tmp_path: Path,
     capsys,
@@ -532,6 +568,41 @@ def test_audit_cli_reports_adapter_jsonl_invalid_json_line_without_traceback(
                 str(trace),
                 "--trace-format",
                 "codex",
+                "--mock-llmff-inspect",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "audit blocked: invalid trace: trace line 2 contains invalid JSON" in output
+    assert "Traceback" not in output
+
+
+def test_audit_cli_auto_trace_format_reports_invalid_json_sample_line_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "CODEX.md").write_text("# Rules\n\nUse tests.\n", encoding="utf-8")
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        json.dumps({"type": "user_request", "content": "Fix bug"}) + "\n"
+        + "{not-json\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "audit",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(trace),
+                "--trace-format",
+                "auto",
                 "--mock-llmff-inspect",
             ]
         )
