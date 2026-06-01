@@ -109,6 +109,20 @@ def test_audit_missing_trace_returns_clear_error_without_traceback(tmp_path: Pat
     assert not (repo / ".sidecar" / "runs").exists()
 
 
+def test_audit_trace_directory_returns_clear_error_without_traceback(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    trace_dir = repo / "traces"
+    trace_dir.mkdir()
+
+    assert main(["audit", "--repo", str(repo), "--trace", str(trace_dir)]) == 1
+
+    output = capsys.readouterr().out
+    assert f"audit blocked: trace path is not a file: {trace_dir}" in output
+    assert "Traceback" not in output
+    assert not (repo / ".sidecar" / "runs").exists()
+
+
 def test_optimize_missing_trace_returns_clear_error_without_traceback(tmp_path: Path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -118,6 +132,26 @@ def test_optimize_missing_trace_returns_clear_error_without_traceback(tmp_path: 
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace file not found: {missing}" in output
+    assert "Traceback" not in output
+    assert not (repo / ".sidecar" / "runs").exists()
+
+
+def test_optimize_trace_directory_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    trace_dir = repo / "traces"
+    trace_dir.mkdir()
+
+    assert (
+        main(["optimize", "--repo", str(repo), "--trace", str(trace_dir), "--suite", "all"])
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert f"audit blocked: trace path is not a file: {trace_dir}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
@@ -184,6 +218,40 @@ def test_optimize_missing_train_trace_returns_clear_error_without_traceback(
 
     output = capsys.readouterr().out
     assert f"audit blocked: trace file not found: {missing_train}" in output
+    assert "Traceback" not in output
+    assert not (repo / ".sidecar" / "runs").exists()
+
+
+def test_optimize_train_trace_directory_returns_clear_error_without_traceback(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    main_trace = repo / "trace.jsonl"
+    main_trace.write_text('{"type":"user_request","text":"Fix"}\n', encoding="utf-8")
+    train_dir = repo / "traces"
+    train_dir.mkdir()
+
+    assert (
+        main(
+            [
+                "optimize",
+                "--repo",
+                str(repo),
+                "--trace",
+                str(main_trace),
+                "--train-trace",
+                str(train_dir),
+                "--suite",
+                "all",
+            ]
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert f"audit blocked: trace path is not a file: {train_dir}" in output
     assert "Traceback" not in output
     assert not (repo / ".sidecar" / "runs").exists()
 
