@@ -3616,6 +3616,8 @@ def _auto_apply_shadow_sources_match(
     if not bool(_auto_apply_candidate_preview_check(repo, run_dir, candidate)["passed"]):
         return False
     expected = _auto_apply_source_artifacts(repo, run_dir, candidate=candidate)
+    if set(raw_sources) != set(expected):
+        return False
     for key, expected_ref in expected.items():
         actual_ref = raw_sources.get(key)
         if not isinstance(actual_ref, dict):
@@ -3644,6 +3646,7 @@ def _auto_apply_source_artifacts(
         ),
         "candidate_preview_file": _auto_apply_artifact_ref(repo, preview_path),
         "eval_report": _auto_apply_artifact_ref(repo, run_dir / "eval-report.json"),
+        "policy": _auto_apply_policy_artifact_ref(repo),
         "policy_gate": _auto_apply_artifact_ref(repo, run_dir / "policy-gate.json"),
     }
 
@@ -3652,6 +3655,16 @@ def _auto_apply_artifact_ref(repo: Path, path: Path) -> dict[str, str]:
     return {
         "path": _relative_repo_path(repo, path),
         "sha256": CandidatePatch.hash_file(path),
+    }
+
+
+def _auto_apply_policy_artifact_ref(repo: Path) -> dict[str, str]:
+    path = sidecar_dir(repo) / "policy.yaml"
+    if path.exists():
+        return _auto_apply_artifact_ref(repo, path)
+    return {
+        "path": ".sidecar/policy.yaml",
+        "sha256": hashlib.sha256(b"").hexdigest(),
     }
 
 

@@ -359,6 +359,10 @@ def test_run_offline_eval_suite_all_reports_candidate_instruction_token_delta(
     assert report.metrics["instruction_tokens_before"] == 5
     assert report.metrics["instruction_tokens_after"] == 8
     assert report.metrics["instruction_token_delta"] == 3
+    assert report.metrics["instruction_token_growth_reason"] == (
+        "instruction_token_growth_without_held_out_improvement"
+    )
+    assert report.metrics["instruction_token_growth_acceptable"] == 0
 
 
 def test_run_offline_eval_suite_all_rejects_noop_preview_without_held_out_improvement(
@@ -391,7 +395,7 @@ def test_run_offline_eval_suite_all_accepts_preview_with_held_out_improvement(
     preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
     preview_root.mkdir(parents=True)
     (preview_root / "CODEX.md").write_text(
-        "# Policy\n\nYou must run tests before final answers.\n",
+        "# Policy\n\nYou must run tests before final answers and cite verification evidence.\n",
         encoding="utf-8",
     )
 
@@ -401,7 +405,33 @@ def test_run_offline_eval_suite_all_accepts_preview_with_held_out_improvement(
     assert report.trigger_score == 0.0
     assert report.held_out_score == 1.0
     assert report.metrics["held_out_improved"] == 1
+    assert report.metrics["instruction_token_growth_reason"] == (
+        "instruction_token_growth_with_eval_improvement"
+    )
+    assert report.metrics["instruction_token_growth_acceptable"] == 1
     assert report.recommendation == "accept"
+
+
+def test_run_offline_eval_suite_all_reports_token_reduction_reason(
+    tmp_path: Path,
+):
+    (tmp_path / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers and cite verification evidence.\n",
+        encoding="utf-8",
+    )
+    _install_eval_fixtures(tmp_path, "passing")
+    preview_root = tmp_path / ".sidecar" / "runs" / "run-1" / "candidate-preview"
+    preview_root.mkdir(parents=True)
+    (preview_root / "CODEX.md").write_text(
+        "# Policy\n\nYou must run tests before final answers.\n",
+        encoding="utf-8",
+    )
+
+    report = run_offline_eval_suite(tmp_path, suite_id="all", preview_root=preview_root)
+
+    assert report.metrics["instruction_token_delta"] < 0
+    assert report.metrics["instruction_token_growth_reason"] == "instruction_token_reduction"
+    assert report.metrics["instruction_token_growth_acceptable"] == 1
 
 
 def test_run_offline_eval_suite_all_rejects_incomplete_phase_4_fixture_corpus(

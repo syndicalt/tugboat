@@ -48,7 +48,7 @@ class EvalCaseRecord:
 class OfflineEvalReport:
     suite_id: str
     passed: bool
-    metrics: dict[str, int]
+    metrics: dict[str, object]
     trigger_score: float
     held_out_score: float
     governance_passed: bool
@@ -247,6 +247,14 @@ def run_offline_eval_suite(
             passed = False
         if missing_phase_4_fixture_categories:
             passed = False
+    metrics.update(
+        _instruction_token_growth_metrics(
+            instruction_token_delta=int(metrics["instruction_token_delta"]),
+            held_out_score=held_out_score,
+            trigger_score=trigger_score,
+            governance_passed=governance_regressions == 0,
+        )
+    )
     return OfflineEvalReport(
         suite_id=suite_id,
         passed=passed,
@@ -1501,6 +1509,39 @@ def _instruction_token_delta_metrics(
         "instruction_tokens_before": before_tokens,
         "instruction_tokens_after": after_tokens,
         "instruction_token_delta": after_tokens - before_tokens,
+    }
+
+
+def _instruction_token_growth_metrics(
+    *,
+    instruction_token_delta: int,
+    held_out_score: float,
+    trigger_score: float,
+    governance_passed: bool,
+) -> dict[str, object]:
+    if instruction_token_delta < 0:
+        return {
+            "instruction_token_growth_reason": "instruction_token_reduction",
+            "instruction_token_growth_acceptable": 1,
+        }
+    if instruction_token_delta == 0:
+        return {
+            "instruction_token_growth_reason": "no_instruction_token_growth",
+            "instruction_token_growth_acceptable": 1,
+        }
+    if not governance_passed:
+        return {
+            "instruction_token_growth_reason": "instruction_token_growth_governance_failed",
+            "instruction_token_growth_acceptable": 0,
+        }
+    if held_out_score > trigger_score:
+        return {
+            "instruction_token_growth_reason": "instruction_token_growth_with_eval_improvement",
+            "instruction_token_growth_acceptable": 1,
+        }
+    return {
+        "instruction_token_growth_reason": "instruction_token_growth_without_held_out_improvement",
+        "instruction_token_growth_acceptable": 0,
     }
 
 

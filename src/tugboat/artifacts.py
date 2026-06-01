@@ -2762,6 +2762,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "candidate_preview_manifest",
                     "candidate_preview_file",
                     "eval_report",
+                    "policy",
                     "policy_gate",
                 ],
                 "properties": {
@@ -2770,6 +2771,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "candidate_preview_manifest": _artifact_ref_schema(),
                     "candidate_preview_file": _artifact_ref_schema(),
                     "eval_report": _artifact_ref_schema(),
+                    "policy": _artifact_ref_schema(),
                     "policy_gate": _artifact_ref_schema(),
                 },
             },

@@ -2573,6 +2573,55 @@ def test_auto_apply_commit_rejects_stale_shadow_source_artifacts_without_mutatio
     assert decisions[0]["reasons"] == ["shadow_evidence_stale"]
 
 
+def test_auto_apply_commit_rejects_shadow_when_policy_file_changes_without_mutation(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    base_branch = _git(repo, "branch", "--show-current")
+    generated_branch = "tugboat/20260525t000000000000z/candidate-7/codex-md"
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+    policy_path = repo / ".sidecar" / "policy.yaml"
+    policy_path.write_text(
+        policy_path.read_text(encoding="utf-8") + "\n# reviewed after shadow\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert "apply blocked: auto-apply shadow evidence stale" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "branch", "--show-current") == base_branch
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
 def test_auto_apply_commit_blocks_when_staged_file_does_not_match_evaluated_preview(
     tmp_path: Path,
     capsys,

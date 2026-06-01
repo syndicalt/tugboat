@@ -114,7 +114,7 @@ Manual `--reason`, `--category`, and `--failure-pattern` fields remain available
 
 ## Eval Reports
 
-`tugboat eval --repo . --candidate latest --suite all` writes `.sidecar/runs/<run-id>/eval-report.json`. For `SKILL.md` preview rewrites, the report includes `skill_report` with deterministic checks for trigger preservation, executability, ambiguity, overfit risk, token footprint, required sections, forbidden sections, and safety weakening. A failing `skill_report` forces `passed: false` and `recommendation: reject`.
+`tugboat eval --repo . --candidate latest --suite all` writes `.sidecar/runs/<run-id>/eval-report.json`. Offline eval metrics include `instruction_token_delta`, `instruction_token_growth_reason`, and `instruction_token_growth_acceptable` so reviewers can tell whether token growth was paired with held-out improvement and governance safety. For `SKILL.md` preview rewrites, the report includes `skill_report` with deterministic checks for trigger preservation, executability, ambiguity, overfit risk, token footprint, required sections, forbidden sections, and safety weakening. A failing `skill_report` forces `passed: false` and `recommendation: reject`.
 
 ## Auto-Apply
 
