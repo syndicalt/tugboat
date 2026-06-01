@@ -28,6 +28,7 @@ from tugboat.mcp import (
     tugboat_candidate_report,
     tugboat_decision_trace,
     tugboat_harness_findings,
+    tugboat_harness_health,
     tugboat_index_summary,
     tugboat_latest_audit,
     tugboat_instruction_graph,
@@ -654,6 +655,86 @@ def test_harness_findings_redact_raw_instruction_rule_text(tmp_path: Path):
     assert "private customer prompt alpha" not in serialized
     assert "Duplicate instruction rule appears 2 times" in serialized
     assert "[REDACTED:harness_rule_text]" in serialized
+
+
+def test_harness_health_returns_sanitized_read_only_report(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    (repo / "AGENTS.md").write_text(
+        "# Agent Map\n\n"
+        "See [Missing](docs/MISSING.md).\n"
+        "MUST keep private customer prompt alpha internal.\n"
+        "MUST keep private customer prompt alpha internal.\n",
+        encoding="utf-8",
+    )
+    (sidecar_dir(repo) / "recurring-failures.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "failures": [
+                    {
+                        "failure_id": "fail-1",
+                        "summary": "token sk-thissecretkeyvalue1234567890 leaked",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = tugboat_harness_health(repo)
+
+    assert result["passed"] is False
+    assert result["summary"] == {
+        "missing_doc_count": 1,
+        "stale_doc_count": 0,
+        "orphaned_runbook_count": 0,
+        "recurring_failure_without_doc_count": 1,
+        "doc_gardening_task_count": 2,
+    }
+    assert result["knowledge_map"] == {"AGENTS.md": ["docs/MISSING.md"]}
+    assert result["missing_docs"] == ["docs/MISSING.md"]
+    assert result["recurring_failures_without_docs"] == [
+        "fail-1: token [REDACTED:openai_api_key] leaked"
+    ]
+    assert result["token_metrics"]["instruction_corpus_estimated_tokens"] > 0
+    serialized = json.dumps(result, sort_keys=True)
+    assert "private customer prompt alpha" not in serialized
+    assert "sk-thissecret" not in serialized
+    assert not (sidecar_dir(repo) / "harness-report.json").exists()
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_harness_health"
+
+
+def test_bound_read_only_mcp_stdio_includes_harness_health(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
+    (tmp_path / "AGENTS.md").write_text(
+        "# Agent Map\n\nSee [Runbook](docs/runbook.md).\n",
+        encoding="utf-8",
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "runbook.md").write_text(
+        "---\nowner: platform\nverification_status: verified\n---\n\n# Runbook\n",
+        encoding="utf-8",
+    )
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "tugboat_harness_health", "arguments": {}},
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    payload = responses[0]["result"]["content"][0]["json"]
+    assert payload["knowledge_map"] == {"AGENTS.md": ["docs/runbook.md"]}
+    assert "token_metrics" in payload
 
 
 def test_latest_runs_limits_results_and_returns_artifact_refs(tmp_path: Path):
@@ -3112,6 +3193,7 @@ def test_mcp_tool_registry_exposes_only_approved_non_mutating_tools():
         "tugboat_daemon_status",
         "tugboat_decision_trace",
         "tugboat_harness_findings",
+        "tugboat_harness_health",
         "tugboat_index_summary",
         "tugboat_instruction_graph",
         "tugboat_latest_audit",

@@ -16,7 +16,7 @@ from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.queue import DaemonQueue
 from tugboat.daemon.service import daemon_status, default_kill_switch
 from tugboat.db import Store
-from tugboat.harness.checks import check_harness_legibility
+from tugboat.harness.checks import check_harness_legibility, generate_harness_report
 from tugboat.ops.observability import summarize_sidecar_observability
 from tugboat.ops.retention import apply_retention_policy
 from tugboat.paths import ensure_private_dir, mark_private_file, runs_dir, sidecar_dir
@@ -90,6 +90,7 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         ("repo", "decision"),
     ),
     "tugboat_harness_findings": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_harness_health": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_index_summary": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_instruction_graph": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_latest_audit": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
@@ -406,6 +407,42 @@ def tugboat_harness_findings(repo: str | Path) -> dict[str, Any]:
         }
 
     return _audit_call(repo_path, "tugboat_harness_findings", {}, read)
+
+
+def tugboat_harness_health(repo: str | Path) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+
+    def read() -> dict[str, Any]:
+        report = generate_harness_report(repo_path)
+        passed = not (
+            report.missing_docs
+            or report.stale_docs
+            or report.orphaned_runbooks
+            or report.recurring_failures_without_docs
+        )
+        return {
+            "passed": passed,
+            "summary": {
+                "missing_doc_count": len(report.missing_docs),
+                "stale_doc_count": len(report.stale_docs),
+                "orphaned_runbook_count": len(report.orphaned_runbooks),
+                "recurring_failure_without_doc_count": len(
+                    report.recurring_failures_without_docs
+                ),
+                "doc_gardening_task_count": len(report.doc_gardening_tasks),
+            },
+            "knowledge_map": redact_payload(report.knowledge_map),
+            "missing_docs": _sanitize_harness_items(report.missing_docs),
+            "stale_docs": _sanitize_harness_items(report.stale_docs),
+            "orphaned_runbooks": _sanitize_harness_items(report.orphaned_runbooks),
+            "recurring_failures_without_docs": _sanitize_harness_items(
+                report.recurring_failures_without_docs
+            ),
+            "doc_gardening_tasks": _sanitize_harness_items(report.doc_gardening_tasks),
+            "token_metrics": redact_payload(report.token_metrics),
+        }
+
+    return _audit_call(repo_path, "tugboat_harness_health", {}, read)
 
 
 def tugboat_latest_runs(repo: str | Path, limit: int = 10) -> dict[str, Any]:
@@ -1134,6 +1171,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_daemon_status": tugboat_daemon_status,
     "tugboat_decision_trace": tugboat_decision_trace,
     "tugboat_harness_findings": tugboat_harness_findings,
+    "tugboat_harness_health": tugboat_harness_health,
     "tugboat_index_summary": tugboat_index_summary,
     "tugboat_instruction_graph": tugboat_instruction_graph,
     "tugboat_latest_audit": tugboat_latest_audit,
@@ -1631,6 +1669,10 @@ def _sanitize_harness_finding(finding: str) -> str:
     if redacted.startswith(conflict_prefix):
         return f"{conflict_prefix}[REDACTED:harness_rule_text]"
     return redacted
+
+
+def _sanitize_harness_items(items: list[str]) -> list[str]:
+    return [_sanitize_harness_finding(item) for item in items]
 
 
 def _redact_after_delimiter(value: str, delimiter: str) -> str:
