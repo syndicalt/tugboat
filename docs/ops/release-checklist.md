@@ -34,6 +34,15 @@ echo "installed tugboat wheel: dist/<wheel>.whl"
 .sidecar/ci/install-smoke-venv/bin/tugboat doctor
 .sidecar/ci/install-smoke-venv/bin/tugboat index --repo . --check
 .sidecar/ci/install-smoke-venv/bin/tugboat harness check --repo .
+python - <<'PY'
+from pathlib import Path
+repo = Path(".sidecar/ci/proposal-smoke-repo")
+repo.mkdir(parents=True, exist_ok=True)
+(repo / "AGENTS.md").write_text("# Agent Instructions\n\nKeep changes reviewed.\n", encoding="utf-8")
+PY
+.sidecar/ci/install-smoke-venv/bin/tugboat init --repo .sidecar/ci/proposal-smoke-repo
+.sidecar/ci/install-smoke-venv/bin/tugboat index --repo .sidecar/ci/proposal-smoke-repo
+.sidecar/ci/install-smoke-venv/bin/tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all
 tugboat ops release-manifest --repo . --wheel dist/<wheel>.whl --commit <sha> --ci-url <url> --approver <name> --security-review-decision approved_proposal_only --security-review-critical-high-findings 0 --evidence .sidecar/ci/doctor.txt --evidence .sidecar/ci/index-check.txt --evidence .sidecar/ci/harness.txt --evidence .sidecar/ci/ci-report.json --evidence .sidecar/ci/security-review.md --evidence .sidecar/ci/pytest-coverage.log --evidence .sidecar/ci/build-wheel.txt --evidence .sidecar/ci/twine-check.txt --evidence .sidecar/ci/install-smoke.txt
 ```
 
@@ -42,6 +51,7 @@ Before tagging:
 - Confirm `tugboat doctor` reports `proposal_only` and `auto_apply: disabled`.
 - Confirm CI retained the pytest log with total coverage at or above 90%, `ci-report.json`, security-review evidence, harness output, and release artifact manifest.
 - Confirm the built wheel installs in a clean virtual environment and the installed `tugboat doctor`, `tugboat index --repo . --check`, and `tugboat harness check --repo .` commands run.
+- Confirm the installed proposal-loop smoke in `.sidecar/ci/proposal-smoke-repo` writes `.sidecar/runs/<run-id>/audit.json`, `candidate.json`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
 - Confirm `.sidecar/ops/release-artifact-manifest.json` records the wheel hash, retained evidence, commit, CI URL, approver, and security review decision.
 - Confirm the security review for the release has no open critical or high findings.
 - Confirm generated artifacts under `.sidecar/runs` contain no raw secrets.

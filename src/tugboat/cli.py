@@ -365,7 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--repo", default=".")
 
     init = subcommands.add_parser("init")
-    init.add_argument("--repo", required=True)
+    init.add_argument("--repo", default=".")
 
     status = subcommands.add_parser("status")
     status.add_argument("--repo", required=True)
@@ -4043,6 +4043,20 @@ def run_optimize_workflow(
         eval_exit_code=eval_result.exit_code,
         unseen_suites=unseen_suites,
     )
+    if exit_code == 0:
+        try:
+            report_path = write_report(
+                repo,
+                trigger_run_id,
+                candidate=_candidate_from_artifacts(run_dir),
+                decision=_decision_from_artifact(run_dir),
+                eval_report_path=run_dir / "eval-report.json",
+            )
+        except (ArtifactValidationError, FileNotFoundError, KeyError, SecretScanError, ValueError) as error:
+            message = f"optimize blocked: report generation failed: {error}"
+            print(message)
+            return OptimizeWorkflowResult(1, run_dir, message)
+        print(f"report: {report_path}")
     return OptimizeWorkflowResult(exit_code, run_dir, eval_result.message)
 
 

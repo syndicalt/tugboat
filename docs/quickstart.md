@@ -32,7 +32,7 @@ The default posture should be proposal-only with auto-apply disabled.
 Bootstrap proposal-only local policy, then index the current instruction corpus:
 
 ```bash
-tugboat init --repo .
+tugboat init
 tugboat index --repo .
 ```
 

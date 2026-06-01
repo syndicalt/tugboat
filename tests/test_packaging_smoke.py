@@ -43,14 +43,13 @@ def test_built_wheel_runs_fresh_repo_proposal_loop(tmp_path: Path):
     optimize_output = _run_installed(
         tugboat, "optimize", "--repo", str(repo), "--trace", str(trace), "--suite", "all"
     )
-    report_output = _run_installed(tugboat, "report", "--repo", str(repo), "--run", "latest")
 
     assert "tugboat: ok" in doctor_output
     assert "initialized:" in init_output
     assert "indexed documents: 1" in index_output
     assert "harness: ok" in harness_output
     assert "optimization: needs_review" in optimize_output
-    assert "report:" in report_output
+    assert "report:" in optimize_output
 
     assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
     run_dir = sorted((repo / ".sidecar" / "runs").iterdir())[-1]

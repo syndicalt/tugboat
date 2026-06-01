@@ -90,6 +90,17 @@ def test_init_bootstraps_proposal_only_policy_and_sidecar_gitignore(
     )
 
 
+def test_init_defaults_to_current_directory(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["init"]) == 0
+
+    assert "initialized: .sidecar/policy.yaml" in capsys.readouterr().out
+    policy = yaml.safe_load((tmp_path / ".sidecar" / "policy.yaml").read_text(encoding="utf-8"))
+    assert policy["mode"] == "proposal_only"
+    assert policy["mcp"]["allowed_repositories"] == [str(tmp_path.resolve())]
+
+
 def test_init_policy_supports_bound_read_only_mcp_status(tmp_path: Path):
     assert main(["init", "--repo", str(tmp_path)]) == 0
 
