@@ -1885,6 +1885,8 @@ def _write_release_artifact_manifest(
             "installed tugboat doctor",
             "installed tugboat index --repo . --check",
             "installed tugboat harness check --repo .",
+            "installed tugboat init --repo .sidecar/ci/proposal-smoke-repo",
+            "installed tugboat index --repo .sidecar/ci/proposal-smoke-repo",
             "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all",
         ],
         "retained_evidence": retained_evidence,
@@ -1961,6 +1963,9 @@ def _validate_release_evidence_content(
             or not _contains_installed_index_success(lowered)
             or "installed tugboat harness check --repo ." not in lowered
             or "harness: ok" not in lowered
+            or "installed tugboat init --repo .sidecar/ci/proposal-smoke-repo" not in lowered
+            or "initialized: .sidecar/policy.yaml" not in lowered
+            or "installed tugboat index --repo .sidecar/ci/proposal-smoke-repo" not in lowered
             or "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all"
             not in lowered
             or "optimization:" not in lowered
@@ -5927,6 +5932,8 @@ def _print_decision_inspection_summary(trace_path: Path) -> None:
         print(f"review_rejection: {summary}")
     for summary in _decision_trace_rejected_edit_memory_summaries(payload):
         print(f"rejected_edit_memory: {summary}")
+    for summary in _decision_trace_rejected_cluster_memory_summaries(payload):
+        print(f"rejected_cluster_memory: {summary}")
     print(f"highest_impact: {_decision_trace_highest_impact_summary(trace_path, artifacts)}")
     next_artifact = artifacts.get("report") or artifacts.get("candidate_diff") or trace_path.as_posix()
     print(f"review_next: inspect {next_artifact}")
@@ -6104,6 +6111,34 @@ def _decision_trace_rejected_edit_memory_summaries(payload: dict[str, object]) -
             f"category={memory_payload.get('category', '')} "
             f"failure_pattern={memory_payload.get('failure_pattern', '')} "
             f"suppression={memory_payload.get('future_proposal_suppression_signal', '')}"
+        )
+    return summaries
+
+
+def _decision_trace_rejected_cluster_memory_summaries(payload: dict[str, object]) -> list[str]:
+    candidate = _json_object_field(payload, "candidate")
+    candidate_id = str(candidate.get("candidate_id", ""))
+    optimizer_memory = payload.get("optimizer_memory", [])
+    if not isinstance(optimizer_memory, list):
+        return []
+    summaries: list[str] = []
+    for record in optimizer_memory:
+        if not isinstance(record, dict) or record.get("memory_type") != "rejected_cluster":
+            continue
+        memory_payload = record.get("payload", {})
+        if not isinstance(memory_payload, dict):
+            continue
+        if candidate_id and not _memory_payload_matches_candidate(memory_payload, candidate_id):
+            continue
+        evidence_refs = memory_payload.get("evidence_refs", [])
+        if not isinstance(evidence_refs, list):
+            evidence_refs = []
+        summaries.append(
+            f"cluster={memory_payload.get('cluster_id', '')} "
+            f"evidence_refs={','.join(str(ref) for ref in evidence_refs)} "
+            f"category={memory_payload.get('category', '')} "
+            f"failure_pattern={memory_payload.get('failure_pattern', '')} "
+            f"reason={memory_payload.get('rejection_reason', '')}"
         )
     return summaries
 

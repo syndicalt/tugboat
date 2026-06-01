@@ -50,12 +50,11 @@ llmff:
 ```
 
 ```bash
-tugboat audit --repo . --trace traces/example.jsonl
-tugboat propose --repo . --audit latest
+tugboat optimize --repo . --trace traces/example.jsonl --suite all
 tugboat report --repo . --run latest
 ```
 
-Review the generated `.sidecar/runs/<run-id>/candidate.diff` before applying anything manually. Proposal-only adoption is successful when the team can inspect the report and reject or copy changes by hand.
+Review the generated `.sidecar/runs/<run-id>/candidate.diff` before applying anything manually. Proposal-only adoption is successful when the team can inspect `audit.json`, `candidate.json`, `eval-report.json`, `optimization-summary.json`, and `report.md`, then reject or copy changes by hand.
 Do not use `--mock-llmff-inspect` for this loop; mock audit output is intentionally rejected by `propose`.
 
 ## Stop Criteria

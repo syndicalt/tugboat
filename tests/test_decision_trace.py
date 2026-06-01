@@ -517,6 +517,34 @@ def test_inspect_decision_summarizes_human_rejection_memory_without_payloads(
                 "source_refs": "candidate:999",
             },
         )
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_cluster",
+            key="rejected_cluster:drift-1",
+            payload={
+                "category": "bounded_edit_quality",
+                "cluster_id": "drift-1",
+                "evidence_refs": ["ev-1", "ev-2"],
+                "failure_pattern": "cluster was too broad",
+                "rejection_reason": "too_broad",
+                "review_actor": "alice",
+                "source_refs": [f"candidate:{candidate_id}", "cluster:drift-1"],
+            },
+        )
+        store.record_optimizer_memory(
+            repo_path=str(repo),
+            memory_type="rejected_cluster",
+            key="rejected_cluster:drift-2",
+            payload={
+                "category": "policy_regression",
+                "cluster_id": "drift-2",
+                "evidence_refs": ["ev-secret"],
+                "failure_pattern": "unrelated cluster memory",
+                "rejection_reason": "safety_weakening",
+                "review_actor": "mallory",
+                "source_refs": ["candidate:999", "cluster:drift-2"],
+            },
+        )
 
     assert main(["inspect-decision", "--repo", str(repo), "--decision", "latest"]) == 0
 
@@ -527,11 +555,18 @@ def test_inspect_decision_summarizes_human_rejection_memory_without_payloads(
         "category=bounded_edit_quality failure_pattern=edit exceeds requested scope "
         "suppression=suppress_matching_bounded_edit_fingerprint"
     ) in output
+    assert (
+        "rejected_cluster_memory: cluster=drift-1 evidence_refs=ev-1,ev-2 "
+        "category=bounded_edit_quality failure_pattern=cluster was too broad "
+        "reason=too_broad"
+    ) in output
     assert "payload_snippet" not in output
     assert "Candidate rationale must stay out of summary" not in output
     assert "Raw trace text must stay out of summary" not in output
     assert "AGENTS.md#Safety" not in output
     assert "unrelated legacy memory" not in output
+    assert "drift-2" not in output
+    assert "ev-secret" not in output
     assert "template=weakens-safety" not in output
 
 

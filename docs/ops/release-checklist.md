@@ -51,7 +51,9 @@ repo = Path(".sidecar/ci/proposal-smoke-repo")
 repo.mkdir(parents=True, exist_ok=True)
 (repo / "AGENTS.md").write_text("# Agent Instructions\n\nKeep changes reviewed.\n", encoding="utf-8")
 PY
+  echo "installed tugboat init --repo .sidecar/ci/proposal-smoke-repo"
   .sidecar/ci/install-smoke-venv/bin/tugboat init --repo .sidecar/ci/proposal-smoke-repo
+  echo "installed tugboat index --repo .sidecar/ci/proposal-smoke-repo"
   .sidecar/ci/install-smoke-venv/bin/tugboat index --repo .sidecar/ci/proposal-smoke-repo
   echo "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all"
   .sidecar/ci/install-smoke-venv/bin/tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all

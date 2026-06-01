@@ -90,6 +90,9 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
         "index: ok\n"
         "installed tugboat harness check --repo .\n"
         "harness: ok\n"
+        "installed tugboat init --repo .sidecar/ci/proposal-smoke-repo\n"
+        "initialized: .sidecar/policy.yaml\n"
+        "installed tugboat index --repo .sidecar/ci/proposal-smoke-repo\n"
         "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all\n"
         "optimization: needs_review\n"
         "proposal smoke artifact: audit.json\n"
@@ -310,6 +313,9 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
         b"index: ok\n"
         b"installed tugboat harness check --repo .\n"
         b"harness: ok\n"
+        b"installed tugboat init --repo .sidecar/ci/proposal-smoke-repo\n"
+        b"initialized: .sidecar/policy.yaml\n"
+        b"installed tugboat index --repo .sidecar/ci/proposal-smoke-repo\n"
         b"installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all\n"
         b"optimization: needs_review\n"
         b"proposal smoke artifact: audit.json\n"
@@ -364,6 +370,8 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             "installed tugboat doctor",
             "installed tugboat index --repo . --check",
             "installed tugboat harness check --repo .",
+            "installed tugboat init --repo .sidecar/ci/proposal-smoke-repo",
+            "installed tugboat index --repo .sidecar/ci/proposal-smoke-repo",
             "installed tugboat optimize --repo .sidecar/ci/proposal-smoke-repo --trace tests/fixtures/traces/codex-local-session-export.jsonl --suite all",
         ],
         "retained_evidence": [
@@ -591,6 +599,13 @@ def test_ops_release_manifest_blocks_wheel_version_that_differs_from_project_met
     wheel.parent.mkdir()
     wheel.write_bytes(b"wheel-bytes")
     evidence = _write_release_evidence(repo)
+    evidence["install"].write_text(
+        evidence["install"]
+        .read_text(encoding="utf-8")
+        .replace("installed tugboat init --repo .sidecar/ci/proposal-smoke-repo\n", "")
+        .replace("initialized: .sidecar/policy.yaml\n", ""),
+        encoding="utf-8",
+    )
     (repo / "pyproject.toml").write_text(
         "[project]\nname = \"tugboat\"\nversion = \"1.0.0\"\n",
         encoding="utf-8",
@@ -717,6 +732,47 @@ def test_ops_release_manifest_rejects_index_success_from_unrelated_smoke_step(
         "proposal smoke artifact: eval-report.json\n"
         "proposal smoke artifact: optimization-summary.json\n"
         "proposal smoke artifact: report.md\n",
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: install smoke evidence did not pass"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_requires_proposal_smoke_init_evidence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    evidence["install"].write_text(
+        evidence["install"]
+        .read_text(encoding="utf-8")
+        .replace("installed tugboat init --repo .sidecar/ci/proposal-smoke-repo\n", "")
+        .replace("initialized: .sidecar/policy.yaml\n", ""),
         encoding="utf-8",
     )
     (repo / "pyproject.toml").write_text(
