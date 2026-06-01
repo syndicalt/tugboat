@@ -20,7 +20,9 @@ The supported path is:
 5. Apply the migration only when the plan is understood.
 6. Re-run doctor, index check, harness check, and the relevant proposal loop.
 
-Tugboat records sidecar schema state in `.sidecar/version.json`. If a sidecar is newer than supported by the installed binary, `tugboat ops migrate --repo .` blocks instead of attempting a downgrade or lossy read.
+Tugboat records sidecar schema state in `.sidecar/version.json`. Older 0.x sidecars may also carry the legacy `.sidecar/VERSION` marker. If either sidecar schema marker is newer than supported by the installed binary, `tugboat ops migrate --repo .` blocks instead of attempting a downgrade or lossy read.
+
+Unmarked 0.x sidecars are treated as legacy schema v1. A `policy.yaml version` field is policy metadata, not the sidecar schema marker, and migration preserves it while writing `.sidecar/version.json`.
 
 ## Before Upgrading
 

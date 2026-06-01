@@ -54,7 +54,7 @@ Artifact schemas are part of the operator contract. Backward-compatible addition
 
 Sidecar migrations write `sidecar-migration-report.json` evidence. Operators should use `tugboat ops migrate --repo .` before `tugboat ops migrate --repo . --apply`, and should back up `.sidecar` before applying migrations.
 
-If `.sidecar/version.json` is newer than supported, Tugboat blocks instead of attempting a downgrade.
+The supported sidecar schema markers are `.sidecar/version.json` and the legacy `.sidecar/VERSION` file. A `policy.yaml version` field is policy metadata and is preserved during migration. If a sidecar schema marker is newer than supported, Tugboat blocks instead of attempting a downgrade.
 
 ## llmff Compatibility
 

@@ -124,8 +124,6 @@ def current_sidecar_version(repo: Path) -> int:
             raise ValueError(f".sidecar/policy.yaml invalid YAML: {error}") from error
         if not isinstance(payload, dict):
             raise ValueError(".sidecar/policy.yaml must contain a mapping")
-        if "version" in payload:
-            return as_positive_version(payload["version"], ".sidecar/policy.yaml version")
 
     return 1
 
@@ -198,7 +196,6 @@ def execute_migration_plan(
             policy_payload = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
             if not isinstance(policy_payload, dict):
                 raise ValueError(".sidecar/policy.yaml must contain a mapping")
-            policy_payload["version"] = plan.target_version
 
         version_json = sidecar / "version.json"
         write_json_artifact(version_json, {"schema_version": plan.target_version})

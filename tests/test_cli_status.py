@@ -78,6 +78,23 @@ def test_status_blocks_future_sidecar_schema_without_traceback(tmp_path: Path, c
     assert not (sidecar / "status-report.json").exists()
 
 
+def test_status_blocks_future_legacy_version_file_before_writing_artifacts(
+    tmp_path: Path,
+    capsys,
+):
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    (sidecar / "VERSION").write_text("999\n", encoding="utf-8")
+
+    assert main(["status", "--repo", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "status blocked: sidecar schema version 999 is newer than supported" in output
+    assert "Traceback" not in output
+    assert not (sidecar / "status-report.json").exists()
+    assert not (sidecar / "db.sqlite").exists()
+
+
 def test_propose_blocks_future_sidecar_schema_before_artifact_lookup(tmp_path: Path, capsys):
     sidecar = tmp_path / ".sidecar"
     sidecar.mkdir()

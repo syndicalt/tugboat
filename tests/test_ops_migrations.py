@@ -51,14 +51,14 @@ def test_current_sidecar_version_treats_existing_unversioned_sidecar_as_v1(
     assert current_sidecar_version(tmp_path) == 1
 
 
-def test_current_sidecar_version_reads_policy_yaml_version_without_marker(
+def test_current_sidecar_version_treats_policy_yaml_version_as_metadata_without_marker(
     tmp_path: Path,
 ) -> None:
     sidecar = tmp_path / ".sidecar"
     sidecar.mkdir()
     (sidecar / "policy.yaml").write_text("version: 2\n", encoding="utf-8")
 
-    assert current_sidecar_version(tmp_path) == 2
+    assert current_sidecar_version(tmp_path) == 1
 
 
 def test_dry_run_migration_plan_for_missing_sidecar_has_no_steps(tmp_path: Path) -> None:
@@ -144,7 +144,7 @@ def test_current_sidecar_version_rejects_malformed_version_json_cleanly(
     assert marker.read_text(encoding="utf-8") == json.dumps(payload)
 
 
-def test_execute_migration_plan_updates_older_policy_yaml_to_current_version(
+def test_execute_migration_plan_preserves_older_policy_yaml_version_metadata(
     tmp_path: Path,
 ) -> None:
     sidecar = tmp_path / ".sidecar"
@@ -172,7 +172,39 @@ def test_execute_migration_plan_updates_older_policy_yaml_to_current_version(
         "schema_version": DEFAULT_MIGRATIONS[-1].to_version,
     }
     assert yaml.safe_load(policy.read_text(encoding="utf-8")) == {
-        "version": DEFAULT_MIGRATIONS[-1].to_version,
+        "version": 1,
+        "mode": "proposal_only",
+        "retention": {"raw_traces_days": 14},
+    }
+
+
+def test_execute_migration_plan_preserves_policy_version_when_upgrading_unmarked_0x_sidecar(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / ".sidecar"
+    sidecar.mkdir()
+    policy = sidecar / "policy.yaml"
+    policy.write_text(
+        "version: 7\n"
+        "mode: proposal_only\n"
+        "retention:\n"
+        "  raw_traces_days: 14\n",
+        encoding="utf-8",
+    )
+
+    result = _execute_migration_plan(tmp_path)
+
+    assert result.current_version == 1
+    assert result.target_version == DEFAULT_MIGRATIONS[-1].to_version
+    assert [step.migration_id for step in result.steps] == [
+        "sidecar-v1-to-v2",
+        "sidecar-v2-to-v3",
+    ]
+    assert json.loads((sidecar / "version.json").read_text(encoding="utf-8")) == {
+        "schema_version": DEFAULT_MIGRATIONS[-1].to_version,
+    }
+    assert yaml.safe_load(policy.read_text(encoding="utf-8")) == {
+        "version": 7,
         "mode": "proposal_only",
         "retention": {"raw_traces_days": 14},
     }
