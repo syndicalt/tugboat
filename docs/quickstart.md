@@ -44,6 +44,46 @@ For CI or dry-run adoption, use:
 tugboat index --repo . --check
 ```
 
+## Solo Local
+
+Use the local path when you are evaluating Tugboat in one repository without provider credentials:
+
+```bash
+tugboat doctor
+tugboat init
+tugboat index --repo .
+tugboat optimize --repo . --trace traces/example.jsonl --suite all
+```
+
+Inspect `.sidecar/runs/<run-id>/report.md` and `candidate.diff` before deciding whether to apply anything. The default policy remains proposal-only.
+
+## Team Proposal-Only
+
+Use the team path when candidates need review through normal branch or pull-request workflow:
+
+```bash
+tugboat optimize --repo . --trace traces/example.jsonl --suite all
+tugboat report --repo . --run latest
+tugboat inspect-decision --repo . --decision latest
+tugboat apply --repo . --candidate latest --mode pr --human-review --review-actor <name>
+```
+
+`apply --mode pr` is VCS-gated and review-oriented. Keep humans in the approval path, inspect `optimization-summary.json`, and reject candidates that weaken safety, broaden authority, or lack evidence.
+
+## CI Adoption
+
+Use CI to prove the repo remains ready for proposal-only Tugboat workflows:
+
+```bash
+tugboat doctor
+tugboat ci --repo .
+tugboat index --repo . --check
+tugboat harness check --repo .
+python -m pytest --cov=src --cov-report=term-missing -q
+```
+
+CI must not run apply, auto-apply, rollback --execute, or mutation modes. Retain `.sidecar/ci/ci-report.json`, harness output, and any generated review artifacts for human inspection.
+
 ## Proposal Loop
 
 Run the governed local optimization loop against a saved trace bundle:
