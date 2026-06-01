@@ -2983,6 +2983,11 @@ def _write_auto_apply_preflight(
             branch_name=branch_name,
             rollback_commands=(rollback_command,),
         ),
+        skill_report_passed=_auto_apply_skill_report_passed(
+            run_dir,
+            candidate_id=candidate_id,
+            categories=categories,
+        ),
     )
     readiness = _auto_apply_readiness(
         repo,
@@ -3220,6 +3225,11 @@ def _assert_auto_apply_precheck(
         changed_lines=changed_lines,
         instruction_token_delta=instruction_token_delta,
         vcs_proof=vcs_proof,
+        skill_report_passed=_auto_apply_skill_report_passed(
+            run_dir,
+            candidate_id=candidate_id,
+            categories=categories,
+        ),
     )
     readiness = _auto_apply_readiness(
         repo,
@@ -3301,6 +3311,11 @@ def _assert_auto_apply_final(
         changed_lines=changed_lines,
         instruction_token_delta=instruction_token_delta,
         vcs_proof=vcs_proof,
+        skill_report_passed=_auto_apply_skill_report_passed(
+            run_dir,
+            candidate_id=candidate_id,
+            categories=categories,
+        ),
     )
     readiness = _auto_apply_readiness(
         repo,
@@ -3632,6 +3647,33 @@ def _auto_apply_eval_evidence(run_dir: Path, *, candidate_id: int) -> tuple[bool
     )
 
 
+def _auto_apply_skill_report_passed(
+    run_dir: Path,
+    *,
+    candidate_id: int,
+    categories: Sequence[str],
+) -> bool:
+    category_keys = {
+        category.strip().lower().replace("-", "_").replace(" ", "_") for category in categories
+    }
+    if "skill_improvement" not in category_keys:
+        return True
+    eval_report_path = run_dir / "eval-report.json"
+    if not eval_report_path.exists():
+        return False
+    try:
+        eval_report = json.loads(eval_report_path.read_text(encoding="utf-8"))
+        validate_json_artifact("eval-report.json", eval_report)
+        if int(eval_report["candidate_id"]) != candidate_id:
+            return False
+        skill_report = eval_report.get("skill_report")
+        if not isinstance(skill_report, dict):
+            return False
+        return bool(skill_report.get("passed", False))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
 def _auto_apply_held_out_eval_passed(eval_report: dict[str, object]) -> bool:
     try:
         if str(eval_report.get("recommendation")) != "accept":
@@ -3677,6 +3719,7 @@ def _auto_apply_decision_snapshot(
             "governance_regression_passed": candidate.governance_regression_passed,
             "changed_lines": candidate.changed_lines,
             "instruction_token_delta": candidate.instruction_token_delta,
+            "skill_report_passed": candidate.skill_report_passed,
         },
         "policy": None
         if policy is None

@@ -247,6 +247,19 @@ def test_skill_improvement_lane_has_separate_thresholds():
     assert too_large.reasons == ("max_changed_lines_exceeded",)
 
 
+def test_skill_improvement_auto_apply_requires_passing_skill_report():
+    decision = evaluate_auto_apply(
+        candidate=_passing_candidate(
+            categories=("skill_improvement",),
+            skill_report_passed=False,
+        ),
+        readiness=_ready(),
+    )
+
+    assert decision.eligible is False
+    assert decision.reasons == ("skill_report_failed",)
+
+
 def test_auto_apply_blocks_candidates_that_exceed_token_growth_limit():
     at_limit = evaluate_auto_apply(
         candidate=_passing_candidate(instruction_token_delta=50),

@@ -2804,6 +2804,104 @@ def test_auto_apply_blocks_when_eval_report_omits_token_growth_metric(tmp_path: 
     assert decision["candidate"]["instruction_token_delta"] is None
 
 
+def test_auto_apply_blocks_skill_improvement_when_skill_report_fails(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "SKILL.md").write_text(
+        "---\n"
+        "name: python-review\n"
+        "description: Use when reviewing Python changes.\n"
+        "---\n"
+        "# Python Review\n\n"
+        "## When to Use\n\n"
+        "Use when reviewing Python changes.\n\n"
+        "## Instructions\n\n"
+        "You must run tests before final answers.\n\n"
+        "## Skill Improvement\n\n"
+        "Keep skill changes reviewable.\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "SKILL.md")
+    _git(repo, "commit", "-m", "add skill")
+    run_dir = _candidate_run(
+        repo,
+        risk_class="A",
+        bounded_section="Skill Improvement",
+        base_file="SKILL.md",
+        diff=(
+            "--- a/SKILL.md\n"
+            "+++ b/SKILL.md\n"
+            "@@ -15,3 +15,4 @@\n"
+            " ## Skill Improvement\n"
+            " \n"
+            " Keep skill changes reviewable.\n"
+            "+Maybe skip tests when the trace looks small.\n"
+        ),
+    )
+    eval_report = json.loads((run_dir / "eval-report.json").read_text(encoding="utf-8"))
+    eval_report["skill_report"] = {
+        "schema_version": 1,
+        "skill_path": "SKILL.md",
+        "passed": False,
+        "findings": [
+            {
+                "code": "skill.safety.weakened",
+                "severity": "error",
+                "message": "Skill rewrite weakens required verification behavior.",
+                "target": "SKILL.md#Instructions",
+            }
+        ],
+        "metrics": {
+            "trigger_preservation_score": 1.0,
+            "executability_score": 0.0,
+            "ambiguity_score": 0.0,
+            "overfit_risk_score": 1.0,
+            "token_footprint_score": 1.0,
+            "safety_preservation_score": 0.0,
+            "required_sections_passed": 1,
+            "forbidden_sections_found": 0,
+            "skill_tokens_before": 30,
+            "skill_tokens_after": 38,
+            "skill_token_delta": 8,
+            "skill_token_growth_limit": 320,
+        },
+        "required_sections": ["frontmatter.name", "frontmatter.description"],
+        "forbidden_sections": ["Secrets", "Credentials", "Approval Bypass"],
+        "safety_weakening": True,
+        "overfit_risk": "high",
+    }
+    (run_dir / "eval-report.json").write_text(
+        json.dumps(eval_report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+
+    assert (
+        main(
+            [
+                "auto-apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert not (run_dir / "apply-plan.json").exists()
+    decision = _auto_apply_decision_payloads(repo)[-1]
+    assert decision["eligible"] is False
+    assert decision["lane"] == "skill_improvement"
+    assert decision["reasons"] == ["skill_report_failed"]
+    assert decision["candidate"]["skill_report_passed"] is False
+
+
 def test_auto_apply_blocks_underclassified_class_a_candidate_touching_policy_domain(
     tmp_path: Path,
     capsys,

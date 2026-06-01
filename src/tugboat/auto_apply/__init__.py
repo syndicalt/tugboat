@@ -44,6 +44,7 @@ REASON_ORDER = (
     "max_instruction_token_delta_exceeded",
     "held_out_eval_failed",
     "governance_regression_failed",
+    "skill_report_failed",
     "rejection_rate_too_high",
     "rollback_rate_too_high",
     "vcs_backing_required",
@@ -183,6 +184,7 @@ class AutoApplyCandidate:
     changed_lines: int
     instruction_token_delta: int | None
     vcs_proof: VcsProof
+    skill_report_passed: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "categories", tuple(self.categories))
@@ -317,6 +319,9 @@ def evaluate_auto_apply(
         found_reasons.add("held_out_eval_failed")
     if not candidate.governance_regression_passed:
         found_reasons.add("governance_regression_failed")
+    if "skill_improvement" in {_category_key(category) for category in candidate.categories}:
+        if not candidate.skill_report_passed:
+            found_reasons.add("skill_report_failed")
     if candidate.vcs_proof.mode not in VCS_BACKED_MODES or not candidate.vcs_proof.is_backed:
         found_reasons.add("vcs_backing_required")
     if not candidate.vcs_proof.has_one_command_rollback:
