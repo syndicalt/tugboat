@@ -850,6 +850,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for state, count in sorted(status["jobs_by_state"].items()):
             print(f"{state}: {count}")
         print(f"oldest_queued_job_id: {status['oldest_queued_job_id']}")
+        print(f"leased_job_count: {status.get('leased_job_count', 0)}")
+        print(f"stuck_job_count: {status.get('stuck_job_count', 0)}")
+        print(f"oldest_stuck_job_id: {status.get('oldest_stuck_job_id')}")
+        print(f"oldest_stuck_lease_expires_at: {status.get('oldest_stuck_lease_expires_at')}")
+        if status.get("recovery_hint"):
+            print(f"recovery_hint: {status['recovery_hint']}")
         return 0
 
     if args.command == "daemon" and args.daemon_command == "run-once":

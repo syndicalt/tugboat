@@ -4,7 +4,7 @@ import hashlib
 import json
 import socket
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,12 @@ class DaemonRunConfig:
     max_attempts: int = 3
 
 
-def daemon_status(repo: Path, *, kill_switch: KillSwitch | None = None) -> dict[str, Any]:
+def daemon_status(
+    repo: Path,
+    *,
+    kill_switch: KillSwitch | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     queue_path = repo / ".sidecar" / "daemon.sqlite"
     if not queue_path.exists():
         return {
@@ -46,9 +51,15 @@ def daemon_status(repo: Path, *, kill_switch: KillSwitch | None = None) -> dict[
             "kill_switch_enabled": bool(kill_switch and kill_switch.is_enabled()),
             "jobs_by_state": {},
             "oldest_queued_job_id": None,
+            "leased_job_count": 0,
+            "stuck_job_count": 0,
+            "oldest_stuck_job_id": None,
+            "oldest_stuck_lease_expires_at": None,
+            "recovery_hint": None,
         }
     queue = DaemonQueue.open_sidecar(repo)
     try:
+        timestamp = _status_timestamp(now)
         rows = queue.connection.execute(
             """
             SELECT state, COUNT(*) FROM daemon_jobs
@@ -60,14 +71,62 @@ def daemon_status(repo: Path, *, kill_switch: KillSwitch | None = None) -> dict[
             "SELECT id FROM daemon_jobs WHERE state = ? ORDER BY id LIMIT 1",
             (JobState.QUEUED.value,),
         ).fetchone()
+        leased = queue.connection.execute(
+            """
+            SELECT COUNT(*) FROM daemon_jobs
+            WHERE state IN (?, ?, ?)
+            """,
+            (
+                JobState.INSPECTING.value,
+                JobState.RUNNING.value,
+                JobState.EVALUATING.value,
+            ),
+        ).fetchone()
+        stuck = queue.connection.execute(
+            """
+            SELECT id, lease_expires_at FROM daemon_jobs
+            WHERE state IN (?, ?, ?)
+              AND lease_expires_at IS NOT NULL
+              AND lease_expires_at <= ?
+            ORDER BY lease_expires_at, id
+            """,
+            (
+                JobState.INSPECTING.value,
+                JobState.RUNNING.value,
+                JobState.EVALUATING.value,
+                timestamp,
+            ),
+        ).fetchall()
+        stuck_count = len(stuck)
+        oldest_stuck = stuck[0] if stuck else None
         return {
             "queue_path": queue.path.relative_to(repo).as_posix(),
             "kill_switch_enabled": bool(kill_switch and kill_switch.is_enabled()),
             "jobs_by_state": {str(row[0]): int(row[1]) for row in rows},
             "oldest_queued_job_id": int(oldest[0]) if oldest is not None else None,
+            "leased_job_count": int(leased[0]) if leased is not None else 0,
+            "stuck_job_count": stuck_count,
+            "oldest_stuck_job_id": int(oldest_stuck[0]) if oldest_stuck is not None else None,
+            "oldest_stuck_lease_expires_at": (
+                str(oldest_stuck[1]) if oldest_stuck is not None else None
+            ),
+            "recovery_hint": (
+                "run tugboat daemon run-once --repo <repo> to recover stale leases"
+                if stuck_count
+                else None
+            ),
         }
     finally:
         queue.close()
+
+
+def _status_timestamp(now: datetime | None) -> str:
+    timestamp = now or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
+    return timestamp.isoformat(timespec="microseconds")
 
 
 def run_daemon_once(repo: Path, config: DaemonRunConfig) -> dict[str, Any]:

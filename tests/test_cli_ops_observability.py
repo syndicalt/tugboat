@@ -215,6 +215,11 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
         "jobs_by_state": {"queued": 1},
         "oldest_queued_job_id": 1,
         "kill_switch_enabled": False,
+        "leased_job_count": 0,
+        "stuck_job_count": 0,
+        "oldest_stuck_job_id": None,
+        "oldest_stuck_lease_expires_at": None,
+        "recovery_hint": None,
     }
     assert summary["auto_apply_lanes"] == {
         "docs_hygiene": {

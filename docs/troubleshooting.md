@@ -113,7 +113,7 @@ tugboat daemon read-only --repo . --status
 tugboat daemon run-once --repo .
 ```
 
-If the kill switch is enabled, queued jobs will not execute. If leases are stale, `run-once` or `cycle` recovers expired leases before acquiring work.
+If the kill switch is enabled, queued jobs will not execute. If status reports `stuck_job_count` greater than zero, `run-once` or `cycle` recovers expired leases before acquiring work.
 
 ## Operations
 

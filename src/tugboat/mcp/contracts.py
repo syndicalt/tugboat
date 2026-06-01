@@ -244,6 +244,13 @@ def tugboat_auto_update_status(repo: str | Path) -> dict[str, Any]:
             "daemon_queue": {
                 "jobs_by_state": daemon_queue.get("jobs_by_state", {}),
                 "oldest_queued_job_id": daemon_queue.get("oldest_queued_job_id"),
+                "leased_job_count": daemon_queue.get("leased_job_count", 0),
+                "stuck_job_count": daemon_queue.get("stuck_job_count", 0),
+                "oldest_stuck_job_id": daemon_queue.get("oldest_stuck_job_id"),
+                "oldest_stuck_lease_expires_at": daemon_queue.get(
+                    "oldest_stuck_lease_expires_at"
+                ),
+                "recovery_hint": daemon_queue.get("recovery_hint"),
             },
         }
 

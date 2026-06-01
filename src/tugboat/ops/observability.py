@@ -93,6 +93,11 @@ def _daemon_queue_status(repo: Path) -> dict[str, Any]:
         "jobs_by_state": status["jobs_by_state"],
         "oldest_queued_job_id": status["oldest_queued_job_id"],
         "kill_switch_enabled": status["kill_switch_enabled"],
+        "leased_job_count": status.get("leased_job_count", 0),
+        "stuck_job_count": status.get("stuck_job_count", 0),
+        "oldest_stuck_job_id": status.get("oldest_stuck_job_id"),
+        "oldest_stuck_lease_expires_at": status.get("oldest_stuck_lease_expires_at"),
+        "recovery_hint": status.get("recovery_hint"),
     }
 
 

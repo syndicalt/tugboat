@@ -17,7 +17,7 @@ Inspect daemon state:
 tugboat daemon status --repo .
 ```
 
-The command prints `.sidecar/daemon.sqlite` queue state and whether `.sidecar/read-only.kill` is enabled.
+The command prints `.sidecar/daemon.sqlite` queue state, whether `.sidecar/read-only.kill` is enabled, queued and leased job counts, and any expired lease summary. Status is read-only: it does not recover, requeue, fail, acquire, or transition jobs.
 
 ## Read-Only Kill Switch
 
@@ -97,6 +97,6 @@ Observability refs must be local-only.
 
 ## Recovery
 
-If a worker crashes, the next `run-once` or `cycle` recovers expired leases. Resume jobs must carry checkpoint metadata whose manifest hash still matches the current manifest. Mismatched checkpoints fail closed.
+If a worker crashes, `daemon status` reports `stuck_job_count`, `oldest_stuck_job_id`, and `oldest_stuck_lease_expires_at` for expired active leases. The next `run-once` or `cycle` recovers expired leases. Resume jobs must carry checkpoint metadata whose manifest hash still matches the current manifest. Mismatched checkpoints fail closed.
 
 Keep `.sidecar/daemon.sqlite` and `.sidecar/db.sqlite` together during backup and restore so queue state and audit state remain comparable.

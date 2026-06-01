@@ -157,7 +157,7 @@ tugboat daemon read-only --repo . --disable
 tugboat daemon profile --repo . --app-boot-json '{"command":"python -m app"}'
 ```
 
-MCP is an adapter over the CLI/service layer. The daemon is local-only and kill-switchable.
+MCP is an adapter over the CLI/service layer. The daemon is local-only and kill-switchable. `daemon status` is read-only and reports queued, leased, and expired-lease counts without recovering or mutating jobs.
 
 ## Operations
 

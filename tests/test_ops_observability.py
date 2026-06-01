@@ -212,6 +212,11 @@ def test_sidecar_observability_includes_daemon_queue_state(tmp_path: Path):
         "jobs_by_state": {"inspecting": 1, "queued": 1},
         "oldest_queued_job_id": queued.id,
         "kill_switch_enabled": False,
+        "leased_job_count": 1,
+        "stuck_job_count": 0,
+        "oldest_stuck_job_id": None,
+        "oldest_stuck_lease_expires_at": None,
+        "recovery_hint": None,
     }
 
 

@@ -161,7 +161,38 @@ def test_daemon_status_summarizes_queue_and_kill_switch(tmp_path: Path):
         "kill_switch_enabled": True,
         "jobs_by_state": {"inspecting": 1, "queued": 1},
         "oldest_queued_job_id": 1,
+        "leased_job_count": 1,
+        "stuck_job_count": 0,
+        "oldest_stuck_job_id": None,
+        "oldest_stuck_lease_expires_at": None,
+        "recovery_hint": None,
     }
+
+
+def test_daemon_status_reports_expired_leases_without_recovering_them(tmp_path: Path):
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        job = queue.enqueue(kind="audit", payload={"trace_id": "trace-1"}, now=_at(0))
+        leased = queue.acquire_next(
+            lease_owner="worker-a",
+            lease_duration=timedelta(seconds=5),
+            now=_at(10),
+        )
+    assert leased is not None
+
+    status = daemon_status(tmp_path, kill_switch=None, now=_at(20))
+
+    assert status["jobs_by_state"] == {"inspecting": 1}
+    assert status["oldest_queued_job_id"] is None
+    assert status["leased_job_count"] == 1
+    assert status["stuck_job_count"] == 1
+    assert status["oldest_stuck_job_id"] == job.id
+    assert status["oldest_stuck_lease_expires_at"] == "2026-01-01T00:00:15.000000+00:00"
+    assert status["recovery_hint"] == "run tugboat daemon run-once --repo <repo> to recover stale leases"
+    with DaemonQueue.open_sidecar(tmp_path) as queue:
+        unchanged = queue.get_job(job.id)
+        assert unchanged is not None
+        assert unchanged.state is JobState.INSPECTING
+        assert unchanged.lease_owner == "worker-a"
 
 
 def test_daemon_status_read_only_kill_switch_does_not_initialize_missing_queue(
@@ -178,6 +209,11 @@ def test_daemon_status_read_only_kill_switch_does_not_initialize_missing_queue(
         "kill_switch_enabled": True,
         "jobs_by_state": {},
         "oldest_queued_job_id": None,
+        "leased_job_count": 0,
+        "stuck_job_count": 0,
+        "oldest_stuck_job_id": None,
+        "oldest_stuck_lease_expires_at": None,
+        "recovery_hint": None,
     }
     assert not (tmp_path / ".sidecar" / "daemon.sqlite").exists()
 
@@ -1066,6 +1102,11 @@ def test_daemon_status_cli_and_mcp_delegate_to_service_layer(
             "kill_switch_enabled": False,
             "jobs_by_state": {"queued": 2},
             "oldest_queued_job_id": 7,
+            "leased_job_count": 0,
+            "stuck_job_count": 0,
+            "oldest_stuck_job_id": None,
+            "oldest_stuck_lease_expires_at": None,
+            "recovery_hint": None,
         }
 
     def mcp_status(repo: Path, *, kill_switch: FileKillSwitch):
@@ -1075,6 +1116,11 @@ def test_daemon_status_cli_and_mcp_delegate_to_service_layer(
             "kill_switch_enabled": True,
             "jobs_by_state": {"running": 1},
             "oldest_queued_job_id": None,
+            "leased_job_count": 1,
+            "stuck_job_count": 1,
+            "oldest_stuck_job_id": 9,
+            "oldest_stuck_lease_expires_at": "2026-01-01T00:00:15.000000+00:00",
+            "recovery_hint": "run tugboat daemon run-once --repo <repo> to recover stale leases",
         }
 
     monkeypatch.setattr(cli_module, "daemon_status", cli_status)
@@ -1082,6 +1128,8 @@ def test_daemon_status_cli_and_mcp_delegate_to_service_layer(
     output = capsys.readouterr().out
     assert "queued: 2" in output
     assert "oldest_queued_job_id: 7" in output
+    assert "leased_job_count: 0" in output
+    assert "stuck_job_count: 0" in output
 
     (tmp_path / ".sidecar").mkdir(exist_ok=True)
     (tmp_path / ".sidecar" / "policy.yaml").write_text(
@@ -1100,6 +1148,11 @@ mcp:
         "kill_switch_enabled": True,
         "jobs_by_state": {"running": 1},
         "oldest_queued_job_id": None,
+        "leased_job_count": 1,
+        "stuck_job_count": 1,
+        "oldest_stuck_job_id": 9,
+        "oldest_stuck_lease_expires_at": "2026-01-01T00:00:15.000000+00:00",
+        "recovery_hint": "run tugboat daemon run-once --repo <repo> to recover stale leases",
     }
     assert calls == [
         ("cli", tmp_path.resolve(), ".sidecar/read-only.kill"),
