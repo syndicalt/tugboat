@@ -14,6 +14,7 @@ import tugboat.cli as cli_module
 from tugboat.cli import main
 from tugboat.daemon.queue import DaemonQueue, JobState
 from tugboat.db import Store
+from tugboat.patches import apply_unified_diff
 from tugboat.paths import sidecar_dir
 from tugboat.vcs import VcsAdapter, VcsStateError
 
@@ -87,6 +88,7 @@ def _candidate_run(
     diff: str | None = None,
     pending_eval_definition_paths: tuple[str, ...] = (),
     recorded_provenance: bool = True,
+    preview_text: str | None = None,
 ) -> Path:
     sidecar = repo / ".sidecar"
     sidecar.mkdir(exist_ok=True)
@@ -151,6 +153,29 @@ def _candidate_run(
     (run_dir / "candidate.diff").write_text(diff, encoding="utf-8")
     (run_dir / "candidate.json").write_text(
         json.dumps(candidate, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    if preview_text is None:
+        preview_text = apply_unified_diff(
+            (repo / base_file).read_text(encoding="utf-8"),
+            diff,
+            expected_path=base_file,
+        )
+    if preview_text is None:
+        preview_text = (repo / base_file).read_text(encoding="utf-8")
+    preview_path = run_dir / "candidate-preview" / base_file
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_text(preview_text, encoding="utf-8")
+    preview_manifest = {
+        "schema_version": 1,
+        "base_file": base_file,
+        "base_hash": candidate["base_hash"],
+        "diff_hash": candidate["diff_hash"],
+        "preview_path": preview_path.relative_to(repo).as_posix(),
+        "preview_hash": _hash(preview_path),
+    }
+    (run_dir / "candidate-preview.json").write_text(
+        json.dumps(preview_manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     (run_dir / "policy-gate.json").write_text(
@@ -2546,6 +2571,141 @@ def test_auto_apply_commit_rejects_stale_shadow_source_artifacts_without_mutatio
     assert len(decisions) == 1
     assert decisions[0]["eligible"] is False
     assert decisions[0]["reasons"] == ["shadow_evidence_stale"]
+
+
+def test_auto_apply_commit_blocks_when_staged_file_does_not_match_evaluated_preview(
+    tmp_path: Path,
+    capsys,
+):
+    repo = _init_repo(tmp_path)
+    evaluated_preview = (
+        "# Rules\n\n"
+        "Use tests.\n\n"
+        "# Typo Fix\n\n"
+        "Keep typo fix guidance.\n"
+        "Evaluated preview content.\n"
+    )
+    run_dir = _candidate_run(
+        repo,
+        risk_class="A",
+        bounded_section="Typo Fix",
+        preview_text=evaluated_preview,
+    )
+    original = (repo / "CODEX.md").read_text(encoding="utf-8")
+    original_head = _git(repo, "rev-parse", "HEAD")
+    base_branch = _git(repo, "branch", "--show-current")
+    generated_branch = "tugboat/20260525t000000000000z/candidate-7/codex-md"
+    _write_auto_apply_policy(repo, version=9)
+    _seed_auto_apply_history(repo)
+    _run_auto_apply_shadow(repo)
+
+    assert (
+        main(
+            [
+                "apply",
+                "--repo",
+                str(repo),
+                "--candidate",
+                "latest",
+                "--mode",
+                "commit",
+                "--auto-apply",
+                "--confirm-auto-apply",
+                "--auto-apply-policy-version",
+                "9",
+                "--review-actor",
+                "operator@example.com",
+            ]
+        )
+        == 1
+    )
+
+    assert "apply blocked: auto-apply staged validation failed" in capsys.readouterr().out
+    assert (repo / "CODEX.md").read_text(encoding="utf-8") == original
+    assert _git(repo, "rev-parse", "HEAD") == original_head
+    assert _git(repo, "branch", "--show-current") == base_branch
+    assert _git(repo, "branch", "--list", generated_branch) == ""
+    assert not (run_dir / "apply-plan.json").exists()
+    assert not (run_dir / "auto-apply-approval.json").exists()
+
+
+def test_auto_apply_candidate_preview_check_accepts_matching_preview(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    candidate = cli_module._candidate_from_artifacts(run_dir)
+
+    check = cli_module._auto_apply_candidate_preview_check(repo, run_dir, candidate)
+
+    assert check["passed"] is True
+    assert check["reason"] == ""
+    assert check["manifest_path"] == ".sidecar/runs/20260525T000000000000Z/candidate-preview.json"
+    assert check["preview_path"] == ".sidecar/runs/20260525T000000000000Z/candidate-preview/CODEX.md"
+    assert check["preview_hash"] == _hash(run_dir / "candidate-preview" / "CODEX.md")
+
+
+@pytest.mark.parametrize(
+    ("mutator", "reason"),
+    [
+        (
+            lambda run_dir, manifest: (run_dir / "candidate-preview.json").unlink(),
+            "candidate_preview_missing",
+        ),
+        (
+            lambda run_dir, manifest: (run_dir / "candidate-preview.json").write_text(
+                "{not json\n",
+                encoding="utf-8",
+            ),
+            "candidate_preview_malformed",
+        ),
+        (
+            lambda run_dir, manifest: manifest.update({"base_file": "AGENTS.md"}),
+            "candidate_preview_stale",
+        ),
+        (
+            lambda run_dir, manifest: manifest.update({"base_hash": "b" * 64}),
+            "candidate_preview_stale",
+        ),
+        (
+            lambda run_dir, manifest: manifest.update({"diff_hash": "c" * 64}),
+            "candidate_preview_stale",
+        ),
+        (
+            lambda run_dir, manifest: manifest.update(
+                {"preview_path": ".sidecar/runs/20260525T000000000000Z/outside.md"}
+            ),
+            "candidate_preview_outside_run",
+        ),
+        (
+            lambda run_dir, manifest: (run_dir / "candidate-preview" / "CODEX.md").unlink(),
+            "candidate_preview_file_missing",
+        ),
+        (
+            lambda run_dir, manifest: (run_dir / "candidate-preview" / "CODEX.md").write_text(
+                "changed preview\n",
+                encoding="utf-8",
+            ),
+            "candidate_preview_hash_mismatch",
+        ),
+    ],
+)
+def test_auto_apply_candidate_preview_check_reports_invalid_preview_states(
+    tmp_path: Path,
+    mutator,
+    reason: str,
+):
+    repo = _init_repo(tmp_path)
+    run_dir = _candidate_run(repo, risk_class="A", bounded_section="Typo Fix")
+    candidate = cli_module._candidate_from_artifacts(run_dir)
+    manifest_path = run_dir / "candidate-preview.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    mutator(run_dir, manifest)
+    if manifest_path.exists() and reason != "candidate_preview_malformed":
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    check = cli_module._auto_apply_candidate_preview_check(repo, run_dir, candidate)
+
+    assert check == {"passed": False, "reason": reason}
 
 
 @pytest.mark.parametrize(

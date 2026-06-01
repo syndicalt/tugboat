@@ -1018,6 +1018,7 @@ def test_latest_failed_gates_returns_sanitized_gate_failures(tmp_path: Path):
                             "base_hashes_match": True,
                             "reasons": [],
                         },
+                        "candidate_preview": {"passed": True, "reason": ""},
                         "auto_apply": {},
                     },
                     "readiness_metrics": {},

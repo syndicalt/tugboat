@@ -2968,6 +2968,8 @@ def _write_apply_plan(
             adapter.create_branch(branch_name)
             branch_created = True
             adapter.apply_diff(run_dir / "candidate.diff", allowed_paths=target_files)
+            if auto_apply:
+                _assert_auto_apply_staged_preview_matches(repo, run_dir, candidate)
             post_hashes = {path: CandidatePatch.hash_file(repo / path) for path in target_files}
             applied_worktree_change = True
             applied_commit = adapter.commit_files(target_files, commit_message)
@@ -3256,6 +3258,9 @@ def _write_auto_apply_preflight(
         reasons.append("eval_report_rejected")
     if not bool(vcs_checks["preflight_passed"]):
         reasons.append("vcs_preflight_failed")
+    candidate_preview_check = _auto_apply_candidate_preview_check(repo, run_dir, candidate)
+    if not bool(candidate_preview_check["passed"]):
+        reasons.append(str(candidate_preview_check["reason"]))
     reasons = list(dict.fromkeys(reasons))
     approval_bundle = None
     if auto_apply_decision.approval_bundle is not None and not reasons:
@@ -3281,7 +3286,6 @@ def _write_auto_apply_preflight(
         "lane": auto_apply_decision.lane,
         "reasons": reasons,
         "approval_bundle": approval_bundle,
-        "source_artifacts": _auto_apply_source_artifacts(repo, run_dir),
         "checks": {
             "policy_gate": {
                 "allowed": decision.allowed,
@@ -3295,6 +3299,7 @@ def _write_auto_apply_preflight(
                 **eval_report_check,
             },
             "vcs": vcs_checks,
+            "candidate_preview": candidate_preview_check,
             "auto_apply": _auto_apply_decision_snapshot(
                 phase=phase,
                 candidate=auto_apply_candidate,
@@ -3304,6 +3309,12 @@ def _write_auto_apply_preflight(
         },
         "readiness_metrics": metrics,
     }
+    if bool(candidate_preview_check["passed"]):
+        payload["source_artifacts"] = _auto_apply_source_artifacts(
+            repo,
+            run_dir,
+            candidate=candidate,
+        )
     if shadow_mode:
         payload["shadow_mode"] = True
     path = run_dir / artifact_name
@@ -3601,7 +3612,10 @@ def _auto_apply_shadow_sources_match(
 ) -> bool:
     if not isinstance(raw_sources, dict):
         return False
-    expected = _auto_apply_source_artifacts(repo, run_dir)
+    candidate = _candidate_from_artifacts(run_dir)
+    if not bool(_auto_apply_candidate_preview_check(repo, run_dir, candidate)["passed"]):
+        return False
+    expected = _auto_apply_source_artifacts(repo, run_dir, candidate=candidate)
     for key, expected_ref in expected.items():
         actual_ref = raw_sources.get(key)
         if not isinstance(actual_ref, dict):
@@ -3613,10 +3627,22 @@ def _auto_apply_shadow_sources_match(
     return True
 
 
-def _auto_apply_source_artifacts(repo: Path, run_dir: Path) -> dict[str, dict[str, str]]:
+def _auto_apply_source_artifacts(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate: CandidatePatch,
+) -> dict[str, dict[str, str]]:
+    manifest = load_json_object_artifact(run_dir / "candidate-preview.json", "candidate-preview.json")
+    preview_path = (repo / str(manifest["preview_path"])).resolve()
     return {
         "candidate_diff": _auto_apply_artifact_ref(repo, run_dir / "candidate.diff"),
         "candidate_metadata": _auto_apply_artifact_ref(repo, run_dir / "candidate.json"),
+        "candidate_preview_manifest": _auto_apply_artifact_ref(
+            repo,
+            run_dir / "candidate-preview.json",
+        ),
+        "candidate_preview_file": _auto_apply_artifact_ref(repo, preview_path),
         "eval_report": _auto_apply_artifact_ref(repo, run_dir / "eval-report.json"),
         "policy_gate": _auto_apply_artifact_ref(repo, run_dir / "policy-gate.json"),
     }
@@ -3627,6 +3653,62 @@ def _auto_apply_artifact_ref(repo: Path, path: Path) -> dict[str, str]:
         "path": _relative_repo_path(repo, path),
         "sha256": CandidatePatch.hash_file(path),
     }
+
+
+def _auto_apply_candidate_preview_check(
+    repo: Path,
+    run_dir: Path,
+    candidate: CandidatePatch,
+) -> dict[str, object]:
+    manifest_path = run_dir / "candidate-preview.json"
+    if not manifest_path.exists():
+        return {"passed": False, "reason": "candidate_preview_missing"}
+    try:
+        manifest = load_json_object_artifact(manifest_path, "candidate-preview.json")
+        validate_json_artifact("candidate-preview.json", manifest)
+    except (OSError, ValueError, ArtifactValidationError, json.JSONDecodeError):
+        return {"passed": False, "reason": "candidate_preview_malformed"}
+    if manifest.get("base_file") != candidate.base_file:
+        return {"passed": False, "reason": "candidate_preview_stale"}
+    if manifest.get("base_hash") != candidate.base_hash:
+        return {"passed": False, "reason": "candidate_preview_stale"}
+    if manifest.get("diff_hash") != candidate.diff_hash:
+        return {"passed": False, "reason": "candidate_preview_stale"}
+    preview_path = (repo / str(manifest["preview_path"])).resolve()
+    preview_root = (run_dir / "candidate-preview").resolve()
+    if not preview_path.is_relative_to(preview_root):
+        return {"passed": False, "reason": "candidate_preview_outside_run"}
+    if not preview_path.exists():
+        return {"passed": False, "reason": "candidate_preview_file_missing"}
+    try:
+        preview_hash = CandidatePatch.hash_file(preview_path)
+    except OSError:
+        return {"passed": False, "reason": "candidate_preview_file_missing"}
+    if preview_hash != manifest["preview_hash"]:
+        return {"passed": False, "reason": "candidate_preview_hash_mismatch"}
+    return {
+        "passed": True,
+        "reason": "",
+        "manifest_path": _relative_repo_path(repo, manifest_path),
+        "preview_path": _relative_repo_path(repo, preview_path),
+        "preview_hash": preview_hash,
+    }
+
+
+def _assert_auto_apply_staged_preview_matches(
+    repo: Path,
+    run_dir: Path,
+    candidate: CandidatePatch,
+) -> None:
+    check = _auto_apply_candidate_preview_check(repo, run_dir, candidate)
+    if not bool(check["passed"]):
+        raise ValueError(f"auto-apply staged validation failed: {check['reason']}")
+    staged_hash = CandidatePatch.hash_file(repo / candidate.base_file)
+    if staged_hash != check["preview_hash"]:
+        raise ValueError(
+            "auto-apply staged validation failed: target file does not match "
+            "evaluated candidate preview"
+        )
 
 
 def _assert_auto_apply_final(

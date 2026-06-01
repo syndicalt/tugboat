@@ -2759,12 +2759,16 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                 "required": [
                     "candidate_diff",
                     "candidate_metadata",
+                    "candidate_preview_manifest",
+                    "candidate_preview_file",
                     "eval_report",
                     "policy_gate",
                 ],
                 "properties": {
                     "candidate_diff": _artifact_ref_schema(),
                     "candidate_metadata": _artifact_ref_schema(),
+                    "candidate_preview_manifest": _artifact_ref_schema(),
+                    "candidate_preview_file": _artifact_ref_schema(),
                     "eval_report": _artifact_ref_schema(),
                     "policy_gate": _artifact_ref_schema(),
                 },
@@ -2777,6 +2781,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "stored_policy_gate",
                     "eval_report",
                     "vcs",
+                    "candidate_preview",
                     "auto_apply",
                 ],
                 "properties": {
@@ -2833,6 +2838,15 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                             "target_files_clean": {"type": "boolean"},
                             "base_hashes_match": {"type": "boolean"},
                             "reasons": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                    "candidate_preview": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "required": ["passed", "reason"],
+                        "properties": {
+                            "passed": {"type": "boolean"},
+                            "reason": {"type": "string"},
                         },
                     },
                     "auto_apply": {"type": "object"},
