@@ -15,9 +15,9 @@ tugboat inspect-decision --repo . --decision latest
 tugboat inspect-decision --repo . --decision latest --compare <decision-id>
 ```
 
-`report` includes a metadata-only `highest_impact_summary` so reviewers can quickly see the most important bounded edit, score delta, token delta, and governance status before opening the diff.
+`report` includes metadata-only `risk_explanation`, `rollback_readiness`, and `highest_impact_summary` lines so reviewers can quickly see policy risk, rollback state, the most important bounded edit, score delta, token delta, and governance status before opening the diff.
 
-`inspect-decision` prints the decision trace path plus a concise metadata summary: run id, decision, candidate id, candidate file, candidate state, risk class, eval pass/fail summary, rollback readiness, highest-impact metadata, and the next artifact to inspect. With `--compare`, it adds a bounded comparison against another decision id or run ref. It does not print raw trace payload snippets, rationale text, optimizer memory, or rollback bodies.
+`inspect-decision` prints the decision trace path plus a concise metadata summary: run id, decision, candidate id, candidate file, candidate state, risk explanation, eval pass/fail summary, strict rollback readiness, broader rollback readiness, highest-impact metadata, and the next artifact to inspect. With `--compare`, it adds a bounded comparison against another decision id or run ref. It does not print raw trace payload snippets, rationale text, optimizer memory, or rollback bodies.
 
 Review these files under `.sidecar/runs/<run-id>/`:
 

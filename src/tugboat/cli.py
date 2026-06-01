@@ -92,7 +92,12 @@ from tugboat.paths import latest_run_dir, mark_private_file, runs_dir, sidecar_d
 from tugboat.policy.gate import CandidatePatch, SourceRef, evaluate_candidate
 from tugboat.report.decision_trace import write_decision_trace
 from tugboat.propose.pipeline import run_propose_pipeline
-from tugboat.report.service import highest_impact_summary_fields, write_report
+from tugboat.report.service import (
+    highest_impact_summary_fields,
+    risk_explanation_summary,
+    rollback_readiness_summary,
+    write_report,
+)
 from tugboat.security.redaction import redact_text
 from tugboat.security.secrets import SecretScanError, scan_path, scan_text
 from tugboat.vcs import PullRequestResult, VcsAdapter, VcsStateError
@@ -4598,8 +4603,10 @@ def _print_decision_inspection_summary(trace_path: Path) -> None:
     print(f"candidate_file: {candidate.get('base_file', '')}")
     print(f"candidate_state: {candidate.get('state', '')}")
     print(f"risk_class: {candidate.get('risk_class', '')}")
+    print(f"risk_explanation: {_decision_trace_risk_explanation(trace_path, candidate, artifacts)}")
     print(f"evals: {_decision_trace_eval_summary(payload)}")
     print(f"rollback_ready: {_decision_trace_rollback_ready(decision, artifacts)}")
+    print(f"rollback_readiness: {_decision_trace_rollback_readiness(trace_path, decision)}")
     print(f"highest_impact: {_decision_trace_highest_impact_summary(trace_path, artifacts)}")
     next_artifact = artifacts.get("report") or artifacts.get("candidate_diff") or trace_path.as_posix()
     print(f"review_next: inspect {next_artifact}")
@@ -4672,6 +4679,45 @@ def _decision_trace_highest_impact_summary(
         f"held_out_delta={fields['held_out_delta']} "
         f"instruction_token_delta={fields['instruction_token_delta']} "
         f"governance_passed={fields['governance_passed']}"
+    )
+
+
+def _decision_trace_risk_explanation(
+    trace_path: Path,
+    candidate: dict[str, object],
+    artifacts: dict[str, object],
+) -> str:
+    policy_gate_path = _decision_trace_artifact_path(trace_path, artifacts, "policy_gate")
+    policy_allowed = "unknown"
+    policy_reasons = "unknown"
+    if policy_gate_path is not None:
+        try:
+            policy_gate = load_json_object_artifact(policy_gate_path, "policy-gate.json")
+            validate_json_artifact("policy-gate.json", policy_gate)
+        except OSError:
+            policy_gate = None
+        if policy_gate is not None:
+            policy_allowed = "true" if bool(policy_gate.get("allowed", False)) else "false"
+            raw_reasons = policy_gate.get("reasons", [])
+            if isinstance(raw_reasons, list) and raw_reasons:
+                policy_reasons = ",".join(str(reason) for reason in raw_reasons)
+            else:
+                policy_reasons = "none"
+    allowed = policy_allowed == "true"
+    reasons = [] if policy_reasons in {"none", "unknown"} else policy_reasons.split(",")
+    return risk_explanation_summary(candidate.get("risk_class", ""), allowed, reasons)
+
+
+def _decision_trace_rollback_readiness(
+    trace_path: Path,
+    decision: dict[str, object],
+) -> str:
+    repo = trace_path.resolve().parents[3]
+    run_dir = trace_path.parent
+    return rollback_readiness_summary(
+        repo,
+        run_dir,
+        applied_commit=str(decision.get("applied_commit", "")),
     )
 
 

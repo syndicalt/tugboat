@@ -8,7 +8,11 @@ from tugboat.artifacts import ArtifactValidationError
 from tugboat.eval.service import write_eval_report
 from tugboat.policy.gate import CandidatePatch, PolicyDecision, SourceRef
 from tugboat.propose.service import write_candidate
-from tugboat.report.service import highest_impact_summary_fields, write_report
+from tugboat.report.service import (
+    highest_impact_summary_fields,
+    rollback_readiness_summary,
+    write_report,
+)
 from tugboat.security.secrets import SecretScanError
 
 
@@ -526,6 +530,8 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "- risk_class: instruction_clarification",
             "- policy_allowed: false",
             "- policy_reasons: modal_weakening,new_external_endpoint",
+            "- risk_explanation: class=instruction_clarification policy_allowed=false policy_reasons=modal_weakening,new_external_endpoint review_required=none",
+            "- rollback_readiness: state=planned command=tugboat rollback --decision latest artifact=.sidecar/runs/run-1/optimization-summary.json applied_commit=missing",
             "- trace_input: .sidecar/runs/run-1/trace-input.jsonl",
             "- instruction_snapshot: .sidecar/runs/run-1/instruction-snapshot",
             "- instruction_graph: .sidecar/runs/run-1/instruction-graph.json",
@@ -567,6 +573,118 @@ def test_write_report_writes_markdown_summary(tmp_path: Path):
             "Clarify ambiguous guidance.",
             "",
         ]
+    )
+
+
+def test_write_report_degrades_review_readiness_without_optional_artifacts(tmp_path: Path):
+    eval_report_path = tmp_path / ".sidecar" / "runs" / "run-1" / "eval-report.json"
+    eval_report_path.parent.mkdir(parents=True)
+    eval_report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_id": 5,
+                "governance_passed": True,
+                "held_out_score": 0.92,
+                "metrics": {},
+                "passed": True,
+                "recommendation": "accept",
+                "suite_id": "unit",
+                "trigger_score": 0.84,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report_path = write_report(
+        tmp_path,
+        "run-1",
+        candidate=_candidate(),
+        decision=PolicyDecision(True, ()),
+        eval_report_path=eval_report_path,
+    )
+    report = report_path.read_text(encoding="utf-8")
+
+    assert (
+        "- risk_explanation: class=instruction_clarification policy_allowed=true "
+        "policy_reasons=none review_required=none"
+    ) in report
+    assert (
+        "- rollback_readiness: state=missing command=none artifact=none "
+        "applied_commit=missing"
+    ) in report
+
+
+def test_rollback_readiness_summary_reports_apply_ready_and_invalid_metadata(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "apply-plan.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mode": "proposal",
+                "candidate_id": 5,
+                "decision_id": "decision-1",
+                "run_id": "run-1",
+                "target_files": ["CODEX.md"],
+                "branch_name": "tugboat/run-1",
+                "commit_message": "message",
+                "pre_hashes": {},
+                "post_hashes": {},
+                "applied_commit": "",
+                "rollback_command": [["tugboat", "rollback", "--decision", "latest"]],
+                "provenance_bundle": ".sidecar/runs/run-1/provenance-bundle.json",
+                "pr_metadata": {},
+                "review_actor": "operator",
+                "auto_apply": False,
+                "explicit_human_review": False,
+                "review_required_reasons": [],
+                "decision_rationale": "proposal mode",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert rollback_readiness_summary(tmp_path, run_dir) == (
+        "state=apply_ready command=tugboat rollback --decision latest "
+        "artifact=.sidecar/runs/run-1/apply-plan.json applied_commit=missing"
+    )
+
+    (run_dir / "apply-plan.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    assert rollback_readiness_summary(tmp_path, run_dir) == (
+        "state=apply_ready command=none artifact=.sidecar/runs/run-1/apply-plan.json "
+        "applied_commit=missing"
+    )
+
+
+def test_rollback_readiness_summary_handles_bad_optional_metadata(tmp_path: Path):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "optimization-summary.json").write_text("not-json\n", encoding="utf-8")
+
+    assert rollback_readiness_summary(tmp_path, run_dir) == (
+        "state=missing command=none artifact=none applied_commit=missing"
+    )
+
+    (run_dir / "apply-plan.json").write_text("[]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="apply-plan.json must be a JSON object"):
+        rollback_readiness_summary(tmp_path, run_dir)
+
+
+def test_rollback_readiness_summary_reports_external_repo_artifact_path(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / "outside-run"
+    run_dir.mkdir()
+    (run_dir / "rollback-plan.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+
+    assert rollback_readiness_summary(tmp_path / "repo", run_dir, applied_commit="abc123") == (
+        f"state=applied_ready command=none artifact={run_dir / 'rollback-plan.json'} "
+        "applied_commit=present"
     )
 
 

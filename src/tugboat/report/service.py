@@ -26,6 +26,13 @@ def write_report(
     eval_summary = _eval_summary_lines(eval_report_path)
     eval_payload = _validated_eval_payload(eval_report_path)
     optimization_summary_path = run_dir / "optimization-summary.json"
+    review_summary = _review_readiness_lines(
+        repo,
+        run_dir,
+        candidate=candidate,
+        decision=decision,
+        optimization_summary_path=optimization_summary_path,
+    )
     optimization_summary = _optimization_summary_lines(repo, optimization_summary_path)
     impact_summary = _highest_impact_summary_lines(eval_payload, optimization_summary_path)
     text = "\n".join(
@@ -37,6 +44,7 @@ def write_report(
             f"- risk_class: {candidate.risk_class}",
             f"- policy_allowed: {str(decision.allowed).lower()}",
             f"- policy_reasons: {','.join(decision.reasons)}",
+            *review_summary,
             *evidence_chain,
             *eval_summary,
             *impact_summary,
@@ -77,6 +85,116 @@ def _evidence_chain_lines(repo: Path, run_dir: Path, eval_report_path: Path) -> 
         for field, path in artifact_fields
         if field == "eval_report" or path.exists()
     ]
+
+
+def _review_readiness_lines(
+    repo: Path,
+    run_dir: Path,
+    *,
+    candidate: CandidatePatch,
+    decision: PolicyDecision,
+    optimization_summary_path: Path,
+) -> list[str]:
+    return [
+        f"- risk_explanation: {risk_explanation_summary(candidate.risk_class, decision.allowed, decision.reasons)}",
+        f"- rollback_readiness: {_rollback_readiness_summary(repo, run_dir, optimization_summary_path=optimization_summary_path, applied_commit='')}",
+    ]
+
+
+def risk_explanation_summary(
+    risk_class: object,
+    policy_allowed: bool | object,
+    policy_reasons: tuple[str, ...] | list[object],
+) -> str:
+    reasons = [str(reason) for reason in policy_reasons if str(reason)]
+    return (
+        f"class={_report_scalar(risk_class)} "
+        f"policy_allowed={_report_scalar(bool(policy_allowed))} "
+        f"policy_reasons={','.join(reasons) if reasons else 'none'} "
+        f"review_required={_review_required_reason(risk_class)}"
+    )
+
+
+def rollback_readiness_summary(
+    repo: Path,
+    run_dir: Path,
+    *,
+    applied_commit: str = "",
+) -> str:
+    return _rollback_readiness_summary(
+        repo,
+        run_dir,
+        optimization_summary_path=run_dir / "optimization-summary.json",
+        applied_commit=applied_commit,
+    )
+
+
+def _rollback_readiness_summary(
+    repo: Path,
+    run_dir: Path,
+    *,
+    optimization_summary_path: Path,
+    applied_commit: str,
+) -> str:
+    rollback_plan = run_dir / "rollback-plan.json"
+    apply_plan = run_dir / "apply-plan.json"
+    if applied_commit and rollback_plan.exists():
+        return _rollback_readiness_fields(
+            state="applied_ready",
+            command="none",
+            artifact=_relative_ref(repo, rollback_plan),
+            applied_commit="present",
+        )
+    if apply_plan.exists():
+        command = _rollback_command_from_artifact(apply_plan, "apply-plan.json")
+        return _rollback_readiness_fields(
+            state="apply_ready",
+            command=command,
+            artifact=_relative_ref(repo, apply_plan),
+            applied_commit="missing",
+        )
+    if optimization_summary_path.exists():
+        command = _rollback_command_from_artifact(
+            optimization_summary_path,
+            "optimization-summary.json",
+        )
+        if command != "none":
+            return _rollback_readiness_fields(
+                state="planned",
+                command=command,
+                artifact=_relative_ref(repo, optimization_summary_path),
+                applied_commit="missing",
+            )
+    return _rollback_readiness_fields(
+        state="missing",
+        command="none",
+        artifact="none",
+        applied_commit="present" if applied_commit else "missing",
+    )
+
+
+def _rollback_readiness_fields(
+    *,
+    state: str,
+    command: str,
+    artifact: str,
+    applied_commit: str,
+) -> str:
+    return (
+        f"state={state} "
+        f"command={command} "
+        f"artifact={artifact} "
+        f"applied_commit={applied_commit}"
+    )
+
+
+def _review_required_reason(risk_class: object) -> str:
+    key = str(risk_class).strip().lower()
+    if key in {"b", "class_b"}:
+        return "class_b_review_required"
+    if key in {"c", "class_c"} or "restricted" in key or "policy" in key:
+        return "restricted_review_required"
+    return "none"
 
 
 def _eval_summary_lines(eval_report_path: Path) -> list[str]:
@@ -278,6 +396,35 @@ def _format_rollback_command(value: object) -> str:
     if isinstance(value, list) and all(isinstance(item, list) for item in value):
         return "; ".join(" ".join(str(part) for part in item) for item in value)
     return str(value)
+
+
+def _rollback_command_from_artifact(path: Path, artifact_name: str) -> str:
+    payload = _load_optional_json_object(path, artifact_name)
+    if payload is None:
+        return "none"
+    if artifact_name in {"apply-plan.json", "optimization-summary.json"}:
+        try:
+            validate_json_artifact(artifact_name, payload)
+        except ValueError:
+            return "none"
+    return _format_rollback_command(payload.get("rollback_command", []))
+
+
+def _load_optional_json_object(path: Path, artifact_name: str) -> dict[str, Any] | None:
+    try:
+        payload: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError(f"{artifact_name} must be a JSON object")
+    return payload
+
+
+def _relative_ref(repo: Path, path: Path) -> str:
+    try:
+        return path.relative_to(repo).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _repo_local_run_dir(repo: Path, run_id: str) -> Path:

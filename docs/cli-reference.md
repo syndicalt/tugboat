@@ -55,11 +55,15 @@ candidate_id: <id>
 candidate_file: CODEX.md
 candidate_state: needs_review
 risk_class: <class>
+risk_explanation: class=<class> policy_allowed=true policy_reasons=none review_required=none
 evals: all=passed
 rollback_ready: no
+rollback_readiness: state=planned command=tugboat rollback --decision latest artifact=.sidecar/runs/<run-id>/optimization-summary.json applied_commit=missing
 highest_impact: target=CODEX.md#Testing operator=add changed_lines=1 normative_changes=0 held_out_delta=0.08 instruction_token_delta=6 governance_passed=true
 review_next: inspect .sidecar/runs/<run-id>/candidate.diff
 ```
+
+`rollback_ready` keeps its strict compatibility meaning: `yes` only when an applied commit and a rollback-plan artifact exist. `rollback_readiness` is broader operator guidance and can be `missing`, `planned`, `apply_ready`, or `applied_ready`.
 
 Use `--compare` to compare the selected decision against another decision id or run ref. The comparison prints only bounded metadata fields: candidate id, target file, state, risk class, decision, eval summary, rollback readiness, and changed field names.
 

@@ -517,3 +517,241 @@ def test_inspect_decision_prints_highest_impact_metadata_only(
     assert "payload_snippet" not in output
     assert "Rationale should not print" not in output
     assert "+Use held-out tests." not in output
+
+
+def test_inspect_decision_prints_risk_and_rollback_readiness_metadata_only(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    codex.write_text("# Rules\n\nUse regression tests.\n", encoding="utf-8")
+    trace_path = repo / "trace.jsonl"
+    trace_path.write_text('{"type":"user_request","text":"Secret payload"}\n', encoding="utf-8")
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    diff_path = run_dir / "candidate.diff"
+    diff_path.write_text("--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use held-out tests.\n", encoding="utf-8")
+    eval_report = run_dir / "eval-report.json"
+    eval_report.write_text('{"schema_version":1,"candidate_id":1,"governance_passed":true,"held_out_score":1.0,"metrics":{},"passed":true,"recommendation":"accept","suite_id":"all","trigger_score":0.8}\n', encoding="utf-8")
+    (run_dir / "policy-gate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "allowed": False,
+                "reasons": ["modal_weakening", "new_external_endpoint"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "apply-plan.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+    (run_dir / "rollback-plan.json").write_text('{"schema_version":1}\n', encoding="utf-8")
+
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(
+            repo=repo,
+            bundle=TraceBundle(
+                trace_path=trace_path,
+                events=(
+                    TraceEvent(
+                        evidence_id="ev-1",
+                        event_type="user_request",
+                        source_trust="user",
+                        line_number=1,
+                        payload={"text": "Sensitive customer request"},
+                    ),
+                ),
+            ),
+        )
+        store.insert_run(
+            run_id="run-1",
+            stage="proposal",
+            manifest_hash="manifest-hash",
+            status="completed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.7,
+            evidence_refs=["ev-1"],
+            instruction_refs=["CODEX.md#Rules"],
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=CandidatePatch(
+                audit_id=audit_id,
+                base_file="CODEX.md",
+                base_hash=CandidatePatch.hash_file(codex),
+                diff=diff_path.read_text(encoding="utf-8"),
+                risk_class="restricted_policy_change",
+                rationale="Rationale should not print.",
+                sources=(SourceRef("ev-1", trusted=True),),
+            ),
+            diff_path=diff_path,
+            state="applied",
+        )
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={},
+        )
+        decision_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="tugboat",
+            policy="deterministic_policy_gate",
+            decision="applied",
+            reason="commit mode",
+            applied_commit="abc123",
+            rollback_ref=json.dumps(["tugboat", "rollback", "--decision", "latest"]),
+        )
+
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", str(decision_id)]) == 0
+    output = capsys.readouterr().out
+
+    assert (
+        "risk_explanation: class=restricted_policy_change policy_allowed=false "
+        "policy_reasons=modal_weakening,new_external_endpoint review_required=restricted_review_required"
+    ) in output
+    assert (
+        "rollback_readiness: state=applied_ready command=none "
+        "artifact=.sidecar/runs/run-1/rollback-plan.json applied_commit=present"
+    ) in output
+    assert "Sensitive customer request" not in output
+    assert "payload_snippet" not in output
+    assert "Rationale should not print" not in output
+    assert "tugboat rollback --decision latest" not in output
+
+
+def test_inspect_decision_prints_planned_rollback_readiness_from_optimization_summary(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex = repo / "CODEX.md"
+    codex.write_text("# Rules\n\nUse regression tests.\n", encoding="utf-8")
+    trace_path = repo / "trace.jsonl"
+    trace_path.write_text('{"type":"user_request","text":"Secret payload"}\n', encoding="utf-8")
+    run_dir = repo / ".sidecar" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    diff_path = run_dir / "candidate.diff"
+    diff_path.write_text("--- a/CODEX.md\n+++ b/CODEX.md\n@@\n+Use held-out tests.\n", encoding="utf-8")
+    eval_report = run_dir / "eval-report.json"
+    eval_report.write_text('{"schema_version":1,"candidate_id":1,"governance_passed":true,"held_out_score":1.0,"metrics":{},"passed":true,"recommendation":"accept","suite_id":"all","trigger_score":0.8}\n', encoding="utf-8")
+    (run_dir / "policy-gate.json").write_text(
+        '{"schema_version":1,"allowed":true,"reasons":[]}\n',
+        encoding="utf-8",
+    )
+    (run_dir / "optimization-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "audit_run": "run-1",
+                "candidate_id": 1,
+                "decision": "needs_review",
+                "governance_passed": True,
+                "held_out_score": 1.0,
+                "recommendation": "accept",
+                "suite_id": "all",
+                "trigger_score": 0.8,
+                "validation_baseline_score": None,
+                "acceptance_decision_recommendation": "needs_review",
+                "acceptance_evidence": ["audit:1"],
+                "acceptance_reasons": ["policy gate and eval report passed"],
+                "acceptance_summary_path": ".sidecar/runs/run-1/acceptance-summary.raw.json",
+                "accepted_bounded_edit_metadata": [
+                    {
+                        "changed_lines": 1,
+                        "file": "CODEX.md",
+                        "normative_changes": 0,
+                        "operator": "add",
+                        "section": "Testing",
+                    }
+                ],
+                "reviewer_checklist": ["Review candidate diff"],
+                "rollback_command": ["tugboat", "rollback", "--decision", "latest"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with Store.open(repo / ".sidecar" / "db.sqlite") as store:
+        episode_id = store.record_trace_episode(
+            repo=repo,
+            bundle=TraceBundle(
+                trace_path=trace_path,
+                events=(
+                    TraceEvent(
+                        evidence_id="ev-1",
+                        event_type="user_request",
+                        source_trust="user",
+                        line_number=1,
+                        payload={"text": "Sensitive customer request"},
+                    ),
+                ),
+            ),
+        )
+        store.insert_run(
+            run_id="run-1",
+            stage="proposal",
+            manifest_hash="manifest-hash",
+            status="completed",
+            run_dir=run_dir,
+            episode_id=episode_id,
+        )
+        audit_id = store.insert_audit(
+            run_id="run-1",
+            failure_class="instruction_missing",
+            severity="medium",
+            confidence=0.7,
+            evidence_refs=["ev-1"],
+            instruction_refs=["CODEX.md#Rules"],
+        )
+        candidate_id = store.insert_candidate(
+            audit_id=audit_id,
+            candidate=CandidatePatch(
+                audit_id=audit_id,
+                base_file="CODEX.md",
+                base_hash=CandidatePatch.hash_file(codex),
+                diff=diff_path.read_text(encoding="utf-8"),
+                risk_class="instruction_clarification",
+                rationale="Rationale should not print.",
+                sources=(SourceRef("ev-1", trusted=True),),
+            ),
+            diff_path=diff_path,
+            state="needs_review",
+        )
+        store.insert_eval(
+            candidate_id=candidate_id,
+            suite_id="all",
+            report_path=eval_report,
+            passed=True,
+            metrics={},
+        )
+        decision_id = store.insert_decision(
+            candidate_id=candidate_id,
+            actor="tugboat",
+            policy="optimization_acceptance_gate",
+            decision="needs_review",
+            reason="held_out_improved",
+        )
+
+    assert main(["inspect-decision", "--repo", str(repo), "--decision", str(decision_id)]) == 0
+    output = capsys.readouterr().out
+
+    assert (
+        "rollback_readiness: state=planned command=tugboat rollback --decision latest "
+        "artifact=.sidecar/runs/run-1/optimization-summary.json applied_commit=missing"
+    ) in output
+    assert "rollback_ready: no" in output
+    assert "Sensitive customer request" not in output
+    assert "payload_snippet" not in output
+    assert "Rationale should not print" not in output
