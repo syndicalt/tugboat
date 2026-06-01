@@ -39,6 +39,12 @@ class RedactionExportResult:
     redaction_candidates: tuple[dict[str, object], ...]
 
 
+@dataclass(frozen=True)
+class RetentionScan:
+    expired_candidates: tuple[Path, ...]
+    redaction_scan_paths: tuple[Path, ...]
+
+
 class RetentionScanBudgetExceeded(ValueError):
     pass
 
@@ -46,21 +52,21 @@ class RetentionScanBudgetExceeded(ValueError):
 def apply_retention_policy(repo: Path, policy: Policy, *, dry_run: bool = True) -> RetentionResult:
     repo = repo.resolve()
     runs_root = runs_dir(repo).resolve()
-    _enforce_scan_file_budget(runs_root, policy.retention_scan_file_budget)
-    candidates = _expired_runtime_artifacts(
+    scan = _scan_retention_artifacts(
         repo,
         runs_root=runs_root,
         raw_trace_days=policy.raw_traces_retention_days,
         checkpoint_days=policy.checkpoints_retention_days,
+        max_scan_files=policy.retention_scan_file_budget,
     )
-    redaction_candidates = _redaction_candidates(repo, _redaction_scan_artifacts(repo, candidates))
+    redaction_candidates = _redaction_candidates(repo, scan.redaction_scan_paths)
     deleted: list[str] = []
     if not dry_run:
-        for path in candidates:
+        for path in scan.expired_candidates:
             path.unlink(missing_ok=True)
             deleted.append(_relative(repo, path))
     return RetentionResult(
-        candidates=tuple(_relative(repo, path) for path in candidates),
+        candidates=tuple(_relative(repo, path) for path in scan.expired_candidates),
         deleted=tuple(deleted),
         redaction_candidates=redaction_candidates,
     )
@@ -75,14 +81,19 @@ def export_redacted_artifacts(
     repo = repo.resolve()
     output_dir = output_dir.resolve()
     _require_outside_sidecar(repo, output_dir, "redaction output")
-    _enforce_scan_file_budget(
-        runs_dir(repo).resolve(),
-        Policy().retention_scan_file_budget if scan_file_budget is None else scan_file_budget,
+    policy = Policy()
+    scan = _scan_retention_artifacts(
+        repo,
+        runs_root=runs_dir(repo).resolve(),
+        raw_trace_days=policy.raw_traces_retention_days,
+        checkpoint_days=policy.checkpoints_retention_days,
+        max_scan_files=(
+            policy.retention_scan_file_budget if scan_file_budget is None else scan_file_budget
+        ),
     )
-    candidates = _redaction_scan_artifacts(repo, ())
-    redaction_candidates = _redaction_candidates(repo, candidates)
+    redaction_candidates = _redaction_candidates(repo, scan.redaction_scan_paths)
     exported: list[str] = []
-    for source in candidates:
+    for source in scan.redaction_scan_paths:
         try:
             text = source.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -100,35 +111,19 @@ def export_redacted_artifacts(
     )
 
 
-def _expired_runtime_artifacts(
+def _scan_retention_artifacts(
     repo: Path,
     *,
     runs_root: Path,
     raw_trace_days: int,
     checkpoint_days: int,
-) -> tuple[Path, ...]:
+    max_scan_files: int,
+) -> RetentionScan:
     if not runs_root.exists():
-        return ()
+        return RetentionScan(expired_candidates=(), redaction_scan_paths=())
     now = time.time()
-    candidates: list[Path] = []
-    for path in runs_root.rglob("*"):
-        if path.is_symlink() or not path.is_file():
-            continue
-        try:
-            path.relative_to(runs_root)
-        except ValueError:
-            continue
-        age_days = (now - path.stat().st_mtime) / (24 * 60 * 60)
-        if path.name in RAW_TRACE_FILES and age_days > raw_trace_days:
-            candidates.append(path)
-        elif (path.name in CHECKPOINT_FILES or path.name.startswith("checkpoint")) and age_days > checkpoint_days:
-            candidates.append(path)
-    return tuple(sorted(candidates, key=lambda item: _relative(repo, item)))
-
-
-def _enforce_scan_file_budget(runs_root: Path, max_scan_files: int) -> None:
-    if not runs_root.exists():
-        return
+    expired_candidates: list[Path] = []
+    redaction_paths: dict[str, Path] = {}
     count = 0
     for path in runs_root.rglob("*"):
         if path.is_symlink() or not path.is_file():
@@ -138,23 +133,29 @@ def _enforce_scan_file_budget(runs_root: Path, max_scan_files: int) -> None:
             raise RetentionScanBudgetExceeded(
                 f"scan budget exceeded: found more than {max_scan_files} files under .sidecar/runs"
             )
-
-
-def _redaction_scan_artifacts(repo: Path, candidates: tuple[Path, ...]) -> tuple[Path, ...]:
-    runs_root = runs_dir(repo).resolve()
-    paths: dict[str, Path] = {_relative(repo, path): path for path in candidates}
-    if runs_root.exists():
-        for path in runs_root.rglob("*"):
-            if path.is_symlink() or not path.is_file():
-                continue
-            if (
-                path.name in RAW_TRACE_FILES
-                or path.name in CHECKPOINT_FILES
-                or path.name.startswith("checkpoint")
-                or path.name in REDACTABLE_RETAINED_ARTIFACTS
-            ):
-                paths[_relative(repo, path)] = path
-    return tuple(paths[key] for key in sorted(paths))
+        try:
+            path.relative_to(runs_root)
+        except ValueError:
+            continue
+        relative = _relative(repo, path)
+        age_days = (now - path.stat().st_mtime) / (24 * 60 * 60)
+        if path.name in RAW_TRACE_FILES and age_days > raw_trace_days:
+            expired_candidates.append(path)
+        elif (path.name in CHECKPOINT_FILES or path.name.startswith("checkpoint")) and age_days > checkpoint_days:
+            expired_candidates.append(path)
+        if (
+            path.name in RAW_TRACE_FILES
+            or path.name in CHECKPOINT_FILES
+            or path.name.startswith("checkpoint")
+            or path.name in REDACTABLE_RETAINED_ARTIFACTS
+        ):
+            redaction_paths[relative] = path
+    for path in expired_candidates:
+        redaction_paths[_relative(repo, path)] = path
+    return RetentionScan(
+        expired_candidates=tuple(sorted(expired_candidates, key=lambda item: _relative(repo, item))),
+        redaction_scan_paths=tuple(redaction_paths[key] for key in sorted(redaction_paths)),
+    )
 
 
 def _relative(repo: Path, path: Path) -> str:

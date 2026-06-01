@@ -6,14 +6,17 @@ from pathlib import Path
 import pytest
 
 from tugboat.audit.pipeline import detect_trace_format
+import tugboat.traces.adapters as trace_adapters
 from tugboat.traces.adapters import (
     ingest_ci_failure,
     ingest_claude_transcript,
+    ingest_claude_transcript_bundle,
     ingest_codex_session,
     ingest_codex_session_bundle,
     ingest_mcp_session,
     ingest_mcp_session_bundle,
 )
+from tugboat.traces.ingest import TraceEventBudgetExceeded
 from tugboat.traces.ingest import ingest_jsonl_trace
 
 FIXTURE_TRACE_DIR = Path(__file__).parent / "fixtures" / "traces"
@@ -434,6 +437,35 @@ def test_ingest_claude_transcript_maps_corrections_and_subagents(tmp_path: Path)
     assert episode.user_corrections[0].payload["content"] == "Use TDD"
     assert episode.subagent_reports[0].payload["agent"] == "reviewer"
     assert episode.final_answer == "Implemented"
+
+
+def test_ingest_claude_json_array_enforces_event_budget_before_derivation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = tmp_path / "claude.json"
+    transcript.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "Fix one"},
+                    {"role": "assistant", "content": "Done"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_derivation(events: list[dict[str, object]]) -> list[dict[str, object]]:
+        raise AssertionError("over-budget Claude JSON should not reach derivation")
+
+    monkeypatch.setattr(trace_adapters, "_derive_test_results", fail_derivation)
+
+    with pytest.raises(
+        TraceEventBudgetExceeded,
+        match="trace event budget exceeded: 2 events, limit 1",
+    ):
+        ingest_claude_transcript_bundle(transcript, max_events=1)
 
 
 def test_ingest_claude_transcript_maps_jsonl_content_blocks(tmp_path: Path):

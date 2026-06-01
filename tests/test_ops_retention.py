@@ -9,7 +9,8 @@ import pytest
 
 from tugboat.models import Policy
 from tugboat.cli import _write_retention_report, main
-from tugboat.ops.retention import apply_retention_policy
+from tugboat.ops.retention import apply_retention_policy, export_redacted_artifacts
+from tugboat.paths import runs_dir
 from tugboat.security.secrets import SecretScanError
 
 
@@ -47,6 +48,18 @@ def test_retention_policy_dry_run_reports_expired_raw_trace_and_checkpoints(tmp_
     assert (run_dir / "events.jsonl").exists()
     assert (run_dir / "checkpoint-patch-eval.json").exists()
     assert (run_dir / "audit.json").exists()
+
+
+def test_retention_policy_handles_missing_runs_root_without_candidates(tmp_path: Path):
+    result = apply_retention_policy(
+        tmp_path,
+        Policy(raw_traces_retention_days=14, checkpoints_retention_days=7),
+        dry_run=True,
+    )
+
+    assert result.candidates == ()
+    assert result.deleted == ()
+    assert result.redaction_candidates == ()
 
 
 def test_retention_reports_invalid_policy_without_traceback(tmp_path: Path, capsys):
@@ -140,6 +153,79 @@ def test_retention_policy_delete_mode_removes_only_expired_runtime_artifacts(tmp
     assert not (run_dir / "events.jsonl").exists()
     assert not (run_dir / "checkpoint-patch-eval.json").exists()
     assert (run_dir / "candidate.diff").exists()
+
+
+def test_retention_policy_traverses_runs_root_once_while_preserving_cleanup_and_redaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    secret_trace = run_dir / "trace-input.jsonl"
+    _touch_old(secret_trace, days_old=15)
+    secret_trace.write_text('{"output":"OPENAI_API_KEY=sk-1234567890abcdefghijkl"}\n', encoding="utf-8")
+    timestamp = time.time() - 15 * 24 * 60 * 60
+    os.utime(secret_trace, (timestamp, timestamp))
+    _touch_old(run_dir / "events.jsonl", days_old=8)
+    _touch_old(run_dir / "candidate.diff", days_old=99)
+    _touch_old(run_dir / "trace-redacted.jsonl", days_old=1)
+    resolved_runs_root = runs_dir(tmp_path).resolve()
+    original_rglob = Path.rglob
+    runs_root_scans = 0
+
+    def counted_rglob(path: Path, pattern: str):
+        nonlocal runs_root_scans
+        if path.resolve() == resolved_runs_root:
+            runs_root_scans += 1
+        yield from original_rglob(path, pattern)
+
+    monkeypatch.setattr(Path, "rglob", counted_rglob)
+
+    result = apply_retention_policy(
+        tmp_path,
+        Policy(raw_traces_retention_days=14, checkpoints_retention_days=7),
+        dry_run=False,
+    )
+
+    assert runs_root_scans == 1
+    assert result.deleted == (
+        ".sidecar/runs/run-1/events.jsonl",
+        ".sidecar/runs/run-1/trace-input.jsonl",
+    )
+    assert result.redaction_candidates == (
+        {
+            "path": ".sidecar/runs/run-1/trace-input.jsonl",
+            "line_number": 1,
+            "kind": "openai_api_key",
+        },
+    )
+    assert not secret_trace.exists()
+    assert not (run_dir / "events.jsonl").exists()
+    assert (run_dir / "candidate.diff").exists()
+    assert (run_dir / "trace-redacted.jsonl").exists()
+
+
+def test_retention_redaction_export_skips_unreadable_runtime_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run_dir = tmp_path / ".sidecar" / "runs" / "run-1"
+    unreadable = run_dir / "trace-input.jsonl"
+    _touch_old(unreadable, days_old=15)
+    output_dir = tmp_path / "redacted"
+    original_read_text = Path.read_text
+
+    def read_text(path: Path, *args, **kwargs):
+        if path == unreadable:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    result = export_redacted_artifacts(tmp_path, output_dir)
+
+    assert result.exported == ()
+    assert result.redaction_candidates == ()
+    assert not (output_dir / ".sidecar" / "runs" / "run-1" / "trace-input.jsonl").exists()
 
 
 def test_retention_cli_apply_blocks_when_scan_file_budget_exceeded_without_deleting(

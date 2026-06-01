@@ -76,6 +76,7 @@ def ingest_claude_transcript_bundle(path: Path, *, max_events: int | None = None
                     "summary": message.get("content", ""),
                 }
             )
+        enforce_trace_event_budget(len(events), max_events)
     return _bundle_from_payloads(path, _derive_test_results(events), max_events=max_events)
 
 
