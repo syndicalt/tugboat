@@ -187,6 +187,8 @@ python -m venv .sidecar/ci/install-smoke-venv
 .sidecar/ci/install-smoke-venv/bin/python -m pip install dist/<wheel>.whl
 {
   echo "installed tugboat wheel: dist/<wheel>.whl"
+  echo "installed tugboat --version"
+  .sidecar/ci/install-smoke-venv/bin/tugboat --version
   echo "installed tugboat doctor"
   .sidecar/ci/install-smoke-venv/bin/tugboat doctor
   echo "installed tugboat index --repo . --check"

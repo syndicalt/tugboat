@@ -61,6 +61,8 @@ jobs:
           {
             .sidecar/ci/install-smoke-venv/bin/python -m pip install "${WHEEL}"
             echo "installed tugboat wheel: ${WHEEL}"
+            echo "installed tugboat --version"
+            .sidecar/ci/install-smoke-venv/bin/tugboat --version
             echo "installed tugboat doctor"
             .sidecar/ci/install-smoke-venv/bin/tugboat doctor --repo .
             echo "installed tugboat index --repo . --check"

@@ -31,6 +31,7 @@ python -m twine check dist/<wheel>.whl
 python -m venv .sidecar/ci/install-smoke-venv
 .sidecar/ci/install-smoke-venv/bin/python -m pip install dist/<wheel>.whl
 echo "installed tugboat wheel: dist/<wheel>.whl"
+.sidecar/ci/install-smoke-venv/bin/tugboat --version
 .sidecar/ci/install-smoke-venv/bin/tugboat doctor
 .sidecar/ci/install-smoke-venv/bin/tugboat index --repo . --check
 .sidecar/ci/install-smoke-venv/bin/tugboat harness check --repo .
@@ -50,7 +51,7 @@ Before tagging:
 
 - Confirm `tugboat doctor` reports `proposal_only` and `auto_apply: disabled`.
 - Confirm CI retained the pytest log with total coverage at or above 90%, `ci-report.json`, security-review evidence, harness output, and release artifact manifest.
-- Confirm the built wheel installs in a clean virtual environment and the installed `tugboat doctor`, `tugboat index --repo . --check`, and `tugboat harness check --repo .` commands run.
+- Confirm the built wheel installs in a clean virtual environment and the installed `tugboat --version`, `tugboat doctor`, `tugboat index --repo . --check`, and `tugboat harness check --repo .` commands run.
 - Confirm the installed proposal-loop smoke in `.sidecar/ci/proposal-smoke-repo` writes `.sidecar/runs/<run-id>/audit.json`, `candidate.json`, `eval-report.json`, `optimization-summary.json`, and `report.md`.
 - Confirm `.sidecar/ops/release-artifact-manifest.json` records the wheel hash, retained evidence, commit, CI URL, approver, and security review decision.
 - Confirm the security review for the release has no open critical or high findings.

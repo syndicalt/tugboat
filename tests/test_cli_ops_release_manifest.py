@@ -6,6 +6,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tugboat import cli as cli_module
 from tugboat.cli import main
 from tugboat.db import Store
@@ -78,6 +80,8 @@ def _write_release_evidence(repo: Path) -> dict[str, Path]:
     )
     evidence["install"].write_text(
         "installed tugboat wheel: dist/tugboat-0.1.0-py3-none-any.whl\n"
+        "installed tugboat --version\n"
+        "tugboat 0.1.0\n"
         "installed tugboat doctor\n"
         "tugboat: ok\n"
         "mode: proposal_only\n"
@@ -109,6 +113,20 @@ def _rewrite_release_evidence_wheel_filename(
             evidence_path.read_text(encoding="utf-8").replace(from_filename, to_filename),
             encoding="utf-8",
         )
+
+
+def _rewrite_release_evidence_package_version(
+    evidence: dict[str, Path],
+    *,
+    from_version: str,
+    to_version: str,
+) -> None:
+    evidence["install"].write_text(
+        evidence["install"]
+        .read_text(encoding="utf-8")
+        .replace(f"tugboat {from_version}", f"tugboat {to_version}"),
+        encoding="utf-8",
+    )
 
 
 def _passing_ci_report() -> dict[str, object]:
@@ -239,12 +257,22 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     capsys,
 ) -> None:
     repo = tmp_path
-    wheel = repo / "dist" / "tugboat-0.1.0-py3-none-any.whl"
+    wheel = repo / "dist" / "tugboat-1.0.0-py3-none-any.whl"
     wheel.parent.mkdir()
     wheel.write_bytes(b"wheel-bytes")
     evidence = _write_release_evidence(repo)
+    _rewrite_release_evidence_wheel_filename(
+        evidence,
+        from_filename="tugboat-0.1.0-py3-none-any.whl",
+        to_filename=wheel.name,
+    )
+    _rewrite_release_evidence_package_version(
+        evidence,
+        from_version="0.1.0",
+        to_version="1.0.0",
+    )
     (repo / "pyproject.toml").write_text(
-        "[project]\nname = \"tugboat\"\nversion = \"0.1.0\"\n",
+        "[project]\nname = \"tugboat\"\nversion = \"1.0.0\"\n",
         encoding="utf-8",
     )
     current_head = _init_release_repo(repo)
@@ -270,7 +298,9 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     assert output_path.stat().st_mode & 0o777 == 0o600
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     install_smoke = (
-        b"installed tugboat wheel: dist/tugboat-0.1.0-py3-none-any.whl\n"
+        b"installed tugboat wheel: dist/tugboat-1.0.0-py3-none-any.whl\n"
+        b"installed tugboat --version\n"
+        b"tugboat 1.0.0\n"
         b"installed tugboat doctor\n"
         b"tugboat: ok\n"
         b"mode: proposal_only\n"
@@ -289,11 +319,11 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     )
     build_wheel = (
         b"python -m build --wheel\n"
-        b"built dist/tugboat-0.1.0-py3-none-any.whl\n"
+        b"built dist/tugboat-1.0.0-py3-none-any.whl\n"
     )
     twine_check = (
-        b"python -m twine check dist/tugboat-0.1.0-py3-none-any.whl\n"
-        b"PASSED dist/tugboat-0.1.0-py3-none-any.whl\n"
+        b"python -m twine check dist/tugboat-1.0.0-py3-none-any.whl\n"
+        b"PASSED dist/tugboat-1.0.0-py3-none-any.whl\n"
     )
     pytest_coverage = (
         b"1226 passed in 75.84s\n"
@@ -307,7 +337,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
     assert payload == {
         "schema_version": 1,
         "artifact_kind": "release_artifact_manifest",
-        "package": {"name": "tugboat", "version": "0.1.0"},
+        "package": {"name": "tugboat", "version": "1.0.0"},
         "commit": current_head,
         "ci_url": "https://ci.example/runs/1",
         "approver": "release-owner",
@@ -329,6 +359,7 @@ def test_ops_release_manifest_records_release_artifacts_and_audits_hash(
             "python -m build --wheel",
             "python -m twine check dist/<wheel>.whl",
             "clean venv install from built wheel",
+            "installed tugboat --version",
             "installed tugboat doctor",
             "installed tugboat index --repo . --check",
             "installed tugboat harness check --repo .",
@@ -439,6 +470,115 @@ def test_ops_release_manifest_accepts_real_installed_index_smoke_output(
     output_path = sidecar_dir(repo) / "ops" / "release-artifact-manifest.json"
     assert f"release manifest: {output_path}" in capsys.readouterr().out
     assert output_path.exists()
+
+
+def test_ops_release_manifest_blocks_install_smoke_without_installed_version_identity(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    wheel = repo / "dist" / "tugboat-1.0.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    _rewrite_release_evidence_wheel_filename(
+        evidence,
+        from_filename="tugboat-0.1.0-py3-none-any.whl",
+        to_filename=wheel.name,
+    )
+    evidence["install"].write_text(
+        evidence["install"]
+        .read_text(encoding="utf-8")
+        .replace("installed tugboat --version\ntugboat 0.1.0\n", ""),
+        encoding="utf-8",
+    )
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"1.0.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: install smoke evidence did not pass"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_ops_release_manifest_blocks_dirty_release_metadata_after_current_head(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = tmp_path
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"1.0.0\"\n",
+        encoding="utf-8",
+    )
+    current_head = _init_release_repo(repo)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tugboat\"\nversion = \"1.0.1\"\n",
+        encoding="utf-8",
+    )
+    wheel = repo / "dist" / "tugboat-1.0.1-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"wheel-bytes")
+    evidence = _write_release_evidence(repo)
+    _rewrite_release_evidence_wheel_filename(
+        evidence,
+        from_filename="tugboat-0.1.0-py3-none-any.whl",
+        to_filename=wheel.name,
+    )
+    _rewrite_release_evidence_package_version(
+        evidence,
+        from_version="0.1.0",
+        to_version="1.0.1",
+    )
+
+    assert (
+        main(
+            _release_manifest_args(
+                repo=repo,
+                wheel=wheel,
+                commit=current_head,
+                evidence_paths=list(evidence.values()),
+            )
+        )
+        == 1
+    )
+
+    assert (
+        "release manifest blocked: release metadata has uncommitted changes"
+        in capsys.readouterr().out
+    )
+    assert not (sidecar_dir(repo) / "ops" / "release-artifact-manifest.json").exists()
+
+
+def test_release_metadata_cleanliness_wraps_git_status_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fail_git_status(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, ["git", "status"])
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fail_git_status)
+
+    with pytest.raises(
+        ValueError,
+        match="release metadata cleanliness check failed",
+    ):
+        cli_module._validate_release_metadata_clean(tmp_path)
 
 
 def test_ops_release_manifest_blocks_wheel_version_that_differs_from_project_metadata(

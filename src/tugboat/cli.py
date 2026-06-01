@@ -1760,6 +1760,9 @@ def _write_release_artifact_manifest(
         raise ValueError("security review decision is not approved")
     if not evidence_paths:
         raise ValueError("retained evidence is required")
+    package_metadata = _project_package_metadata(resolved_repo)
+    _validate_release_wheel_matches_package(resolved_wheel.name, package_metadata)
+
     retained_evidence = []
     for evidence_path in evidence_paths:
         resolved_evidence = evidence_path.resolve()
@@ -1775,7 +1778,11 @@ def _write_release_artifact_manifest(
                 for finding in error.findings
             )
             raise ValueError(f"retained evidence contains secret: {findings}") from error
-        _validate_release_evidence_content(resolved_evidence, wheel_filename=resolved_wheel.name)
+        _validate_release_evidence_content(
+            resolved_evidence,
+            wheel_filename=resolved_wheel.name,
+            package_version=package_metadata["version"],
+        )
         retained_evidence.append(_file_manifest_entry(resolved_evidence))
     missing_release_evidence = _missing_release_evidence(retained_evidence)
     if missing_release_evidence is not None:
@@ -1831,9 +1838,7 @@ def _write_release_artifact_manifest(
     current_head = _current_git_head(resolved_repo)
     if commit != current_head:
         raise ValueError(f"commit does not match current HEAD: {current_head}")
-    package_metadata = _project_package_metadata(resolved_repo)
-    _validate_release_wheel_matches_package(resolved_wheel.name, package_metadata)
-
+    _validate_release_metadata_clean(resolved_repo)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "artifact_kind": "release_artifact_manifest",
@@ -1855,6 +1860,7 @@ def _write_release_artifact_manifest(
             "python -m build --wheel",
             "python -m twine check dist/<wheel>.whl",
             "clean venv install from built wheel",
+            "installed tugboat --version",
             "installed tugboat doctor",
             "installed tugboat index --repo . --check",
             "installed tugboat harness check --repo .",
@@ -1904,7 +1910,12 @@ def _missing_release_evidence(retained_evidence: Sequence[dict[str, object]]) ->
     return None
 
 
-def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> None:
+def _validate_release_evidence_content(
+    path: Path,
+    *,
+    wheel_filename: str,
+    package_version: str,
+) -> None:
     name = path.name
     text = path.read_text(encoding="utf-8", errors="replace")
     lowered = text.lower()
@@ -1920,6 +1931,7 @@ def _validate_release_evidence_content(path: Path, *, wheel_filename: str) -> No
         if (
             "installed tugboat wheel" not in lowered
             or wheel_filename.lower() not in lowered
+            or not _contains_installed_version_identity(lowered, package_version)
             or "installed tugboat doctor" not in lowered
             or "tugboat: ok" not in lowered
             or "mode: proposal_only" not in lowered
@@ -2020,6 +2032,18 @@ def _contains_installed_index_success(lowered_text: str) -> bool:
         if line.strip() != command:
             continue
         return _installed_index_success_line(lines[index + 1].strip())
+    return False
+
+
+def _contains_installed_version_identity(lowered_text: str, package_version: str) -> bool:
+    lines = lowered_text.splitlines()
+    command = "installed tugboat --version"
+    expected_output = f"tugboat {package_version}".lower()
+    for index, line in enumerate(lines[:-1]):
+        if line.strip() != command:
+            continue
+        if lines[index + 1].strip() == expected_output:
+            return True
     return False
 
 
@@ -2133,6 +2157,30 @@ def _current_git_head(repo: Path) -> str:
     except (OSError, subprocess.CalledProcessError) as error:
         raise ValueError("repo must have a current git HEAD") from error
     return result.stdout.strip()
+
+
+_RELEASE_METADATA_PATHS = (
+    "pyproject.toml",
+    "docs/releases",
+    "docs/ops",
+    "docs/roadmaps",
+    "CHANGELOG.md",
+)
+
+
+def _validate_release_metadata_clean(repo: Path) -> None:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--", *_RELEASE_METADATA_PATHS],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("release metadata cleanliness check failed") from error
+    if result.stdout.strip():
+        raise ValueError("release metadata has uncommitted changes")
 
 
 def _file_manifest_entry(path: Path) -> dict[str, object]:
