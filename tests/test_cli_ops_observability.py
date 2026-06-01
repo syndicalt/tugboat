@@ -151,6 +151,11 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
             finding="Duplicate instruction rule appears 2 times: run tests.",
             severity="duplicate_rule",
         )
+        store.record_harness_finding(
+            repo_path=repo,
+            finding="docs/runbook.md is missing ownership metadata.",
+            severity="stale_doc",
+        )
         trace_event = store.append_audit_event(
             "trace_event.recorded",
             {
@@ -204,6 +209,7 @@ def test_ops_observability_cli_writes_summary_from_sidecar_state(tmp_path: Path,
     assert summary["provider_backend_failure_rate"] == {"failed": 1, "rate": 1, "total": 1}
     assert summary["corpus_growth"] == {"earliest_count": 1, "latest_count": 1, "delta": 0}
     assert summary["duplicate_rule_count"] == 1
+    assert summary["stale_doc_count"] == 1
     assert summary["user_correction_recurrence"]["correction_count"] == 1
     assert summary["recurring_incident_rate"] == {
         "incident_count": 3,

@@ -211,6 +211,11 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
             finding="Duplicate instruction rule appears 2 times: run tests.",
             severity="duplicate_rule",
         )
+        store.record_harness_finding(
+            repo_path=repo,
+            finding="docs/runbook.md is missing ownership metadata.",
+            severity="stale_doc",
+        )
 
     assert main(["eval", "--repo", str(repo), "--candidate", "run-1", "--suite", "all"]) == 1
 
@@ -230,6 +235,7 @@ def test_eval_suite_all_runs_offline_and_writes_recommendation_metrics(tmp_path:
         "recurring_incident_rate": 1,
         "rejection_rate": 0.333333,
         "rollback_rate": 0.333333,
+        "stale_doc_count": 1,
         "user_correction_recurrence": 0,
     }
     assert report["metrics"]["held_out_improved"] == 0

@@ -1127,6 +1127,7 @@ def test_validate_observability_summary_artifact_accepts_current_schema():
                 "corpus_growth": {"earliest_count": 1, "latest_count": 2, "delta": 1},
                 "provider_backend_failure_rate": {"failed": 1, "rate": 1, "total": 1},
                 "duplicate_rule_count": 1,
+                "stale_doc_count": 1,
                 "user_correction_recurrence": {"correction_count": 1},
                 "recurring_incident_rate": {
                     "incident_count": 3,

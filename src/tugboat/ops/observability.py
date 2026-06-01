@@ -17,7 +17,7 @@ def summarize_observability(
     jobs: Iterable[dict[str, Any]] = (),
     evals: Iterable[dict[str, Any]] = (),
     corpus_snapshots: Iterable[dict[str, Any]] = (),
-    harness_findings: Iterable[str] = (),
+    harness_findings: Iterable[object] = (),
     trace_events: Iterable[dict[str, Any]] = (),
     incidents: Iterable[dict[str, Any]] = (),
     auto_apply_events: Iterable[dict[str, Any]] = (),
@@ -29,6 +29,7 @@ def summarize_observability(
     job_items = list(jobs)
     edit_counts = _edit_counts(job_items)
     eval_items = list(evals)
+    harness_finding_items = list(harness_findings)
     return {
         "run_duration": _run_duration_summary(run_items),
         "failure_kind_counts": dict(sorted(_failure_kind_counts(run_items).items())),
@@ -39,7 +40,8 @@ def summarize_observability(
         "governance_regression_count": _governance_regression_count(eval_items),
         "corpus_growth": _corpus_growth(corpus_snapshots),
         "provider_backend_failure_rate": _provider_backend_failure_rate(run_items),
-        "duplicate_rule_count": _duplicate_rule_count(harness_findings),
+        "duplicate_rule_count": _duplicate_rule_count(harness_finding_items),
+        "stale_doc_count": _stale_doc_count(harness_finding_items),
         "user_correction_recurrence": _user_correction_recurrence(trace_events),
         "recurring_incident_rate": _recurring_incident_rate(incidents),
         "auto_apply_lanes": _auto_apply_lane_counts(
@@ -63,8 +65,13 @@ def summarize_sidecar_observability(repo: Path) -> dict[str, Any]:
         decisions = _sidecar_decisions(connection)
         incidents = _sidecar_incidents(connection)
         harness_findings = [
-            str(row["finding"])
-            for row in connection.execute("SELECT finding FROM harness_findings ORDER BY id")
+            {
+                "finding": str(row["finding"]),
+                "severity": str(row["severity"]),
+            }
+            for row in connection.execute(
+                "SELECT finding, severity FROM harness_findings ORDER BY id"
+            )
         ]
         trace_events = _sidecar_trace_events(connection)
         corpus_snapshots = _sidecar_corpus_snapshots(connection, repo)
@@ -560,11 +567,31 @@ def _provider_backend_failure_rate(runs: list[dict[str, Any]]) -> dict[str, int 
     }
 
 
-def _duplicate_rule_count(harness_findings: Iterable[str]) -> int:
+def _finding_text(finding: object) -> str:
+    if isinstance(finding, dict):
+        return str(finding.get("finding", ""))
+    return str(finding)
+
+
+def _finding_severity(finding: object) -> str:
+    if isinstance(finding, dict):
+        return str(finding.get("severity", ""))
+    return ""
+
+
+def _duplicate_rule_count(harness_findings: Iterable[object]) -> int:
     return sum(
         1
         for finding in harness_findings
-        if str(finding).startswith("Duplicate instruction rule appears ")
+        if _finding_text(finding).startswith("Duplicate instruction rule appears ")
+    )
+
+
+def _stale_doc_count(harness_findings: Iterable[object]) -> int:
+    return sum(
+        1
+        for finding in harness_findings
+        if _finding_severity(finding) == "stale_doc"
     )
 
 

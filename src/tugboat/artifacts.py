@@ -1213,6 +1213,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "corpus_growth",
                     "provider_backend_failure_rate",
                     "duplicate_rule_count",
+                    "stale_doc_count",
                     "user_correction_recurrence",
                     "recurring_incident_rate",
                     "auto_apply_lanes",
@@ -1228,6 +1229,7 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
                     "corpus_growth": {"type": "object"},
                     "provider_backend_failure_rate": {"type": "object"},
                     "duplicate_rule_count": {"type": "integer"},
+                    "stale_doc_count": {"type": "integer"},
                     "user_correction_recurrence": {"type": "object"},
                     "recurring_incident_rate": {"type": "object"},
                     "auto_apply_lanes": {

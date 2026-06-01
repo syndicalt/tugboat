@@ -235,6 +235,7 @@ def _longitudinal_summary_lines(payload: dict[str, Any]) -> list[str]:
         "mean_changed_lines",
         "corpus_growth",
         "duplicate_rule_count",
+        "stale_doc_count",
         "governance_regression_count",
         "user_correction_recurrence",
     )

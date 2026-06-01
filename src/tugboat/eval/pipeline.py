@@ -265,6 +265,7 @@ def _longitudinal_eval_metrics(repo: Path) -> dict[str, object]:
         "mean_changed_lines": summary.get("mean_changed_lines", 0),
         "corpus_growth": corpus_growth.get("delta", 0),
         "duplicate_rule_count": summary.get("duplicate_rule_count", 0),
+        "stale_doc_count": summary.get("stale_doc_count", 0),
         "governance_regression_count": summary.get("governance_regression_count", 0),
         "user_correction_recurrence": user_corrections.get("recurring_correction_count", 0),
     }

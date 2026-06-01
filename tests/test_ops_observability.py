@@ -112,6 +112,11 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
             "Duplicate instruction rule appears 2 times: run tests.",
             "CODEX.md has no repo-local markdown references; keep instruction files as short maps.",
             "Duplicate instruction rule appears 3 times: cite evidence.",
+            {"finding": "docs/runbook.md is missing ownership metadata.", "severity": "stale_doc"},
+            {
+                "finding": "docs/runbook.md is missing verification-status metadata.",
+                "severity": "stale_doc",
+            },
         ],
         trace_events=[
             {"type": "user_correction", "content": "Run regression tests before final."},
@@ -167,6 +172,7 @@ def test_summarize_observability_returns_json_safe_phase_10_metrics() -> None:
         "total": 3,
     }
     assert summary["duplicate_rule_count"] == 2
+    assert summary["stale_doc_count"] == 2
     assert summary["user_correction_recurrence"] == {
         "correction_count": 3,
         "recurring_correction_count": 1,
