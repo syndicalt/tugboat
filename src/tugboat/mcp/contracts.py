@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from tugboat import __version__
-from tugboat.artifacts import validate_json_artifact
+from tugboat.artifacts import ArtifactValidationError, validate_json_artifact
 from tugboat.config import load_policy
 from tugboat.corpus.indexer import index_repo
 from tugboat.daemon.queue import DaemonQueue
@@ -94,6 +94,10 @@ MCP_TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "tugboat_index_summary": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_instruction_graph": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
     "tugboat_latest_audit": _object_schema({"repo": _REPO_SCHEMA}, ("repo",)),
+    "tugboat_latest_failed_gates": _object_schema(
+        {"repo": _REPO_SCHEMA, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+        ("repo",),
+    ),
     "tugboat_latest_runs": _object_schema(
         {"repo": _REPO_SCHEMA, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
         ("repo",),
@@ -504,6 +508,49 @@ def tugboat_latest_audit(repo: str | Path) -> dict[str, Any]:
         return {"audit": audit}
 
     return _audit_call(repo_path, "tugboat_latest_audit", {}, read)
+
+
+def tugboat_latest_failed_gates(repo: str | Path, limit: int = 10) -> dict[str, Any]:
+    repo_path = _resolve_local_repo(repo)
+    normalized_limit = _normalize_limit(limit)
+
+    def read() -> dict[str, Any]:
+        failed_gates: list[dict[str, Any]] = []
+        with Store.open(sidecar_dir(repo_path) / "db.sqlite") as store:
+            rows = store.connection.execute(
+                """
+                SELECT id, stage, updated_at, run_dir
+                FROM runs
+                ORDER BY updated_at DESC, created_at DESC, id DESC
+                LIMIT 100
+                """
+            ).fetchall()
+        for row in rows:
+            run_id = str(row[0])
+            stage = str(row[1])
+            observed_at = str(row[2])
+            run_dir = _stored_path(repo_path, row[3])
+            failed_gates.extend(
+                _failed_gate_artifacts_for_run(
+                    repo_path,
+                    run_id=run_id,
+                    stage=stage,
+                    observed_at=observed_at,
+                    run_dir=run_dir,
+                )
+            )
+            if len(failed_gates) >= normalized_limit:
+                break
+        if len(failed_gates) < normalized_limit:
+            failed_gates.extend(_ci_gate_failures(repo_path))
+        return {"failed_gates": failed_gates[:normalized_limit]}
+
+    return _audit_call(
+        repo_path,
+        "tugboat_latest_failed_gates",
+        {"limit": normalized_limit},
+        read,
+    )
 
 
 def tugboat_run_report(repo: str | Path, run_id: str) -> dict[str, Any]:
@@ -1175,6 +1222,7 @@ MCP_TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "tugboat_index_summary": tugboat_index_summary,
     "tugboat_instruction_graph": tugboat_instruction_graph,
     "tugboat_latest_audit": tugboat_latest_audit,
+    "tugboat_latest_failed_gates": tugboat_latest_failed_gates,
     "tugboat_latest_runs": tugboat_latest_runs,
     "tugboat_recent_decisions": tugboat_recent_decisions,
     "tugboat_record_episode": tugboat_record_episode,
@@ -1621,6 +1669,313 @@ def _run_artifact_refs(repo: Path, run_dir: Path) -> list[dict[str, str]]:
         for kind, filename in RUN_ARTIFACTS
         if (run_dir / filename).is_file()
     ]
+
+
+def _failed_gate_artifacts_for_run(
+    repo: Path,
+    *,
+    run_id: str,
+    stage: str,
+    observed_at: str,
+    run_dir: Path,
+) -> list[dict[str, Any]]:
+    gates: list[dict[str, Any]] = []
+    gates.extend(
+        _policy_gate_failure(
+            repo,
+            run_id=run_id,
+            stage=stage,
+            observed_at=observed_at,
+            path=run_dir / "policy-gate.json",
+        )
+    )
+    gates.extend(
+        _eval_report_failure(
+            repo,
+            run_id=run_id,
+            stage=stage,
+            observed_at=observed_at,
+            path=run_dir / "eval-report.json",
+        )
+    )
+    for name, kind, artifact_name in (
+        ("auto-apply-preflight.json", "auto_apply_preflight", "auto-apply-preflight.json"),
+        ("auto-apply-shadow.json", "auto_apply_shadow", "auto-apply-shadow.json"),
+    ):
+        gates.extend(
+            _auto_apply_gate_failure(
+                repo,
+                run_id=run_id,
+                stage=stage,
+                observed_at=observed_at,
+                path=run_dir / name,
+                kind=kind,
+                artifact_name=artifact_name,
+            )
+        )
+    return gates
+
+
+def _ci_gate_failures(repo: Path) -> list[dict[str, Any]]:
+    path = sidecar_dir(repo) / "ci" / "ci-report.json"
+    payload, malformed = _validated_gate_payload(path, "ci-report.json")
+    if not path.exists():
+        return []
+    observed_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+    if malformed:
+        return [
+            _failed_gate_item(
+                repo,
+                run_id="ci",
+                stage="ci",
+                observed_at=observed_at,
+                gate="ci_check",
+                artifact_kind="ci_report",
+                path=path,
+                artifact_status="malformed",
+                reason_codes=["artifact_malformed"],
+                summary="CI report artifact is malformed",
+            )
+        ]
+    if payload is None:
+        return []
+    checks = payload.get("checks", {})
+    if not isinstance(checks, dict):
+        return []
+    failed_checks = [
+        str(name)
+        for name, check in sorted(checks.items())
+        if isinstance(check, dict) and check.get("passed") is False
+    ]
+    if not failed_checks:
+        return []
+    return [
+        _failed_gate_item(
+            repo,
+            run_id="ci",
+            stage="ci",
+            observed_at=observed_at,
+            gate="ci_check",
+            artifact_kind="ci_report",
+            path=path,
+            artifact_status="valid",
+            reason_codes=failed_checks,
+            summary=f"CI check failed: {', '.join(failed_checks)}",
+        )
+    ]
+
+
+def _policy_gate_failure(
+    repo: Path,
+    *,
+    run_id: str,
+    stage: str,
+    observed_at: str,
+    path: Path,
+) -> list[dict[str, Any]]:
+    payload, malformed = _validated_gate_payload(path, "policy-gate.json")
+    if malformed:
+        return [
+            _failed_gate_item(
+                repo,
+                run_id=run_id,
+                stage=stage,
+                observed_at=observed_at,
+                gate="policy_gate",
+                artifact_kind="policy_gate",
+                path=path,
+                artifact_status="malformed",
+                reason_codes=["artifact_malformed"],
+                summary="policy gate artifact is malformed",
+            )
+        ]
+    if payload is None or bool(payload.get("allowed", True)):
+        return []
+    return [
+        _failed_gate_item(
+            repo,
+            run_id=run_id,
+            stage=stage,
+            observed_at=observed_at,
+            gate="policy_gate",
+            artifact_kind="policy_gate",
+            path=path,
+            artifact_status="valid",
+            reason_codes=_reason_codes(payload.get("reasons", [])),
+            summary="policy gate rejected candidate",
+        )
+    ]
+
+
+def _eval_report_failure(
+    repo: Path,
+    *,
+    run_id: str,
+    stage: str,
+    observed_at: str,
+    path: Path,
+) -> list[dict[str, Any]]:
+    payload, malformed = _validated_gate_payload(path, "eval-report.json")
+    if malformed:
+        return [
+            _failed_gate_item(
+                repo,
+                run_id=run_id,
+                stage=stage,
+                observed_at=observed_at,
+                gate="eval_report",
+                artifact_kind="eval_report",
+                path=path,
+                artifact_status="malformed",
+                reason_codes=["artifact_malformed"],
+                summary="eval report artifact is malformed",
+            )
+        ]
+    if payload is None or bool(payload.get("passed", True)):
+        return []
+    reasons = ["eval_report_failed"]
+    if payload.get("governance_passed") is False:
+        reasons.append("governance_failed")
+    return [
+        _failed_gate_item(
+            repo,
+            run_id=run_id,
+            stage=stage,
+            observed_at=observed_at,
+            gate="eval_report",
+            artifact_kind="eval_report",
+            path=path,
+            artifact_status="valid",
+            candidate_id=_optional_int(payload.get("candidate_id")),
+            suite_id=str(payload.get("suite_id", "")) or None,
+            recommendation=str(payload.get("recommendation", "")) or None,
+            reason_codes=reasons,
+            summary="eval report rejected candidate",
+        )
+    ]
+
+
+def _auto_apply_gate_failure(
+    repo: Path,
+    *,
+    run_id: str,
+    stage: str,
+    observed_at: str,
+    path: Path,
+    kind: str,
+    artifact_name: str,
+) -> list[dict[str, Any]]:
+    payload, malformed = _validated_gate_payload(path, artifact_name)
+    if malformed:
+        return [
+            _failed_gate_item(
+                repo,
+                run_id=run_id,
+                stage=stage,
+                observed_at=observed_at,
+                gate=kind,
+                artifact_kind=kind,
+                path=path,
+                artifact_status="malformed",
+                reason_codes=["artifact_malformed"],
+                summary=f"{kind.replace('_', ' ').replace('auto apply', 'auto-apply')} artifact is malformed",
+            )
+        ]
+    if payload is None:
+        return []
+    reasons = _reason_codes(payload.get("reasons", []))
+    eligible = bool(payload.get("eligible", True))
+    would_apply = bool(payload.get("would_apply", True))
+    if eligible and would_apply and not reasons:
+        return []
+    checks = payload.get("checks", {})
+    eval_check = checks.get("eval_report", {}) if isinstance(checks, dict) else {}
+    return [
+        _failed_gate_item(
+            repo,
+            run_id=run_id,
+            stage=stage,
+            observed_at=observed_at,
+            gate=kind,
+            artifact_kind=kind,
+            path=path,
+            artifact_status="valid",
+            candidate_id=_optional_int(payload.get("candidate_id")),
+            suite_id=str(eval_check.get("suite_id", "")) if isinstance(eval_check, dict) else None,
+            recommendation=(
+                str(eval_check.get("recommendation", "")) if isinstance(eval_check, dict) else None
+            ),
+            lane=str(payload.get("lane", "")) or None,
+            reason_codes=reasons,
+            summary=f"{kind.replace('_', ' ').replace('auto apply', 'auto-apply')} rejected candidate",
+        )
+    ]
+
+
+def _failed_gate_item(
+    repo: Path,
+    *,
+    run_id: str,
+    stage: str,
+    observed_at: str,
+    gate: str,
+    artifact_kind: str,
+    path: Path,
+    artifact_status: str,
+    reason_codes: list[str],
+    summary: str,
+    candidate_id: int | None = None,
+    suite_id: str | None = None,
+    recommendation: str | None = None,
+    lane: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "stage": stage,
+        "gate": gate,
+        "failed": True,
+        "candidate_id": candidate_id,
+        "suite_id": suite_id,
+        "recommendation": recommendation,
+        "lane": lane,
+        "reason_codes": _reason_codes(reason_codes),
+        "summary": redact_text(summary),
+        "observed_at": observed_at,
+        "artifact_status": artifact_status,
+        "source": {
+            "kind": artifact_kind,
+            "path": _relative_ref(repo, path),
+            "sha256": _sha256(path),
+        },
+    }
+
+
+def _validated_gate_payload(path: Path, artifact_name: str) -> tuple[dict[str, Any] | None, bool]:
+    if not path.is_file():
+        return None, False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None, True
+        validate_json_artifact(artifact_name, payload)
+    except (OSError, json.JSONDecodeError, ArtifactValidationError, ValueError):
+        return None, True
+    return payload, False
+
+
+def _reason_codes(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [redact_text(str(item)) for item in raw if str(item).strip()]
+
+
+def _optional_int(raw: object) -> int | None:
+    if isinstance(raw, bool) or raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _relative_ref(repo: Path, path: Path) -> str:

@@ -32,6 +32,7 @@ from tugboat.mcp import (
     tugboat_index_summary,
     tugboat_latest_audit,
     tugboat_instruction_graph,
+    tugboat_latest_failed_gates,
     tugboat_latest_runs,
     tugboat_record_episode,
     tugboat_request_audit,
@@ -866,6 +867,256 @@ def test_latest_audit_tie_breaks_equal_created_at_by_updated_at(tmp_path: Path):
 
     assert result["audit"]["run"]["run_id"] == "run-1"
     assert result["audit"]["summary"]["audit_id"] == 1
+
+
+def test_latest_failed_gates_returns_sanitized_gate_failures(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        for run_id in ("run-1", "run-2", "run-3"):
+            run_dir = runs_dir(repo) / run_id
+            run_dir.mkdir(parents=True)
+            store.insert_run(
+                run_id=run_id,
+                stage="eval",
+                manifest_hash=f"hash-{run_id}",
+                status="completed",
+                run_dir=run_dir,
+            )
+        (runs_dir(repo) / "run-1" / "policy-gate.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "allowed": False,
+                    "reasons": ["blocked sk-thissecretkeyvalue1234567890"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (runs_dir(repo) / "run-1" / "eval-report.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "candidate_id": 7,
+                    "suite_id": "all",
+                    "passed": False,
+                    "trigger_score": 0.8,
+                    "held_out_score": 0.6,
+                    "governance_passed": False,
+                    "recommendation": "reject",
+                    "metrics": {"raw_note": "sk-thissecretkeyvalue1234567890"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (runs_dir(repo) / "run-2" / "auto-apply-preflight.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "run_id": "run-2",
+                    "candidate_id": 8,
+                    "mode": "commit",
+                    "target_files": ["CODEX.md"],
+                    "branch_name": "tugboat/run-2/candidate-8/codex-md",
+                    "eligible": False,
+                    "would_apply": False,
+                    "lane": "docs_hygiene",
+                    "reasons": ["eval_report_rejected"],
+                    "approval_bundle": None,
+                    "checks": {
+                        "policy_gate": {"allowed": True, "reasons": []},
+                        "stored_policy_gate": {"allowed": True, "reasons": []},
+                        "eval_report": {
+                            "candidate_id_matches": True,
+                            "passed": False,
+                            "recommendation": "reject",
+                            "suite_id": "all",
+                        },
+                        "vcs": {
+                            "preflight_passed": True,
+                            "worktree_clean": True,
+                            "dirty_paths": [],
+                            "target_files_clean": True,
+                            "base_hashes_match": True,
+                            "reasons": [],
+                        },
+                        "auto_apply": {},
+                    },
+                    "readiness_metrics": {},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (runs_dir(repo) / "run-3" / "policy-gate.json").write_text(
+            '{"schema_version":1,"allowed":true,"reasons":[]}\n',
+            encoding="utf-8",
+        )
+
+    result = tugboat_latest_failed_gates(repo, limit=2)
+
+    assert [gate["gate"] for gate in result["failed_gates"]] == [
+        "auto_apply_preflight",
+        "policy_gate",
+    ]
+    preflight = result["failed_gates"][0]
+    assert preflight["run_id"] == "run-2"
+    assert preflight["stage"] == "eval"
+    assert preflight["failed"] is True
+    assert preflight["candidate_id"] == 8
+    assert preflight["suite_id"] == "all"
+    assert preflight["recommendation"] == "reject"
+    assert preflight["lane"] == "docs_hygiene"
+    assert preflight["reason_codes"] == ["eval_report_rejected"]
+    assert preflight["summary"] == "auto-apply preflight rejected candidate"
+    assert preflight["artifact_status"] == "valid"
+    assert preflight["source"] == {
+        "kind": "auto_apply_preflight",
+        "path": ".sidecar/runs/run-2/auto-apply-preflight.json",
+        "sha256": preflight["source"]["sha256"],
+    }
+    assert len(preflight["source"]["sha256"]) == 64
+    policy_gate = result["failed_gates"][1]
+    assert policy_gate["run_id"] == "run-1"
+    assert policy_gate["failed"] is True
+    assert policy_gate["reason_codes"] == ["blocked [REDACTED:openai_api_key]"]
+    assert policy_gate["summary"] == "policy gate rejected candidate"
+    assert policy_gate["artifact_status"] == "valid"
+    assert policy_gate["source"] == {
+        "kind": "policy_gate",
+        "path": ".sidecar/runs/run-1/policy-gate.json",
+        "sha256": policy_gate["source"]["sha256"],
+    }
+    serialized = json.dumps(result, sort_keys=True)
+    assert "sk-thissecret" not in serialized
+    assert "raw_note" not in serialized
+    assert _mcp_events(repo)[-1]["tool"] == "tugboat_latest_failed_gates"
+
+
+def test_latest_failed_gates_reports_malformed_gate_artifact_without_raw_payload(
+    tmp_path: Path,
+):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    run_dir = runs_dir(repo) / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "policy-gate.json").write_text(
+        '{"allowed": false, "reasons": ["sk-thissecretkeyvalue1234567890"]}\n',
+        encoding="utf-8",
+    )
+    with Store.open(sidecar_dir(repo) / "db.sqlite") as store:
+        store.insert_run(
+            run_id="run-1",
+            stage="eval",
+            manifest_hash="hash-run-1",
+            status="completed",
+            run_dir=run_dir,
+        )
+
+    result = tugboat_latest_failed_gates(repo)
+
+    assert result["failed_gates"] == [
+        {
+            "run_id": "run-1",
+            "stage": "eval",
+            "gate": "policy_gate",
+            "failed": True,
+            "candidate_id": None,
+            "suite_id": None,
+            "recommendation": None,
+            "lane": None,
+            "reason_codes": ["artifact_malformed"],
+            "summary": "policy gate artifact is malformed",
+            "observed_at": result["failed_gates"][0]["observed_at"],
+            "artifact_status": "malformed",
+            "source": {
+                "kind": "policy_gate",
+                "path": ".sidecar/runs/run-1/policy-gate.json",
+                "sha256": result["failed_gates"][0]["source"]["sha256"],
+            },
+        }
+    ]
+    assert "sk-thissecret" not in json.dumps(result, sort_keys=True)
+
+
+def test_latest_failed_gates_includes_sanitized_ci_check_failures(tmp_path: Path):
+    repo = tmp_path
+    _allow_mcp_repo(repo)
+    ci_dir = sidecar_dir(repo) / "ci"
+    ci_dir.mkdir(parents=True)
+    (ci_dir / "ci-report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "mode": "ci_check",
+                "auto_apply": False,
+                "checks": {
+                    "index": {"passed": True, "indexed_documents": 1},
+                    "harness": {
+                        "passed": True,
+                        "findings": [],
+                        "report_path": ".sidecar/harness-report.json",
+                        "report_sha256": "a" * 64,
+                        "doc_gardening_task_count": 0,
+                    },
+                    "manifest_contracts": {"passed": True, "findings": []},
+                    "semantic_policy_lint": {
+                        "passed": False,
+                        "findings": ["found sk-thissecretkeyvalue1234567890"],
+                    },
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = tugboat_latest_failed_gates(repo)
+
+    assert result["failed_gates"] == [
+        {
+            "run_id": "ci",
+            "stage": "ci",
+            "gate": "ci_check",
+            "failed": True,
+            "candidate_id": None,
+            "suite_id": None,
+            "recommendation": None,
+            "lane": None,
+            "reason_codes": ["semantic_policy_lint"],
+            "summary": "CI check failed: semantic_policy_lint",
+            "observed_at": result["failed_gates"][0]["observed_at"],
+            "artifact_status": "valid",
+            "source": {
+                "kind": "ci_report",
+                "path": ".sidecar/ci/ci-report.json",
+                "sha256": result["failed_gates"][0]["source"]["sha256"],
+            },
+        }
+    ]
+    assert "sk-thissecret" not in json.dumps(result, sort_keys=True)
+
+
+def test_bound_read_only_mcp_stdio_includes_latest_failed_gates(tmp_path: Path):
+    _allow_mcp_repo(tmp_path)
+
+    responses = _mcp_stdio_responses(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "tugboat_latest_failed_gates", "arguments": {"limit": 5}},
+            }
+        ],
+        repo=tmp_path,
+        read_only=True,
+    )
+
+    payload = responses[0]["result"]["content"][0]["json"]
+    assert payload == {"failed_gates": []}
 
 
 def test_run_report_summarizes_known_artifacts_without_raw_payloads(tmp_path: Path):
@@ -3197,6 +3448,7 @@ def test_mcp_tool_registry_exposes_only_approved_non_mutating_tools():
         "tugboat_index_summary",
         "tugboat_instruction_graph",
         "tugboat_latest_audit",
+        "tugboat_latest_failed_gates",
         "tugboat_latest_runs",
         "tugboat_recent_decisions",
         "tugboat_run_report",
