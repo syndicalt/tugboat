@@ -1556,6 +1556,38 @@ def _weakens_normative_language(before_words: tuple[str, ...], after_words: tupl
     return before_normative and after_permissive
 
 
+def instruction_token_efficiency_metrics(
+    root: Path,
+    *,
+    preview_root: Path,
+    policy: Policy | None,
+    held_out_score: float,
+    trigger_score: float,
+    governance_passed: bool,
+) -> dict[str, object]:
+    policy_files = _instruction_files(root, preview_root=preview_root, policy=policy)
+    policy_pairs = tuple(
+        _instruction_text_pair(path, root=root, preview_root=preview_root)
+        for path in policy_files
+    )
+    if not policy_pairs:
+        policy_pairs = (("", ""),)
+    metrics: dict[str, object] = {
+        **_instruction_token_delta_metrics(policy_pairs),
+        **_duplicate_rule_token_delta_metrics(policy_pairs),
+    }
+    metrics.update(
+        _instruction_token_growth_metrics(
+            instruction_token_delta=int(metrics["instruction_token_delta"]),
+            duplicate_rule_token_delta=int(metrics["duplicate_rule_token_delta"]),
+            held_out_score=held_out_score,
+            trigger_score=trigger_score,
+            governance_passed=governance_passed,
+        )
+    )
+    return metrics
+
+
 def _words(markdown: str) -> tuple[str, ...]:
     return tuple(re.findall(r"[a-z]+", markdown.lower()))
 

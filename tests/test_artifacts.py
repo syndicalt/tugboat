@@ -225,6 +225,34 @@ def test_validate_eval_report_artifact_accepts_current_schema():
     )
 
 
+def test_validate_eval_report_artifact_types_token_metrics_when_present():
+    payload = {
+        "schema_version": 1,
+        "candidate_id": 1,
+        "governance_passed": True,
+        "held_out_score": 1.0,
+        "metrics": {
+            "instruction_tokens_before": 10,
+            "instruction_tokens_after": 12,
+            "instruction_token_delta": 2,
+            "duplicate_rule_tokens_before": 0,
+            "duplicate_rule_tokens_after": 0,
+            "duplicate_rule_token_delta": 0,
+            "instruction_token_growth_reason": "instruction_token_growth_with_eval_improvement",
+            "instruction_token_growth_acceptable": 1,
+        },
+        "passed": True,
+        "recommendation": "accept",
+        "suite_id": "all",
+        "trigger_score": 1.0,
+    }
+    validate_json_artifact("eval-report.json", payload)
+
+    payload["metrics"]["instruction_token_delta"] = "2"
+    with pytest.raises(ArtifactValidationError, match="metrics.instruction_token_delta"):
+        validate_json_artifact("eval-report.json", payload)
+
+
 def test_validate_eval_report_artifact_accepts_skill_report():
     skill_report = {
         "schema_version": 1,
@@ -267,7 +295,17 @@ def test_validate_eval_report_artifact_accepts_skill_report():
             "candidate_id": 1,
             "governance_passed": False,
             "held_out_score": 1.0,
-            "metrics": {"governance_regressions": 1},
+            "metrics": {
+                "governance_regressions": 1,
+                "instruction_tokens_before": 10,
+                "instruction_tokens_after": 12,
+                "instruction_token_delta": 2,
+                "duplicate_rule_tokens_before": 0,
+                "duplicate_rule_tokens_after": 0,
+                "duplicate_rule_token_delta": 0,
+                "instruction_token_growth_reason": "instruction_token_growth_governance_failed",
+                "instruction_token_growth_acceptable": 0,
+            },
             "passed": False,
             "recommendation": "reject",
             "skill_report": skill_report,
@@ -294,7 +332,17 @@ def test_validate_eval_report_artifact_rejects_malformed_skill_report():
                 "candidate_id": 1,
                 "governance_passed": False,
                 "held_out_score": 1.0,
-                "metrics": {"governance_regressions": 1},
+                "metrics": {
+                    "governance_regressions": 1,
+                    "instruction_tokens_before": 10,
+                    "instruction_tokens_after": 12,
+                    "instruction_token_delta": 2,
+                    "duplicate_rule_tokens_before": 0,
+                    "duplicate_rule_tokens_after": 0,
+                    "duplicate_rule_token_delta": 0,
+                    "instruction_token_growth_reason": "instruction_token_growth_governance_failed",
+                    "instruction_token_growth_acceptable": 0,
+                },
                 "passed": False,
                 "recommendation": "reject",
                 "skill_report": {

@@ -15,7 +15,12 @@ from tugboat.artifacts import (
 from tugboat.config import load_policy
 from tugboat.db import Store
 from tugboat.eval.service import write_eval_report
-from tugboat.evals import EvalCaseRecord, run_offline_eval_suite, run_provider_smoke_suite
+from tugboat.evals import (
+    EvalCaseRecord,
+    instruction_token_efficiency_metrics,
+    run_offline_eval_suite,
+    run_provider_smoke_suite,
+)
 from tugboat.llmff.contracts import LlmffRunFailed
 from tugboat.llmff.runner import MissingOutputError, inspect_manifest, run_manifest
 from tugboat.manifests import (
@@ -206,6 +211,23 @@ def run_eval_pipeline(repo: Path, candidate_ref: str, suite_id: str) -> EvalPipe
             return EvalPipelineResult(1, run_dir, str(error))
     else:
         return EvalPipelineResult(1, run_dir, f"unsupported offline eval suite: {suite_id}")
+
+    if suite_id == "all":
+        try:
+            preview_root = _candidate_preview_root(repo, run_dir)
+        except ValueError as error:
+            return EvalPipelineResult(1, run_dir, f"eval rejected: {error}")
+        metrics = {
+            **metrics,
+            **instruction_token_efficiency_metrics(
+                repo,
+                preview_root=preview_root,
+                policy=policy,
+                held_out_score=held_out_score,
+                trigger_score=trigger_score,
+                governance_passed=governance_passed,
+            ),
+        }
 
     report_path = write_eval_report(
         repo,

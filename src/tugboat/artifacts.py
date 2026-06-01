@@ -16,6 +16,17 @@ SCHEMA_VERSION = 1
 
 JSON_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
 
+EVAL_TOKEN_METRIC_PROPERTIES: dict[str, dict[str, str]] = {
+    "instruction_tokens_before": {"type": "number"},
+    "instruction_tokens_after": {"type": "number"},
+    "instruction_token_delta": {"type": "number"},
+    "duplicate_rule_tokens_before": {"type": "number"},
+    "duplicate_rule_tokens_after": {"type": "number"},
+    "duplicate_rule_token_delta": {"type": "number"},
+    "instruction_token_growth_reason": {"type": "string"},
+    "instruction_token_growth_acceptable": {"type": "number"},
+}
+
 BOUNDED_EDIT_OPERATORS = (
     "add",
     "annotate",
@@ -802,7 +813,10 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "candidate_id": {"type": "integer"},
             "governance_passed": {"type": "boolean"},
             "held_out_score": {"type": "number"},
-            "metrics": {"type": "object"},
+            "metrics": {
+                "type": "object",
+                "properties": EVAL_TOKEN_METRIC_PROPERTIES,
+            },
             "skill_report": SKILL_REPORT_SCHEMA,
             "longitudinal_metrics": {"type": "object"},
             "passed": {"type": "boolean"},
@@ -845,7 +859,10 @@ JSON_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "held_out_score": {"type": "number"},
             "governance_passed": {"type": "boolean"},
             "recommendation": {"type": "string"},
-            "metrics": {"type": "object"},
+            "metrics": {
+                "type": "object",
+                "properties": EVAL_TOKEN_METRIC_PROPERTIES,
+            },
             "skill_report": SKILL_REPORT_SCHEMA,
             "validation_splits": {
                 "type": "object",

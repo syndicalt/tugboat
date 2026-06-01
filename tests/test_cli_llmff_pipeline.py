@@ -5086,6 +5086,11 @@ llmff:
     assert eval_report["held_out_score"] == held_out_score
     assert eval_report["governance_passed"] is True
     assert eval_report["recommendation"] == "reject"
+    assert eval_report["metrics"]["instruction_token_delta"] == 6
+    assert (
+        eval_report["metrics"]["instruction_token_growth_reason"]
+        == "instruction_token_growth_without_held_out_improvement"
+    )
     assert not (run_dir / "acceptance-summary.raw.json").exists()
 
 
