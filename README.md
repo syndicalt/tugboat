@@ -9,8 +9,28 @@ The default posture is proposal-only. Tugboat creates evidence-backed review art
 Start with [docs/quickstart.md](docs/quickstart.md), then use
 [docs/cli-reference.md](docs/cli-reference.md) for the full command surface.
 
+## Safe First Run
+
+Tugboat is proposal-only by default, and there are no provider credentials required after init when using the shipped local fixture backend:
+
+```bash
+python -m pip install tugboat
+tugboat doctor
+tugboat init
+tugboat index --repo .
+tugboat optimize --repo . --trace traces/example.jsonl --suite all
+```
+
+Review `.sidecar/runs/<run-id>/candidate.diff`, `eval-report.json`, `optimization-summary.json`, and `report.md` before applying any generated change.
+
+## Documentation
+
 For the production release framing, see
 [docs/announcements/tugboat-production-release-article.md](docs/announcements/tugboat-production-release-article.md).
+
+For setup and integration details, see [docs/troubleshooting.md](docs/troubleshooting.md),
+[docs/integrations.md](docs/integrations.md), and
+[docs/instruction-best-practices.md](docs/instruction-best-practices.md).
 
 For release and production checks, see [docs/ops/release-checklist.md](docs/ops/release-checklist.md).
 

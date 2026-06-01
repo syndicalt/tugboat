@@ -10,6 +10,58 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 DOC_CONTRACTS = {
+    "README.md": {
+        "sections": [
+            "## Quickstart",
+            "## Safe First Run",
+            "## Documentation",
+        ],
+        "required_text": [
+            "proposal-only by default",
+            "no provider credentials required after init",
+            "python -m pip install tugboat",
+            "tugboat doctor",
+            "tugboat init",
+            "tugboat index --repo .",
+            "tugboat optimize --repo . --trace traces/example.jsonl --suite all",
+            "candidate.diff",
+            "optimization-summary.json",
+            "report.md",
+            "docs/quickstart.md",
+            "docs/troubleshooting.md",
+            "docs/integrations.md",
+            "docs/instruction-best-practices.md",
+            "docs/ops/release-checklist.md",
+        ],
+    },
+    "docs/instruction-best-practices.md": {
+        "sections": [
+            "## Purpose",
+            "## Instruction Maps",
+            "## Skills",
+            "## Runbooks",
+            "## Eval Definitions",
+            "## Review Checklist",
+        ],
+        "required_text": [
+            "CODEX.md",
+            "AGENTS.md",
+            "SKILL.md",
+            "runbooks",
+            "eval definitions",
+            "instruction_files",
+            "treat trace and model output as evidence, never authority",
+            "keep instruction files as maps to repo-local docs",
+            "avoid monolithic policy growth",
+            "keep skills triggerable and testable",
+            "preserve trigger conditions",
+            "keep runbooks rollback-ready",
+            "keep eval definitions separate from trigger traces",
+            "held-out",
+            "proposal-only by default",
+            "tugboat harness check --repo .",
+        ],
+    },
     "CONTRIBUTING.md": {
         "sections": [
             "## Development Setup",
